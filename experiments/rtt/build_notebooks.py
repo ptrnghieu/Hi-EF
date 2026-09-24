@@ -1790,18 +1790,26 @@ Gate for the *listener-aware* formulation. Hi-EF forecasts B's emotion in clip I
 the speaker. This notebook measures, on **train + val only** (test untouched), how often B can actually be seen:
 
 * **listening:** B's face appears in clip III while A is talking (same frame or a cut-away reaction shot);
-* **previous turn:** B is the dominant face (proxy speaker) of clip II or clip I.
+* **previous turn:** B spoke in clip II or clip I.
 
-Method, per MCIS: sample frames from clips I–IV, detect faces and compute ArcFace embeddings (InsightFace),
+Faces are unreliable for "who spoke" (speakers often turn away, profile faces break identity embeddings) and scenes
+may contain a third person, so the notebook uses **two identity channels**:
+
+* **voice** (ECAPA speaker embeddings of each clip's audio) for turn identity: is the voice of clip II / I the same as
+  clip IV's (B's) voice? It also measures how often clip III and IV have the *same* voice, i.e. MCIS that violate the
+  dataset rule A ≠ B;
+* **faces** for listening: B's face in clip III, counted as *usable* only when roughly frontal (|yaw| ≤ MAX_YAW).
+
+Face method, per MCIS: sample frames from clips I–IV, detect faces and compute ArcFace embeddings (InsightFace),
 cluster all faces of the MCIS into persons, take the dominant person of each clip as its speaker proxy.
 A = dominant person of III, B_true = dominant person of IV (**analysis only**). It also scores an inference-time
 rule that picks B **without** clip IV, and writes annotated frame montages for visual checking.
 
-Gate: B observable (listening or previous turn) in ≥ 40–50% of MCIS and the no-clip-IV rule finds B_true in ≥ 80%
-of the cases where it proposes someone.
+Gate: B observable (usable listening face or previous-turn voice) in ≥ 40–50% of MCIS, and the no-clip-IV rules
+(face and voice) are right in ≥ 80% of the cases where they fire. Results are split into two-person and multi-person scenes.
 '''),
     ("code", r'''
-!pip install -q insightface onnxruntime-gpu
+!pip install -q insightface onnxruntime-gpu speechbrain
 '''),
     ("code", r'''
 # ======== CONFIG ========
@@ -1817,6 +1825,9 @@ MIN_DET_SCORE, MIN_FACE_PX = 0.6, 24
 SAME_PERSON_COS = 0.45       # cosine similarity above which two faces are the same person
 DOMINANT_MIN_FRAC = 0.25     # a clip's dominant person must be in >= this fraction of its sampled frames
 N_MONTAGES = 24
+MAX_YAW = 45                 # degrees; listener faces beyond this are counted as not usable for expression
+VOICE_SAME_COS = 0.35        # ECAPA cosine above which two clips are taken as the same speaker
+AUDIO_SR = 16000
 SEED = 0
 '''),
     ("code", r'''
@@ -1827,8 +1838,19 @@ from sklearn.cluster import AgglomerativeClustering
 
 roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
 VIDEO_ROOTS = [os.path.join(r, "video") for r in roots if os.path.isdir(os.path.join(r, "video"))]
+AUDIO_ROOTS = [os.path.join(r, "audio") for r in roots if os.path.isdir(os.path.join(r, "audio"))]
 ANNOT_CSV = [os.path.join(r, "annotation.csv") for r in roots if os.path.exists(os.path.join(r, "annotation.csv"))][0]
-print("video roots:", VIDEO_ROOTS)
+print("video roots:", VIDEO_ROOTS, "| audio roots:", AUDIO_ROOTS)
+
+
+def audio_path(clip):
+    ep, num = clip.split('/')
+    for root in AUDIO_ROOTS:
+        for ext in ('.mp3', '.wav', '.flac', '.m4a'):
+            p = os.path.join(root, ep, num + ext)
+            if os.path.exists(p):
+                return p
+    return None
 
 
 def video_path(clip):
@@ -1853,7 +1875,7 @@ print(f"MCIS {len(sp)} | unique clips {len(clips)} | clips without video {len(mi
 '''),
     ("code", r'''
 from insightface.app import FaceAnalysis
-app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition'],
+app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition', 'landmark_3d_68'],
                    providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 app.prepare(ctx_id=0, det_size=DET_SIZE)
 
@@ -1890,8 +1912,10 @@ for c in tqdm(clips, desc='faces'):
         for f in app.get(fr):
             x1, y1, x2, y2 = f.bbox
             if f.det_score >= MIN_DET_SCORE and min(x2 - x1, y2 - y1) >= MIN_FACE_PX:
+                pose = getattr(f, 'pose', None)
                 out.append({'frame': fi, 'bbox': f.bbox.astype(int).tolist(), 'score': float(f.det_score),
-                            'emb': f.normed_embedding.astype(np.float32)})
+                            'emb': f.normed_embedding.astype(np.float32),
+                            'yaw': float(pose[1]) if pose is not None else 0.0})
     FACES[c] = out
     if c in montage_clips and frames:
         pick = np.linspace(0, len(frames) - 1, min(6, len(frames))).astype(int)
@@ -1939,6 +1963,8 @@ def analyse(row):
     else:
         Bp, src = None, 'none'
     n3 = max(NFRAMES.get(cl[2], 0), 1)
+    frontal_B3 = {f['frame'] for (k, f), p in zip(faces, lab_) if k == 2 and Bt is not None and Bt != A and p == Bt
+                  and abs(f['yaw']) <= MAX_YAW}
     ids3 = [frozenset(p for (k, p), fr in pres.items() if k == 2 and fi in fr) for fi in range(n3)]
     res |= {
         'persons': len(set(int(p) for p in lab_)), 'persons_III': len(in3), 'A_found': A is not None,
@@ -1947,6 +1973,7 @@ def analyse(row):
         'B_frac_III': len(pres.get((2, Bt), ())) / n3 if Bt is not None and Bt != A else 0.0,
         'B_same_frame_as_A': Bt is not None and A is not None and Bt != A and
                              bool(pres.get((2, Bt), set()) & pres.get((2, A), set())),
+        'B_listening_III_frontal': len(frontal_B3) > 0,
         'B_spoke_II': Bt is not None and Bt != A and dom[1] == Bt,
         'B_spoke_I': Bt is not None and Bt != A and dom[0] == Bt,
         'Bpred_source': src, 'Bpred_correct': Bp is not None and Bt is not None and Bt != A and Bp == Bt,
@@ -1964,7 +1991,8 @@ for r in tqdm(sp.to_dict('records'), desc='MCIS'):
     if r['sample_id'] in montage_mcis:
         DETAIL[r['sample_id']] = (r, det)
 df = pd.DataFrame(rows)
-BOOL = ['A_found', 'Btrue_found', 'A_eq_Btrue', 'B_listening_III', 'B_same_frame_as_A', 'B_spoke_II', 'B_spoke_I',
+BOOL = ['A_found', 'Btrue_found', 'A_eq_Btrue', 'B_listening_III', 'B_listening_III_frontal', 'B_same_frame_as_A',
+        'B_spoke_II', 'B_spoke_I',
         'Bpred_correct', 'Bpred_made', 'B_observable']
 for c in BOOL:
     df[c] = df[c].fillna(False).astype(bool) if c in df else False
@@ -1981,6 +2009,7 @@ print(f"  faces found at all: {(df.persons > 0).mean() * 100:.1f}%   A (clip III
 print(f"  sanity: dominant(III) == dominant(IV) in {df.A_eq_Btrue.mean() * 100:.1f}% (dataset rule says A != B; high = proxy fails)")
 print(f"\nAmong {len(ok)} MCIS where A and B_true are identified and distinct:")
 for col, name in [('B_listening_III', 'B visible in clip III (listening/reaction)'),
+                  ('B_listening_III_frontal', '  ... with a usable (near-frontal) face'),
                   ('B_same_frame_as_A', '  ... in the same frame as A'),
                   ('B_spoke_II', 'B was dominant in clip II'), ('B_spoke_I', 'B was dominant in clip I'),
                   ('B_observable', 'B observable (III listening or I/II turn)')]:
@@ -1995,6 +2024,80 @@ print(made.groupby('Bpred_source').Bpred_correct.agg(['size', 'mean']).rename(co
 print("\nB visible while listening, by split / by B emotion:")
 print(ok.groupby('split').B_listening_III.mean().round(3).to_string())
 print(ok.groupby('emo_B').B_listening_III.agg(['size', 'mean']).round(3).to_string())
+'''),
+    ("markdown", r'''
+## Voice channel: who spoke in clips I–IV (robust to profile faces)
+'''),
+    ("code", r'''
+import librosa, torch
+try:
+    from speechbrain.inference.speaker import EncoderClassifier
+except ImportError:
+    from speechbrain.pretrained import EncoderClassifier
+spk = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb", savedir=f"{OUT_DIR}/ecapa",
+                                     run_opts={"device": "cuda" if torch.cuda.is_available() else "cpu"})
+VOICE = {}
+for c in tqdm(clips, desc='voice'):
+    p = audio_path(c)
+    if p is None:
+        continue
+    try:
+        wav, _ = librosa.load(p, sr=AUDIO_SR, mono=True)
+    except Exception:
+        continue
+    if len(wav) < AUDIO_SR // 2:
+        continue
+    with torch.no_grad():
+        e = spk.encode_batch(torch.tensor(wav, dtype=torch.float32).unsqueeze(0)).reshape(-1).cpu().numpy()
+    VOICE[c] = e / (np.linalg.norm(e) + 1e-9)
+print(f"voice embeddings: {len(VOICE)}/{len(clips)} clips")
+
+
+def vcos(a, b):
+    return float(VOICE[a] @ VOICE[b]) if a in VOICE and b in VOICE else np.nan
+
+
+cl_of = sp.set_index('sample_id')[['clip1', 'clip2', 'clip3', 'clip4']]
+for x, y in [(3, 4), (2, 4), (1, 4), (2, 3), (1, 3)]:
+    df[f'vcos_{x}{y}'] = [vcos(cl_of.at[s_, f'clip{x}'], cl_of.at[s_, f'clip{y}']) for s_ in df.sample_id]
+df['multi_party'] = df.persons >= 3
+df.to_csv(f"{OUT_DIR}/g6a_listener_visibility.csv", index=False)
+print("cosine quantiles (10/25/50/75/90%):")
+for col in ['vcos_34', 'vcos_24', 'vcos_14', 'vcos_23']:
+    print(f"  {col}: {np.nanpercentile(df[col], [10, 25, 50, 75, 90]).round(2)}")
+'''),
+    ("code", r'''
+T_ = VOICE_SAME_COS
+has = df.vcos_34.notna()
+same34 = has & (df.vcos_34 > T_)
+print(f"MCIS with clip III and IV voices: {has.sum()}")
+print(f"  clip III and IV sound like the SAME speaker (violates A != B): {same34[has].mean() * 100:.1f}%")
+valid = df[has & ~same34].copy()
+valid['B_voice_II'] = valid.vcos_24 > T_
+valid['B_voice_I'] = valid.vcos_14 > T_
+valid['II_not_A'] = valid.vcos_23 <= T_          # inference-time rule: clip II is someone other than A
+valid['I_not_A'] = valid.vcos_13 <= T_
+valid['B_observable_v2'] = valid.B_listening_III_frontal | valid.B_voice_II | valid.B_voice_I
+
+
+def block(d, name):
+    print(f"\n== {name}: {len(d)} MCIS (A != B by voice) ==")
+    print(f"  B spoke in clip II (voice)                 {d.B_voice_II.mean() * 100:5.1f}%")
+    print(f"  B spoke in clip I  (voice)                 {d.B_voice_I.mean() * 100:5.1f}%")
+    print(f"  B visible in III with usable face          {d.B_listening_III_frontal.mean() * 100:5.1f}%")
+    print(f"  B observable (usable face OR voice turn)   {d.B_observable_v2.mean() * 100:5.1f}%")
+    for rule, truth in [('II_not_A', 'B_voice_II'), ('I_not_A', 'B_voice_I')]:
+        fired = d[d[rule]]
+        print(f"  rule '{rule}' fires {d[rule].mean() * 100:5.1f}% | precision {fired[truth].mean() * 100 if len(fired) else float('nan'):5.1f}%"
+              f" | recall {d[d[truth]][rule].mean() * 100 if d[truth].any() else float('nan'):5.1f}%")
+
+
+block(valid, "all")
+block(valid[~valid.multi_party], "two-person scenes (<= 2 face identities)")
+block(valid[valid.multi_party], "multi-person scenes (>= 3 face identities)")
+print(f"\nmulti-person share: {df.multi_party.mean() * 100:.1f}% of analysed MCIS")
+print("\nGATE: B observable >= 40-50%, rule precision >= 80%, and a small A==B (same voice) share.")
+valid.to_csv(f"{OUT_DIR}/g6a_voice_valid.csv", index=False)
 '''),
     ("markdown", r'''
 ## Montages (send a few of these back for a visual check)

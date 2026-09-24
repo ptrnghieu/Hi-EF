@@ -4239,6 +4239,337 @@ print(f"\nDECISION (preregistered): ΔUAR LA {d7:+.2f}, Δ6-class {d6:+.2f}, pos
 """),
 ]
 
+# ---------------------------------------------------------------- G10: the single preregistered test run
+G10 = [
+    ("markdown", r"""
+# G10 — The single preregistered test evaluation
+
+The plan is fixed in `experiments/rtt/PREREG_G10_TEST.md`, which was committed before this notebook was run. In short:
+
+* **Training data.** All arms train on the 45 train+val episodes. Five of those episodes, drawn with
+  `random.Random(2026)`, are held out for early stopping and checkpoint selection.
+* **Evaluation.** Once, on the 409 test MCIS from 8 episodes.
+* **Arms:** `PaperBest` (the Hi-EF paper's best configuration, replicated), `B1`, `LateFusion`, `RoleNet`,
+  `RoleNet-noRole`. Each neural arm runs 5 seeds, and the seed ensemble averages probabilities.
+* **Confirmatory contrasts**, in a fixed sequence, measured as ΔUAR under a single post-hoc logit adjustment (LA) with a
+  95% bootstrap over the test episodes:
+  1. RoleNet − PaperBest (primary)
+  2. RoleNet − B1
+  3. RoleNet − LateFusion
+  4. RoleNet − RoleNet-noRole
+
+Run it **once**. Set `UNLOCK_TEST = True` in the CONFIG cell.
+"""),
+    G8B[1],
+    ("code", r"""
+# ======== CONFIG ========
+import os
+
+
+def first_existing(*paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"none of {paths}")
+
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = first_existing("/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv",
+                           "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv")
+G8A_DIR = first_existing("/kaggle/input/datasets/ptrnghieu/g8a-features", "/kaggle/input/g8a-features")
+OUT_DIR = "/kaggle/working"
+UNLOCK_TEST = False          # set to True for the single preregistered run
+
+N_INNER_DEV, SELECT_SEED = 5, 2026
+SEEDS = [42, 123, 456, 789, 1024]
+LR, WEIGHT_DECAY = 1e-4, 1e-5
+FC_EPOCHS, PATIENCE, FC_BATCH = 50, 8, 32          # B1, as G3b / G8b
+PAPER_EPOCHS, PAPER_BATCH = 50, 32                 # PaperBest, as the replication notebook
+RN = dict(D=128, heads=4, layers=2, dropout=0.2, lr=3e-4, wd=1e-2, epochs=80, patience=12, batch=64,
+          aux_w=0.3, a_w=0.3, p_drop_ctx=0.3, p_drop_face=0.15)
+PCA_DIM, MAXF, MAXF_POOL = 128, 24, 32
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
+LATE_W, LA_TAU = 0.5, 1.0
+VOICE_SAME_COS = 0.35
+DEBUG_PER_EPISODE = None
+
+FULL = dict(role=True, faces=True, ctx=True, aux=True, mdrop=True)
+EXPERIMENTS = [
+    ("B1",             'b1',   None),
+    ("RoleNet",        'role', FULL),
+    ("RoleNet-noRole", 'role', {**FULL, 'role': False}),
+]
+"""),
+    ("code", COMMON + r"""
+import glob, pickle
+import torch, torch.nn as nn, torch.nn.functional as F
+from tqdm.auto import tqdm
+
+if not UNLOCK_TEST:
+    raise RuntimeError("Test split is locked. Set UNLOCK_TEST = True only for the single preregistered run.")
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+ANNOT_CSV = glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF", "annotation.csv"))[0]
+ann, sp = load_tables(ANNOT_CSV, SPLIT_CSV)
+if DEBUG_PER_EPISODE:
+    sp = sp.groupby('source_folder', group_keys=False).head(DEBUG_PER_EPISODE)
+DEV = sp.reset_index(drop=True)            # all rows: train+val are fitted on, test is evaluated once
+train_all = ev = DEV
+N = len(DEV)
+IS_TEST = (DEV.split == 'test').values
+src = DEV.source_folder.values
+EPS = np.array(sorted(set(src[~IS_TEST])))
+TEST_EPS = sorted(set(src[IS_TEST]))
+print(f"training MCIS {(~IS_TEST).sum()} from {len(EPS)} episodes | test MCIS {IS_TEST.sum()} from {len(TEST_EPS)} episodes")
+if not DEBUG_PER_EPISODE:
+    assert len(EPS) == 45 and len(TEST_EPS) == 8 and IS_TEST.sum() == 409
+
+
+def seed_all(s):
+    random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
+"""),
+    G3[3], G3[4], G8B[6], G8B[7], G8B[11], G8B[12],
+    ("markdown", r"""
+## PaperBest: the Hi-EF paper's best configuration (verbatim from the replication notebook)
+"""),
+    ("code", r"""
+class TemporalTransformer(nn.Module):
+    def __init__(self, d_model=512, n_heads=8, n_layers=2, dropout=0.1):
+        super().__init__()
+        self.pos_encoding = nn.Parameter(torch.randn(1, 16, d_model) * 0.02)
+        layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dim_feedforward=d_model * 4,
+                                           dropout=dropout, batch_first=True, norm_first=True)
+        self.transformer = nn.TransformerEncoder(layer, num_layers=n_layers, enable_nested_tensor=False)
+
+    def forward(self, x):
+        return self.transformer(x + self.pos_encoding[:, :x.size(1), :])
+
+
+class CrossAttentionFusion(nn.Module):
+    def __init__(self, d_model=512, n_heads=8, n_layers=1, dropout=0.1):
+        super().__init__()
+        self.layers = nn.ModuleList([nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+                                     for _ in range(n_layers)])
+        self.norms = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(n_layers)])
+
+    def forward(self, query, key_values):
+        x = query
+        for attn, norm in zip(self.layers, self.norms):
+            attended, _ = attn(x, key_values, key_values)
+            x = norm(x + attended)
+        return x
+
+
+class IntraVideoFusion(nn.Module):
+    def __init__(self, d_model=512, audio_dim=527):
+        super().__init__()
+        self.face_temporal = TemporalTransformer(d_model, n_heads=8, n_layers=2)
+        self.ori_temporal = TemporalTransformer(d_model, n_heads=8, n_layers=2)
+        self.type_fusion = CrossAttentionFusion(d_model, n_heads=8, n_layers=1)
+        self.audio_proj = nn.Linear(audio_dim, d_model)
+        self.modality_fusion = CrossAttentionFusion(d_model, n_heads=8, n_layers=1)
+
+    def forward(self, face_features, ori_features, text_feature, audio_feature):
+        face_out = self.face_temporal(face_features).mean(dim=1, keepdim=True)
+        ori_out = self.ori_temporal(ori_features).mean(dim=1, keepdim=True)
+        video_feat = self.type_fusion(face_out, torch.cat([face_out, ori_out], dim=1))
+        audio_feat = self.audio_proj(F.normalize(audio_feature, dim=-1)).unsqueeze(1)
+        text_feat = text_feature.unsqueeze(1)
+        clip_feat = self.modality_fusion(video_feat, torch.cat([video_feat, text_feat, audio_feat], dim=1))
+        return clip_feat.squeeze(1)
+
+
+class InterVideoFusion(nn.Module):
+    def __init__(self, d_model=512, lstm_layers=3, transformer_layers=2):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size=d_model, hidden_size=d_model, num_layers=lstm_layers, batch_first=False,
+                            dropout=0.1)
+        self.pos_encoding = nn.Parameter(torch.randn(1, 3, d_model) * 0.02)
+        layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=8, dim_feedforward=d_model * 4, dropout=0.1,
+                                           batch_first=True, norm_first=True)
+        self.transformer = nn.TransformerEncoder(layer, num_layers=transformer_layers, enable_nested_tensor=False)
+
+    def forward(self, c1, c2, c3):
+        lstm_out, _ = self.lstm(torch.stack([c1, c2, c3], dim=0))
+        return self.transformer(lstm_out.permute(1, 0, 2) + self.pos_encoding).mean(dim=1)
+
+
+class PaperBest(nn.Module):
+    def __init__(self, d_model=512, n_classes=7):
+        super().__init__()
+        self.intra_fusion = IntraVideoFusion(d_model)
+        self.inter_fusion = InterVideoFusion(d_model)
+        self.classifier = nn.Sequential(nn.LayerNorm(d_model), nn.Dropout(0.3), nn.Linear(d_model, d_model // 2),
+                                        nn.GELU(), nn.Dropout(0.2), nn.Linear(d_model // 2, n_classes))
+
+    def forward(self, ix, train=False):
+        feats = gather(CLIPIDX[ix])
+        clips = [self.intra_fusion(feats['face'][:, k], feats['ori'][:, k], feats['text'][:, k], feats['audio'][:, k])
+                 for k in range(3)]
+        return self.classifier(self.inter_fusion(*clips)), {}
+
+
+print(f"PaperBest parameters: {sum(p.numel() for p in PaperBest().parameters()):,}")
+
+
+def train_paper(tr, dev, te, seed):
+    seed_all(seed)
+    model = PaperBest().to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', patience=5, factor=0.5)
+    y_dev = YB[dev]
+    best, best_state = -1, None
+    for ep in range(PAPER_EPOCHS):
+        model.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm), PAPER_BATCH):
+            j = perm[i:i + PAPER_BATCH]
+            loss = F.cross_entropy(model(j)[0], YB[j])
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        p = predict(model, dev)
+        sched.step(F.nll_loss(torch.log(torch.tensor(p) + 1e-9), y_dev.cpu()).item())
+        u = war_uar(p.argmax(1), y_dev.cpu().numpy(), 7)[1]
+        if u > best:
+            best = u
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    model.load_state_dict(best_state)
+    return predict(model, te), best
+"""),
+    ("markdown", r"""
+## Train on the 45 train+val episodes, evaluate once on test
+"""),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+
+sel_eps = sorted(random.Random(SELECT_SEED).sample(list(EPS), N_INNER_DEV))
+trr = np.where(~IS_TEST)[0]
+fit_rows = np.where(~IS_TEST & ~np.isin(src, sel_eps))[0]
+dev_rows = np.where(np.isin(src, sel_eps))[0]
+te_rows = np.where(IS_TEST)[0]
+assert not set(src[te_rows]) & set(src[trr])
+print(f"fit {len(fit_rows)} | selection {len(dev_rows)} (episodes {sel_eps}) | test {len(te_rows)}")
+y_all = DEV.yB.values
+FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+mu, sd = LRF[trr].mean(0), LRF[trr].std(0) + 1e-6
+LRFZ = T(((LRF - mu) / sd).astype(np.float32))
+LOGPI_TR = np.log((np.bincount(y_all[trr], minlength=7) + 1) / (len(trr) + 7))
+tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+
+PROBS, log = {}, []
+t0 = time.time()
+for name, kind, cfg in EXPERIMENTS + [("PaperBest", 'paper', None)]:
+    PROBS[name] = []
+    for seed in SEEDS:
+        p, sel = train_paper(tr, dev, te, seed) if kind == 'paper' else train_eval(kind, cfg, tr, dev, te, seed)
+        PROBS[name].append(p)
+        w, u = war_uar(p.argmax(1), y_all[te_rows], 7)
+        log.append({'exp': name, 'seed': seed, 'sel_UAR': sel, 'test_UAR': u, 'test_WAR': w})
+        print(f"{name:<15} seed {seed}: sel {sel:5.2f} | test UAR {u:5.2f} WAR {w:5.2f} | {(time.time() - t0) / 60:.1f} min",
+              flush=True)
+        torch.cuda.empty_cache()
+    PROBS[name] = np.stack(PROBS[name])
+
+sc = StandardScaler().fit(LRF[trr])
+Xtr, Xte = sc.transform(LRF[trr]), sc.transform(LRF[te_rows])
+best = None
+for C in [0.003, 0.01, 0.03, 0.1, 0.3, 1]:
+    s = [war_uar(LogisticRegression(max_iter=3000, C=C).fit(Xtr[a], y_all[trr][a]).predict(Xtr[b]), y_all[trr][b], 7)[1]
+         for a, b in GroupKFold(5).split(Xtr, y_all[trr], src[trr])]
+    if best is None or np.mean(s) > best[0]:
+        best = (np.mean(s), C)
+clf = LogisticRegression(max_iter=3000, C=best[1]).fit(Xtr, y_all[trr])
+pf = np.full((len(te_rows), 7), 1e-6, np.float32); pf[:, clf.classes_] = clf.predict_proba(Xte); pf /= pf.sum(1, keepdims=True)
+PROBS['LateFusion'] = np.stack([np.exp((1 - LATE_W) * np.log(PROBS['B1'][s] + 1e-9) + LATE_W * np.log(pf + 1e-9))
+                                for s in range(len(SEEDS))])
+PROBS['FaceLR'] = pf[None]
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g10_test_per_seed.csv", index=False)
+np.savez(f"{OUT_DIR}/g10_test_probs.npz", sample_id=DEV.sample_id.values[te_rows], logpi=LOGPI_TR,
+         **{k.replace('-', '_'): v for k, v in PROBS.items()})
+"""),
+    ("markdown", r"""
+## Results: preregistered fixed-sequence contrasts, then descriptive analyses
+"""),
+    ("code", r"""
+yt, st = y_all[te_rows], src[te_rows]
+vis_t = VIS[te_rows]
+FEAR = E2I['fear']
+
+
+def recalls(p, y):
+    return np.array([(p[y == c] == c).mean() * 100 if (y == c).any() else np.nan for c in range(7)])
+
+
+def uar7(p, y):
+    return np.nanmean(recalls(p, y))
+
+
+def uar6(p, y):
+    return np.nanmean(np.delete(recalls(p, y), FEAR))
+
+
+LOGP = {k: np.log(v.mean(0) + 1e-9) for k, v in PROBS.items()}
+PRED = {'LA': {k: (v - LA_TAU * LOGPI_TR).argmax(1) for k, v in LOGP.items()}, 'plain': {k: v.argmax(1) for k, v in LOGP.items()}}
+rng = np.random.default_rng(0)
+G = [np.where(st == e)[0] for e in np.unique(st)]
+BOOT = [np.concatenate([G[j] for j in rng.integers(0, len(G), len(G))]) for _ in range(2000)]
+
+
+def contrast(a, b, mode='LA', metric=uar7, m=None):
+    m = np.ones(len(yt), bool) if m is None else m
+    pa, pb = PRED[mode][a], PRED[mode][b]
+    d0 = metric(pa[m], yt[m]) - metric(pb[m], yt[m])
+    ds = [metric(pa[i[m[i]]], yt[i[m[i]]]) - metric(pb[i[m[i]]], yt[i[m[i]]]) for i in BOOT]
+    lo, hi = np.nanpercentile(ds, [2.5, 97.5])
+    return d0, lo, hi
+
+
+print(f"test MCIS {len(yt)} | episodes {len(G)} | class counts {dict(zip(EMO, np.bincount(yt, minlength=7)))}")
+print("\n== per-seed test UAR (plain) ==")
+print(pd.DataFrame(log).pivot(index='seed', columns='exp', values='test_UAR').round(2).to_string())
+print("\n== seed ensemble (LA | plain), with 95% bootstrap over test episodes for LA UAR ==")
+for k in PRED['LA']:
+    ds = [uar7(PRED['LA'][k][i], yt[i]) for i in BOOT]
+    lo, hi = np.nanpercentile(ds, [2.5, 97.5])
+    print(f"  {k:<15} UAR LA {uar7(PRED['LA'][k], yt):5.2f} [{lo:5.1f},{hi:5.1f}]  WAR LA {(PRED['LA'][k] == yt).mean() * 100:5.2f} | "
+          f"UAR plain {uar7(PRED['plain'][k], yt):5.2f}  WAR plain {(PRED['plain'][k] == yt).mean() * 100:5.2f} | "
+          f"6-class LA {uar6(PRED['LA'][k], yt):5.2f}")
+print("  (paper, different split, not comparable: UAR 23.72, WAR 35.19)")
+
+print("\n== PREREGISTERED fixed-sequence contrasts (ΔUAR, LA, 7-class, seed ensemble) ==")
+alive = True
+for i, (a, b) in enumerate([("RoleNet", "PaperBest"), ("RoleNet", "B1"), ("RoleNet", "LateFusion"),
+                            ("RoleNet", "RoleNet-noRole")], 1):
+    d, lo, hi = contrast(a, b)
+    ok = lo > 0
+    status = ('CONFIRMED' if ok else 'NOT CONFIRMED') if alive else 'descriptive only (sequence stopped)'
+    print(f"  {i}. {a} − {b}: ΔUAR {d:+.2f} [{lo:+.2f},{hi:+.2f}] -> {status}")
+    alive = alive and ok
+
+print("\n== descriptive ==")
+for a, b in [("RoleNet", "PaperBest"), ("RoleNet", "B1"), ("RoleNet", "LateFusion"), ("RoleNet", "RoleNet-noRole"),
+             ("PaperBest", "B1")]:
+    r = [contrast(a, b, 'LA', uar6), contrast(a, b, 'plain', uar7),
+         contrast(a, b, 'LA', uar7, vis_t), contrast(a, b, 'LA', uar7, ~vis_t)]
+    print(f"  {a:<9}− {b:<15} 6-class LA {r[0][0]:+5.2f} [{r[0][1]:+.1f},{r[0][2]:+.1f}] | plain {r[1][0]:+5.2f} "
+          f"[{r[1][1]:+.1f},{r[1][2]:+.1f}] | listener visible {r[2][0]:+5.2f} (n={vis_t.sum()}) | not visible {r[3][0]:+5.2f} (n={(~vis_t).sum()})")
+print("\n== per-class recall (LA) ==")
+print(f"  {'':<15}" + "".join(f"{e[:7]:>8}" for e in EMO))
+for k, p in PRED['LA'].items():
+    print(f"  {k:<15}" + "".join(f"{x:8.1f}" for x in recalls(p, yt)))
+print("\n== per-episode UAR (LA): RoleNet vs PaperBest vs B1 ==")
+wins = 0
+for e in np.unique(st):
+    m = st == e
+    r, pb_, b1 = uar7(PRED['LA']['RoleNet'][m], yt[m]), uar7(PRED['LA']['PaperBest'][m], yt[m]), uar7(PRED['LA']['B1'][m], yt[m])
+    wins += r > pb_
+    print(f"  episode {e} (n={m.sum()}): RoleNet {r:5.2f} | PaperBest {pb_:5.2f} | B1 {b1:5.2f}")
+print(f"  RoleNet beats PaperBest in {wins}/{len(np.unique(st))} episodes")
+"""),
+]
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -4246,6 +4577,7 @@ if __name__ == "__main__":
                         ("g6a_listener_visibility.ipynb", G6A), ("g6b_listener_expression.ipynb", G6B),
                         ("g7b_faces_into_b1.ipynb", G7B), ("g8a_role_features.ipynb", G8A),
                         ("g8b_rolenet_cv.ipynb", G8B),
-                        ("g9_rolenet_plus_cv.ipynb", G9)]:
+                        ("g9_rolenet_plus_cv.ipynb", G9),
+                        ("g10_test_preregistered.ipynb", G10)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

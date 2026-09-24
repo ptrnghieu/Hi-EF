@@ -218,11 +218,21 @@ def call_llm(row, retries=5):
             out = client.chat.completions.create(**kwargs)
             return json.loads(out.choices[0].message.content)
         except Exception as e:
+            ERRORS.append(f"{type(e).__name__}: {e}")
             if "temperature" in str(e) and "temperature" in kwargs:
                 kwargs.pop("temperature")
                 continue
             time.sleep(2 ** attempt)
     return None
+
+
+# Pre-flight: one real call so key / model / Internet problems surface here instead of as uniform scores
+ERRORS = []
+probe = call_llm(train.iloc[0].to_dict(), retries=2)
+if probe is None:
+    raise RuntimeError("Pre-flight call failed. Check: Kaggle 'Internet on', secret OPENAI_API_KEY attached, "
+                       f"MODEL name.\nLast error: {ERRORS[-1] if ERRORS else 'unknown'}")
+print("pre-flight OK:", json.dumps(probe)[:200])
 '''),
     ("code", r'''
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -244,7 +254,13 @@ with ThreadPoolExecutor(MAX_WORKERS) as pool, open(CACHE, 'a') as f:
         if resp is not None:
             cache[sid] = resp
             f.write(json.dumps({'sample_id': sid, 'response': resp}) + "\n")
-print(f"responses: {sum(s in cache for s in ev.sample_id)}/{len(ev)}")
+n_ok = sum(s in cache for s in ev.sample_id)
+print(f"responses: {n_ok}/{len(ev)}")
+if ERRORS:
+    print(f"{len(ERRORS)} API errors; first ones:", *sorted(set(ERRORS))[:3], sep="\n  ")
+if n_ok < 0.95 * len(ev):
+    raise RuntimeError("More than 5% of items have no response; re-run this cell (cached items are skipped) "
+                       "before scoring, otherwise missing items are scored as uniform.")
 '''),
     ("code", r'''
 def to_probs(d, labels):

@@ -1809,7 +1809,9 @@ Gate: B observable (usable listening face or previous-turn voice) in ≥ 40–50
 (face and voice) are right in ≥ 80% of the cases where they fire. Results are split into two-person and multi-person scenes.
 '''),
     ("code", r'''
-!pip install -q insightface onnxruntime-gpu speechbrain
+# Kaggle ships the CPU build of onnxruntime, which shadows onnxruntime-gpu -> remove it first
+!pip uninstall -y -q onnxruntime onnxruntime-gpu
+!pip install -q onnxruntime-gpu insightface speechbrain
 '''),
     ("code", r'''
 # ======== CONFIG ========
@@ -1874,6 +1876,19 @@ missing = [c for c in clips if video_path(c) is None]
 print(f"MCIS {len(sp)} | unique clips {len(clips)} | clips without video {len(missing)}", missing[:5])
 '''),
     ("code", r'''
+import onnxruntime as ort
+ON_GPU = 'CUDAExecutionProvider' in ort.get_available_providers()
+print("onnxruntime providers:", ort.get_available_providers())
+if not ON_GPU:
+    # CPU fallback: keep the run to a manageable size instead of silently running for hours
+    print("WARNING: no CUDA provider for onnxruntime -> CPU mode: fewer MCIS/frames, smaller detector input")
+    N_CPU_MCIS = 150
+    if len(sp) > N_CPU_MCIS:
+        sp = sp.sample(n=N_CPU_MCIS, random_state=SEED).reset_index(drop=True)
+        clips = sorted(set(sp[['clip1', 'clip2', 'clip3', 'clip4']].values.ravel()))
+    MAX_FRAMES, DET_SIZE = 12, (480, 480)
+    print(f"CPU mode: {len(sp)} MCIS, {len(clips)} clips, <= {MAX_FRAMES} frames/clip")
+
 from insightface.app import FaceAnalysis
 app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition', 'landmark_3d_68'],
                    providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
@@ -1885,15 +1900,12 @@ def read_frames(path):
     n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     want = max(1, min(MAX_FRAMES, int(round(n / fps * SAMPLE_FPS)))) if n else MAX_FRAMES
-    idx = set(np.linspace(0, max(n - 1, 0), want).astype(int).tolist())
-    frames, i = [], 0
-    while True:
+    frames = []
+    for i in sorted(set(np.linspace(0, max(n - 1, 0), want).astype(int).tolist())):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)   # seek instead of decoding the whole clip
         ok, fr = cap.read()
-        if not ok:
-            break
-        if i in idx:
+        if ok:
             frames.append(fr)
-        i += 1
     cap.release()
     return frames
 
@@ -1903,7 +1915,11 @@ NFRAMES = {}
 KEEP_FRAMES = {}  # a few frames per clip for montages
 montage_mcis = set(sp.sample(n=min(N_MONTAGES, len(sp)), random_state=SEED + 1).sample_id)
 montage_clips = set(sp[sp.sample_id.isin(montage_mcis)][['clip1', 'clip2', 'clip3', 'clip4']].values.ravel())
-for c in tqdm(clips, desc='faces'):
+import time as _time
+_t0 = _time.time()
+for ci, c in enumerate(clips):
+    if ci % 100 == 0:
+        print(f"faces: {ci}/{len(clips)} clips, {(_time.time() - _t0) / 60:.1f} min", flush=True)
     p = video_path(c)
     frames = read_frames(p) if p else []
     NFRAMES[c] = len(frames)
@@ -2050,7 +2066,7 @@ for c in tqdm(clips, desc='voice'):
     with torch.no_grad():
         e = spk.encode_batch(torch.tensor(wav, dtype=torch.float32).unsqueeze(0)).reshape(-1).cpu().numpy()
     VOICE[c] = e / (np.linalg.norm(e) + 1e-9)
-print(f"voice embeddings: {len(VOICE)}/{len(clips)} clips")
+print(f"voice embeddings: {len(VOICE)}/{len(clips)} clips", flush=True)
 
 
 def vcos(a, b):
@@ -2086,6 +2102,9 @@ def block(d, name):
     print(f"  B spoke in clip I  (voice)                 {d.B_voice_I.mean() * 100:5.1f}%")
     print(f"  B visible in III with usable face          {d.B_listening_III_frontal.mean() * 100:5.1f}%")
     print(f"  B observable (usable face OR voice turn)   {d.B_observable_v2.mean() * 100:5.1f}%")
+    for k, name_ in [('2', 'II'), ('1', 'I')]:
+        third = (d[f'vcos_{k}3'] <= T_) & (d[f'vcos_{k}4'] <= T_)
+        print(f"  clip {name_:<2} speaker is a THIRD person (neither A nor B)  {third.mean() * 100:5.1f}%")
     for rule, truth in [('II_not_A', 'B_voice_II'), ('I_not_A', 'B_voice_I')]:
         fired = d[d[rule]]
         print(f"  rule '{rule}' fires {d[rule].mean() * 100:5.1f}% | precision {fired[truth].mean() * 100 if len(fired) else float('nan'):5.1f}%"

@@ -1813,7 +1813,7 @@ Gate: B observable (usable listening face or previous-turn voice) in ≥ 40–50
 # Install it first, then remove every onnxruntime build, then install the GPU build last.
 !pip install -q insightface speechbrain
 !pip uninstall -y -q onnxruntime onnxruntime-gpu
-!pip install -q onnxruntime-gpu
+!pip install -q "onnxruntime-gpu==1.22.0"   # CUDA 12 build (1.30+ targets CUDA 13, which Kaggle lacks)
 !pip list 2>/dev/null | grep -i onnxruntime
 '''),
     ("code", r'''
@@ -1886,23 +1886,25 @@ if hasattr(ort, 'preload_dlls'):
         ort.preload_dlls()
     except Exception as e:
         print("preload_dlls:", e)
-ON_GPU = 'CUDAExecutionProvider' in ort.get_available_providers() and torch.cuda.is_available()
-print("onnxruntime providers:", ort.get_available_providers())
+print("onnxruntime", ort.__version__, "declared providers:", ort.get_available_providers())
+
+from insightface.app import FaceAnalysis
+app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition', 'landmark_3d_68'],
+                   providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+app.prepare(ctx_id=0, det_size=DET_SIZE)
+USED = {k: m.session.get_providers() for k, m in app.models.items()}
+ON_GPU = all('CUDAExecutionProvider' in v for v in USED.values())
+print("providers actually used:", USED)
 if not ON_GPU:
-    # CPU fallback: keep the run to a manageable size instead of silently running for hours
-    print("WARNING: no CUDA provider for onnxruntime -> CPU mode: fewer MCIS/frames, smaller detector input")
+    # CPU fallback, decided on the providers the sessions really use (a declared CUDA provider can still fail to load)
+    print("WARNING: models run on CPU -> CPU mode: fewer MCIS/frames, smaller detector input")
     N_CPU_MCIS = 150
     if len(sp) > N_CPU_MCIS:
         sp = sp.sample(n=N_CPU_MCIS, random_state=SEED).reset_index(drop=True)
         clips = sorted(set(sp[['clip1', 'clip2', 'clip3', 'clip4']].values.ravel()))
     MAX_FRAMES, DET_SIZE = 12, (480, 480)
+    app.prepare(ctx_id=-1, det_size=DET_SIZE)
     print(f"CPU mode: {len(sp)} MCIS, {len(clips)} clips, <= {MAX_FRAMES} frames/clip")
-
-from insightface.app import FaceAnalysis
-app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition', 'landmark_3d_68'],
-                   providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
-app.prepare(ctx_id=0 if ON_GPU else -1, det_size=DET_SIZE)
-print("providers actually used:", {k: m.session.get_providers() for k, m in app.models.items()})
 
 
 def read_frames(path):

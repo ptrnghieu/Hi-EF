@@ -14,6 +14,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g3b_robustness.ipynb` | G3b: robustness of `traj_only` — per-fold eval trajectories (no train/eval feature mismatch), 3 recognizer seeds, both selection protocols (inner-dev / val), clip ablation III · II–III · I–III, logistic-regression forecaster, gate summary |
 | `g4_test_preregistered.ipynb` | G4: the single preregistered test run — selection on val, evaluation on test (see below) |
 | `g5_episode_cv.ipynb` | G5: preregistered secondary — the primary contrast under 5-fold cross-validation over all 53 episodes (run after G4) |
+| `g6a_listener_visibility.ipynb` | G6a: gate for the listener-aware formulation — face detection + identity clustering on clips I–IV (train+val only) to measure how often B is visible while listening in clip III or spoke in clip I/II, plus annotated montages |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).

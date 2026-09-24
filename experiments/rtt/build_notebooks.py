@@ -1781,9 +1781,261 @@ print("\nCV VERDICT:", "CONFIRMED" if d_all > 0 and lo_all > 0 else ("DIRECTIONA
 ]
 
 
+# ---------------------------------------------------------------- G6a: who is on screen?
+G6A = [
+    ("markdown", r'''
+# G6a — Is the listener (B) observable before B speaks?
+
+Gate for the *listener-aware* formulation. Hi-EF forecasts B's emotion in clip IV from clips I–III, but models only
+the speaker. This notebook measures, on **train + val only** (test untouched), how often B can actually be seen:
+
+* **listening:** B's face appears in clip III while A is talking (same frame or a cut-away reaction shot);
+* **previous turn:** B is the dominant face (proxy speaker) of clip II or clip I.
+
+Method, per MCIS: sample frames from clips I–IV, detect faces and compute ArcFace embeddings (InsightFace),
+cluster all faces of the MCIS into persons, take the dominant person of each clip as its speaker proxy.
+A = dominant person of III, B_true = dominant person of IV (**analysis only**). It also scores an inference-time
+rule that picks B **without** clip IV, and writes annotated frame montages for visual checking.
+
+Gate: B observable (listening or previous turn) in ≥ 40–50% of MCIS and the no-clip-IV rule finds B_true in ≥ 80%
+of the cases where it proposes someone.
+'''),
+    ("code", r'''
+!pip install -q insightface onnxruntime-gpu
+'''),
+    ("code", r'''
+# ======== CONFIG ========
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+SPLIT_CSV = "/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv"
+OUT_DIR = "/kaggle/working"
+
+SPLITS = ["train", "val"]    # test stays untouched
+N_MCIS = 600                 # random MCIS to analyse (None = all train+val; ~4x slower)
+SAMPLE_FPS, MAX_FRAMES = 3, 24
+DET_SIZE = (640, 640)
+MIN_DET_SCORE, MIN_FACE_PX = 0.6, 24
+SAME_PERSON_COS = 0.45       # cosine similarity above which two faces are the same person
+DOMINANT_MIN_FRAC = 0.25     # a clip's dominant person must be in >= this fraction of its sampled frames
+N_MONTAGES = 24
+SEED = 0
+'''),
+    ("code", r'''
+import os, glob, random, json
+import numpy as np, pandas as pd, cv2
+from tqdm.auto import tqdm
+from sklearn.cluster import AgglomerativeClustering
+
+roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
+VIDEO_ROOTS = [os.path.join(r, "video") for r in roots if os.path.isdir(os.path.join(r, "video"))]
+ANNOT_CSV = [os.path.join(r, "annotation.csv") for r in roots if os.path.exists(os.path.join(r, "annotation.csv"))][0]
+print("video roots:", VIDEO_ROOTS)
+
+
+def video_path(clip):
+    ep, num = clip.split('/')
+    for root in VIDEO_ROOTS:
+        for ext in ('.mp4', '.avi', '.mkv', '.mov'):
+            p = os.path.join(root, ep, num + ext)
+            if os.path.exists(p):
+                return p
+    return None
+
+
+ann = pd.read_csv(ANNOT_CSV, header=None, dtype=str).set_index(0)
+sp = pd.read_csv(SPLIT_CSV, dtype=str)
+sp = sp[sp.split.isin(SPLITS)].reset_index(drop=True)
+assert 'test' not in set(sp.split)
+if N_MCIS is not None and N_MCIS < len(sp):
+    sp = sp.sample(n=N_MCIS, random_state=SEED).reset_index(drop=True)
+clips = sorted(set(sp[['clip1', 'clip2', 'clip3', 'clip4']].values.ravel()))
+missing = [c for c in clips if video_path(c) is None]
+print(f"MCIS {len(sp)} | unique clips {len(clips)} | clips without video {len(missing)}", missing[:5])
+'''),
+    ("code", r'''
+from insightface.app import FaceAnalysis
+app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition'],
+                   providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+app.prepare(ctx_id=0, det_size=DET_SIZE)
+
+
+def read_frames(path):
+    cap = cv2.VideoCapture(path)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    want = max(1, min(MAX_FRAMES, int(round(n / fps * SAMPLE_FPS)))) if n else MAX_FRAMES
+    idx = set(np.linspace(0, max(n - 1, 0), want).astype(int).tolist())
+    frames, i = [], 0
+    while True:
+        ok, fr = cap.read()
+        if not ok:
+            break
+        if i in idx:
+            frames.append(fr)
+        i += 1
+    cap.release()
+    return frames
+
+
+FACES = {}      # clip -> list of dicts(frame, bbox, score, emb)
+NFRAMES = {}
+KEEP_FRAMES = {}  # a few frames per clip for montages
+montage_mcis = set(sp.sample(n=min(N_MONTAGES, len(sp)), random_state=SEED + 1).sample_id)
+montage_clips = set(sp[sp.sample_id.isin(montage_mcis)][['clip1', 'clip2', 'clip3', 'clip4']].values.ravel())
+for c in tqdm(clips, desc='faces'):
+    p = video_path(c)
+    frames = read_frames(p) if p else []
+    NFRAMES[c] = len(frames)
+    out = []
+    for fi, fr in enumerate(frames):
+        for f in app.get(fr):
+            x1, y1, x2, y2 = f.bbox
+            if f.det_score >= MIN_DET_SCORE and min(x2 - x1, y2 - y1) >= MIN_FACE_PX:
+                out.append({'frame': fi, 'bbox': f.bbox.astype(int).tolist(), 'score': float(f.det_score),
+                            'emb': f.normed_embedding.astype(np.float32)})
+    FACES[c] = out
+    if c in montage_clips and frames:
+        pick = np.linspace(0, len(frames) - 1, min(6, len(frames))).astype(int)
+        KEEP_FRAMES[c] = [(int(i), frames[i]) for i in pick]
+print("clips with >=1 face:", sum(bool(v) for v in FACES.values()), "/", len(FACES))
+'''),
+    ("code", r'''
+def analyse(row):
+    cl = [row['clip1'], row['clip2'], row['clip3'], row['clip4']]
+    faces = [(k, f) for k, c in enumerate(cl) for f in FACES.get(c, [])]
+    res = {'sample_id': row['sample_id'], 'split': row['split'], 'source_folder': row['source_folder'],
+           'emo_A': row['clip3_emotion'], 'emo_B': row['clip4_emotion'],
+           'unc_B': str(ann.at[row['clip4'], 8]) if row['clip4'] in ann.index else 'NA'}
+    if len(faces) == 0:
+        return res | {'persons': 0}, {}
+    E = np.stack([f['emb'] for _, f in faces])
+    lab_ = (np.zeros(1, int) if len(E) == 1 else
+            AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
+                                    distance_threshold=1 - SAME_PERSON_COS).fit_predict(E))
+    # frames per (clip, person)
+    pres = {}
+    for (k, f), p in zip(faces, lab_):
+        pres.setdefault((k, int(p)), set()).add(f['frame'])
+
+    def dominant(k):
+        n = NFRAMES.get(cl[k], 0)
+        cand = [(len(fr), p) for (kk, p), fr in pres.items() if kk == k]
+        if not cand or n == 0:
+            return None
+        cnt, p = max(cand)
+        return p if cnt / n >= DOMINANT_MIN_FRAC else None
+
+    dom = [dominant(k) for k in range(4)]
+    A, Bt = dom[2], dom[3]
+    in3 = {p for (k, p) in pres if k == 2}
+    others3 = sorted(in3 - {A}, key=lambda p: -len(pres[(2, p)]))
+    # inference-time rule (no clip IV): a non-A person of clip III, preferring one who spoke in II or I
+    spoke = [p for p in (dom[1], dom[0]) if p is not None and p != A]
+    if others3:
+        pref = [p for p in others3 if p in spoke]
+        Bp = pref[0] if pref else others3[0]
+        src = 'III_listening'
+    elif spoke:
+        Bp, src = spoke[0], 'previous_turn'
+    else:
+        Bp, src = None, 'none'
+    n3 = max(NFRAMES.get(cl[2], 0), 1)
+    ids3 = [frozenset(p for (k, p), fr in pres.items() if k == 2 and fi in fr) for fi in range(n3)]
+    res |= {
+        'persons': len(set(int(p) for p in lab_)), 'persons_III': len(in3), 'A_found': A is not None,
+        'Btrue_found': Bt is not None, 'A_eq_Btrue': A is not None and A == Bt,
+        'B_listening_III': Bt is not None and Bt != A and Bt in in3,
+        'B_frac_III': len(pres.get((2, Bt), ())) / n3 if Bt is not None and Bt != A else 0.0,
+        'B_same_frame_as_A': Bt is not None and A is not None and Bt != A and
+                             bool(pres.get((2, Bt), set()) & pres.get((2, A), set())),
+        'B_spoke_II': Bt is not None and Bt != A and dom[1] == Bt,
+        'B_spoke_I': Bt is not None and Bt != A and dom[0] == Bt,
+        'Bpred_source': src, 'Bpred_correct': Bp is not None and Bt is not None and Bt != A and Bp == Bt,
+        'Bpred_made': Bp is not None,
+        'cuts_III': sum(ids3[i] != ids3[i - 1] for i in range(1, len(ids3))),
+    }
+    res['B_observable'] = res['B_listening_III'] or res['B_spoke_II'] or res['B_spoke_I']
+    return res, {'faces': faces, 'labels': lab_, 'A': A, 'Bt': Bt, 'Bp': Bp}
+
+
+rows, DETAIL = [], {}
+for r in tqdm(sp.to_dict('records'), desc='MCIS'):
+    res, det = analyse(r)
+    rows.append(res)
+    if r['sample_id'] in montage_mcis:
+        DETAIL[r['sample_id']] = (r, det)
+df = pd.DataFrame(rows)
+BOOL = ['A_found', 'Btrue_found', 'A_eq_Btrue', 'B_listening_III', 'B_same_frame_as_A', 'B_spoke_II', 'B_spoke_I',
+        'Bpred_correct', 'Bpred_made', 'B_observable']
+for c in BOOL:
+    df[c] = df[c].fillna(False).astype(bool) if c in df else False
+for c in ['persons_III', 'B_frac_III', 'cuts_III']:
+    df[c] = df[c].fillna(0) if c in df else 0
+df['Bpred_source'] = df['Bpred_source'].fillna('none') if 'Bpred_source' in df else 'none'
+df.to_csv(f"{OUT_DIR}/g6a_listener_visibility.csv", index=False)
+'''),
+    ("code", r'''
+ok = df[df.A_found & df.Btrue_found & ~df.A_eq_Btrue]
+print(f"MCIS analysed: {len(df)}")
+print(f"  faces found at all: {(df.persons > 0).mean() * 100:.1f}%   A (clip III dominant) found: {df.A_found.mean() * 100:.1f}%   "
+      f"B_true (clip IV dominant) found: {df.Btrue_found.mean() * 100:.1f}%")
+print(f"  sanity: dominant(III) == dominant(IV) in {df.A_eq_Btrue.mean() * 100:.1f}% (dataset rule says A != B; high = proxy fails)")
+print(f"\nAmong {len(ok)} MCIS where A and B_true are identified and distinct:")
+for col, name in [('B_listening_III', 'B visible in clip III (listening/reaction)'),
+                  ('B_same_frame_as_A', '  ... in the same frame as A'),
+                  ('B_spoke_II', 'B was dominant in clip II'), ('B_spoke_I', 'B was dominant in clip I'),
+                  ('B_observable', 'B observable (III listening or I/II turn)')]:
+    print(f"  {name:<46} {ok[col].mean() * 100:5.1f}%")
+print(f"  mean fraction of clip-III frames showing B: {ok.B_frac_III.mean():.2f}  | mean identity changes in III: {ok.cuts_III.mean():.1f}")
+print(f"\nB_observable over ALL analysed MCIS (unidentified counted as not observable): "
+      f"{df.B_observable.mean() * 100:.1f}%")
+made = ok[ok.Bpred_made]
+print(f"\nNo-clip-IV rule: proposes someone in {ok.Bpred_made.mean() * 100:.1f}% of identified MCIS; "
+      f"precision {made.Bpred_correct.mean() * 100:.1f}%")
+print(made.groupby('Bpred_source').Bpred_correct.agg(['size', 'mean']).rename(columns={'mean': 'precision'}).round(3).to_string())
+print("\nB visible while listening, by split / by B emotion:")
+print(ok.groupby('split').B_listening_III.mean().round(3).to_string())
+print(ok.groupby('emo_B').B_listening_III.agg(['size', 'mean']).round(3).to_string())
+'''),
+    ("markdown", r'''
+## Montages (send a few of these back for a visual check)
+Rows = clips I–IV, columns = sampled frames. Box colours: **red** A (dominant in III), **green** B_true
+(dominant in IV), **blue** the no-clip-IV prediction when it differs from B_true, **grey** other people.
+'''),
+    ("code", r'''
+os.makedirs(f"{OUT_DIR}/g6a_montages", exist_ok=True)
+for sid, (r, det) in DETAIL.items():
+    if not det:
+        continue
+    cl = [r['clip1'], r['clip2'], r['clip3'], r['clip4']]
+    person_at = {}
+    for (k, f), p in zip(det['faces'], det['labels']):
+        person_at.setdefault((cl[k], f['frame']), []).append((f['bbox'], int(p)))
+    tiles_rows = []
+    for k, c in enumerate(cl):
+        tiles = []
+        for fi, fr in KEEP_FRAMES.get(c, []):
+            im = fr.copy()
+            for (x1, y1, x2, y2), p in person_at.get((c, fi), []):
+                col = ((0, 0, 255) if p == det['A'] else (0, 200, 0) if p == det['Bt'] else
+                       (255, 120, 0) if p == det['Bp'] else (160, 160, 160))
+                cv2.rectangle(im, (x1, y1), (x2, y2), col, 3)
+                cv2.putText(im, str(p), (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, col, 2)
+            tiles.append(cv2.resize(im, (256, 144)))
+        while len(tiles) < 6:
+            tiles.append(np.zeros((144, 256, 3), np.uint8))
+        row_img = np.hstack(tiles[:6])
+        cv2.putText(row_img, ['I', 'II', 'III (A speaks)', 'IV (B speaks)'][k], (5, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        tiles_rows.append(row_img)
+    cv2.imwrite(f"{OUT_DIR}/g6a_montages/{sid}.jpg", np.vstack(tiles_rows))
+print(len(os.listdir(f"{OUT_DIR}/g6a_montages")), "montages written")
+'''),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
-                        ("g4_test_preregistered.ipynb", G4), ("g5_episode_cv.ipynb", G5)]:
+                        ("g4_test_preregistered.ipynb", G4), ("g5_episode_cv.ipynb", G5),
+                        ("g6a_listener_visibility.ipynb", G6A)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

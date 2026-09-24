@@ -172,3 +172,27 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 * **Clip IV.** Its voice gives the B-pointer's training labels and the B-previous-utterance targets. It is never an
   input; the ORACLE arm is analysis only.
 * **After round 2** (if any), no further architecture changes. Then one preregistered test run.
+
+## G9 results (round 1): preregistered decision is KEEP RoleNet
+
+**Setup checks:**
+- The RoleNet arm reproduces G8b exactly, per seed and per fold.
+- B-pointer AUC, out-of-fold: 0.821 overall (clip I 0.833, clip II 0.803).
+
+**Contrasts**, seed ensemble, ΔUAR with 95% episode bootstrap:
+
+| Contrast | LA, 7-class | LA, 6-class | plain, 7-class |
+|---|---|---|---|
+| RoleNet+ − RoleNet | +0.11 [−2.23, +2.03] | +0.13 | −0.10 |
+| RoleNet+spk − RoleNet | −0.48 | — | — |
+| RoleNet+ ORACLE − RoleNet+ | −0.64 [−1.94, +0.50] | — | — |
+| RoleNet+ − RoleNet+ −faceRoles | +0.61 | +1.75 [−0.05, +3.69] | +0.85 |
+
+- **Decision.** RoleNet+ − RoleNet is positive in only 2/5 folds, so RoleNet+ is not adopted.
+- **The ORACLE arm is flat.** Even a perfect "B spoke in I/II" pointer adds nothing on top of RoleNet. The label-level
+  B-specific persistence is therefore not exploitable by tagging context speech with speaker roles in this
+  architecture.
+- **Face-role assignment** gives a consistent but borderline benefit:
+  - G8b, RoleNet − noRole: plain +1.17 [−0.01, +2.29];
+  - G9, RoleNet+ vs −faceRoles: 6-class +1.75 [−0.05, +3.69];
+  - G9, same contrast on listener-visible MCIS: plain +1.66 [+0.19, +3.11].

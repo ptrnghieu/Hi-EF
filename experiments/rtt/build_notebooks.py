@@ -2492,10 +2492,291 @@ print("\nGATE: on 'listener visible', A+listener − A ≥ +2–3 UAR with CI ab
 ]
 
 
+
+# ---------------------------------------------------------------- G7b: B1 + role-grounded face features
+G7B = [
+    ("markdown", r"""
+# G7b — Does B1 improve when it is told *whose* face is whose?
+
+G6b/G6c (train+val, out-of-fold over 45 episodes) showed that reading the **listener's** face in clip III forecasts
+B better than reading A's face (zero-shot ΔUAR +3.72 [+0.60, +7.24]), that the gain comes from the expression and
+not from whether a reaction shot exists, and that B's face is often already present in clips I/II.
+B1 sees whole frames and has no notion of who is who. This notebook adds the G6b **role-grounded face features**
+(HSEmotion 8 probabilities + valence/arousal + presence + frame share, per role) to B1.
+
+| Arm | Face input (per role: A, listener in III, listener seen in I/II, dominant face of II, of I) |
+|---|---|
+| `B1` | none, identical to G3b's B1 (reproduction check) |
+| `B1+faces` | all 5 roles × 12 = 60 numbers |
+| `B1+faces_early` | same, but the listener uses only frames in the first 80% of clip III (secondary) |
+| `B1+presence` | control: only presence + frame share per role, no expression |
+
+Fusion: the face vector (z-scored with training statistics) goes through a small MLP whose **last layer starts at
+zero** and is added to B1's pooled representation, so every face arm starts exactly as B1.
+Both selection protocols, 5 seeds, paired episode bootstrap against B1. **Test stays locked** (the face CSV has
+train+val only).
+
+Gate: `B1+faces` − `B1` (inner-dev selection) ΔUAR > 0 with CI lower bound > 0 and ≥ 3/5 seed wins; under
+val selection `B1+faces@val` ≥ `B1@val`; `B1+presence` does not explain the gain.
+"""),
+    ("code", r"""
+# ======== CONFIG ========
+import os
+
+
+def first_existing(*paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"none of {paths}")
+
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = first_existing("/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv",
+                           "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv")
+ROLE_CSV = first_existing("/kaggle/input/datasets/ptrnghieu/role-features/g6b_role_features.csv",
+                          "/kaggle/input/role-features/g6b_role_features.csv")
+OUT_DIR = "/kaggle/working"
+
+SEEDS = [42, 123, 456, 789, 1024]
+N_FOLDS = 5
+N_INNER_DEV_SOURCES = 5
+REC_EPOCHS, FC_EPOCHS, PATIENCE = 60, 50, 8
+REC_BATCH, FC_BATCH = 64, 32
+LR, WEIGHT_DECAY = 1e-4, 1e-5
+POL_WEIGHT = 0.3
+CERT_WEIGHTS = {'1': 1.0, '2': 0.75, '3': 0.5}   # bookkeeping only
+REC_SEED = 42
+
+# (name, face set, selection protocol)
+EXPERIMENTS = [
+    ("B1",                 None,       "inner_dev"),
+    ("B1+faces",           "full",     "inner_dev"),
+    ("B1+faces_early",     "early",    "inner_dev"),
+    ("B1+presence",        "presence", "inner_dev"),
+    ("B1@val",             None,       "val"),
+    ("B1+faces@val",       "full",     "val"),
+    ("B1+faces_early@val", "early",    "val"),
+    ("B1+presence@val",    "presence", "val"),
+]
+G3B_B1_SEED_MEAN = {"inner_dev": 21.65, "val": 25.77}   # G3b per-seed mean UAR of B1, for the reproduction check
+EVAL_SPLIT = "val"
+UNLOCK_TEST = False
+"""),
+    G3[2], G3[3], G3[4],
+    ("markdown", r"""
+## Role-grounded face features (from G6b, clips I–III only)
+"""),
+    ("code", r"""
+ROLE = pd.read_csv(ROLE_CSV).set_index('sample_id')
+need = set(train_all.sample_id) | set(ev.sample_id)
+miss = need - set(ROLE.index)
+assert not miss, f"{len(miss)} MCIS without face features, e.g. {sorted(miss)[:3]}"
+FACE_ROLES = {'full': ['A', 'listener', 'listener_ctx', 'ctx_II', 'ctx_I'],
+              'early': ['A', 'listener_early', 'listener_ctx', 'ctx_II', 'ctx_I']}
+FACE_ROLES['presence'] = FACE_ROLES['full']
+
+
+def face_cols(fset):
+    dims = [10, 11] if fset == 'presence' else range(12)
+    return [f"{r}_{i}" for r in FACE_ROLES[fset] for i in dims]
+
+
+def face_matrix(d, fset):
+    return ROLE.loc[d.sample_id, face_cols(fset)].values.astype(np.float32)
+
+
+# z-score with statistics of the training episodes only
+FSTAT = {}
+for fset in FACE_ROLES:
+    X = face_matrix(train_all, fset)
+    FSTAT[fset] = (X.mean(0), X.std(0) + 1e-6)
+
+vis = ROLE.loc[ev.sample_id, 'listener_10'].values > 0
+early = ROLE.loc[ev.sample_id, 'listener_early_10'].values > 0
+bctx = ROLE.loc[ev.sample_id, 'listener_ctx_10'].values > 0
+print(f"{EVAL_SPLIT}: listener visible {vis.mean() * 100:.1f}% | in first 80% of III {early.mean() * 100:.1f}% | "
+      f"listener also seen in I/II {bctx.mean() * 100:.1f}%")
+
+
+class FaceForecaster(nn.Module):
+    # B1 (raw clip encoder over I-III) + a role-face vector added to the pooled representation.
+    # The face MLP's last layer is zero-initialised, so the model starts exactly as B1.
+
+    def __init__(self, n_face, d=512):
+        super().__init__()
+        self.base = Forecaster(use_raw=True, use_traj=False, d=d)
+        self.face = nn.Sequential(nn.Linear(n_face, d // 2), nn.GELU(), nn.Dropout(0.3), nn.Linear(d // 2, d))
+        nn.init.zeros_(self.face[-1].weight); nn.init.zeros_(self.face[-1].bias)
+
+    def forward(self, clip_idx, rec, face):
+        b = self.base
+        B, n = clip_idx.shape
+        feats = gather(clip_idx)
+        flat = {k: v.reshape(B * n, *v.shape[2:]) for k, v in feats.items()}
+        tok = b.enc(flat).reshape(B, n, -1)
+        h = b.inter(tok + b.clip_pos[:, 3 - n:])
+        return b.head(h.mean(1) + self.face(face))
+"""),
+    ("markdown", r"""
+## Forecasters under both selection protocols
+"""),
+    ("code", r"""
+def seed_all(s):
+    random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
+
+
+fc_train = train_all[~train_all.source_folder.isin(inner_dev_sources)].reset_index(drop=True)
+fc_dev = train_all[train_all.source_folder.isin(inner_dev_sources)].reset_index(drop=True)
+_T = {}
+
+
+def make_T(rows_name, d, fset):
+    key = (rows_name, fset)
+    if key not in _T:
+        idx = torch.tensor([[CIDX[c] for c in r] for r in d[['clip1', 'clip2', 'clip3']].values], device=DEVICE)
+        rec = torch.zeros(len(d), 3, N_REC, device=DEVICE)
+        if fset is None:
+            face = None
+        else:
+            mu, sd = FSTAT[fset]
+            face = torch.tensor((face_matrix(d, fset) - mu) / sd, device=DEVICE)
+        _T[key] = (idx, rec, torch.tensor(d.yB.values, device=DEVICE), face)
+    return _T[key]
+
+
+def run(model, T, i, j):
+    return model(T[0][i:j], T[1][i:j]) if T[3] is None else model(T[0][i:j], T[1][i:j], T[3][i:j])
+
+
+def fc_predict(model, T, bs=256):
+    model.eval()
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(T[0]), bs):
+            out.append(F.softmax(run(model, T, i, i + bs), -1).cpu())
+    return torch.cat(out).numpy()
+
+
+def train_forecaster(fset, protocol, seed):
+    seed_all(seed)
+    tr_rows, tr_name = (train_all, 'train_all') if protocol == 'val' else (fc_train, 'fc_train')
+    T_tr = make_T(tr_name, tr_rows, fset)
+    T_ev = make_T('ev', ev, fset)
+    T_sel = T_ev if protocol == 'val' else make_T('fc_dev', fc_dev, fset)
+    model = (Forecaster(use_raw=True, use_traj=False) if fset is None
+             else FaceForecaster(T_tr[3].shape[1])).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    y = T_tr[2]
+    y_sel = T_sel[2].cpu().numpy()
+    best, best_state, bad = -1, None, 0
+    for ep in range(FC_EPOCHS):
+        model.train()
+        perm = torch.randperm(len(y), device=DEVICE)
+        for i in range(0, len(perm), FC_BATCH):
+            j = perm[i:i + FC_BATCH]
+            Tj = tuple(t[j] if t is not None else None for t in T_tr)
+            loss = F.cross_entropy(run(model, Tj, 0, len(j)), y[j])
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        sel_uar = war_uar(fc_predict(model, T_sel).argmax(1), y_sel, 7)[1]
+        if sel_uar > best:
+            best, bad = sel_uar, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= PATIENCE:
+                break
+    model.load_state_dict(best_state)
+    return fc_predict(model, T_ev), best
+
+
+yB = ev.yB.values
+src = ev.source_folder.values
+results, PROBS = [], {}
+for name, fset, protocol in EXPERIMENTS:
+    PROBS[name] = []
+    for seed in SEEDS:
+        p, sel = train_forecaster(fset, protocol, seed)
+        PROBS[name].append(p)
+        w, u = war_uar(p.argmax(1), yB, 7)
+        wv, uv = war_uar(p[vis].argmax(1), yB[vis], 7)
+        results.append({'exp': name, 'protocol': protocol, 'seed': seed, 'sel_UAR': sel, 'UAR': u, 'WAR': w,
+                        'UAR_listener_visible': uv, 'WAR_listener_visible': wv})
+        print({k: round(v, 2) if isinstance(v, float) else v for k, v in results[-1].items()}, flush=True)
+    torch.cuda.empty_cache()
+
+res = pd.DataFrame(results)
+res.to_csv(f"{OUT_DIR}/g7b_results_per_seed.csv", index=False)
+np.savez(f"{OUT_DIR}/g7b_{EVAL_SPLIT}_probs.npz", sample_id=ev.sample_id.values,
+         **{n.replace('@', '_at_').replace('+', '_'): np.stack(v) for n, v in PROBS.items()})
+print("\n== mean ± std over seeds ==")
+print(res.drop(columns=['seed', 'protocol']).groupby('exp', sort=False).agg(['mean', 'std']).round(2).to_string())
+for prot, ref in G3B_B1_SEED_MEAN.items():
+    got = res[(res.exp == ('B1' if prot == 'inner_dev' else 'B1@val'))].UAR.mean()
+    print(f"reproduction check, B1 ({prot}): seed-mean UAR {got:.2f} vs G3b {ref:.2f}")
+"""),
+    ("markdown", r"""
+## Paired comparisons against B1, subsets and the gate
+"""),
+    ("code", r"""
+def paired_diff_ci(pa, pb, y, src, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    groups = [np.where(src == s)[0] for s in np.unique(src)]
+    d = []
+    for _ in range(n_boot):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        wa, ua = war_uar(pa[idx], y[idx], 7)
+        wb, ub = war_uar(pb[idx], y[idx], 7)
+        d.append((ua - ub, wa - wb))
+    return np.percentile(np.array(d), [2.5, 97.5], axis=0)
+
+
+ENS = {n: np.mean(v, 0).argmax(1) for n, v in PROBS.items()}
+SUBSETS = {'all': np.ones(len(yB), bool), 'listener visible': vis, 'listener not visible': ~vis,
+           'listener in first 80% of III': early, 'listener also seen in I/II': bctx}
+PAIRS = [("B1+faces", "B1"), ("B1+faces_early", "B1"), ("B1+presence", "B1"),
+         ("B1+faces@val", "B1@val"), ("B1+faces_early@val", "B1@val"), ("B1+presence@val", "B1@val")]
+verdict = {}
+for sname, m in SUBSETS.items():
+    print(f"\n== {sname}: n={m.sum()} ==")
+    if m.sum() < 30:
+        print("  too few MCIS, skipped")
+        continue
+    for n in ENS:
+        report(f"  {n}", ENS[n][m], yB[m], src[m])
+    for a, b in PAIRS:
+        lo, hi = paired_diff_ci(ENS[a][m], ENS[b][m], yB[m], src[m])
+        wa, ua = war_uar(ENS[a][m], yB[m], 7); wb, ub = war_uar(ENS[b][m], yB[m], 7)
+        col = 'UAR' if sname == 'all' else ('UAR_listener_visible' if sname == 'listener visible' else None)
+        wins = ""
+        if col:
+            pa = res[res.exp == a].set_index('seed')[col]; pb = res[res.exp == b].set_index('seed')[col]
+            wins = f"({int(((pa - pb) > 0).sum())}/{len(SEEDS)} seeds)"
+            verdict[(sname, a)] = (ua - ub, lo[0], hi[0], int(((pa - pb) > 0).sum()))
+        print(f"  {a:<20} - {b:<7} ΔUAR {ua - ub:+5.2f} [{lo[0]:+5.2f},{hi[0]:+5.2f}] {wins}  "
+              f"ΔWAR {wa - wb:+5.2f} [{lo[1]:+5.2f},{hi[1]:+5.2f}]")
+
+d1 = verdict[('all', 'B1+faces')]
+d2 = verdict[('all', 'B1+faces@val')]
+dp = verdict[('all', 'B1+presence')]
+print("\n== GATE ==")
+print(f"1. B1+faces vs B1 (inner_dev): ΔUAR {d1[0]:+.2f} [{d1[1]:+.2f},{d1[2]:+.2f}], {d1[3]}/{len(SEEDS)} seed wins -> "
+      f"{'PASS' if d1[1] > 0 and d1[3] >= 3 else ('WEAK (positive, CI includes 0)' if d1[0] > 0 else 'FAIL')}")
+print(f"2. B1+faces@val vs B1@val: ΔUAR {d2[0]:+.2f} -> {'PASS' if d2[0] >= 0 else 'FAIL'}")
+print(f"3. presence-only control (inner_dev): ΔUAR {dp[0]:+.2f} -> "
+      f"{'OK (below faces)' if dp[0] < d1[0] else 'CAUTION: presence alone explains the gain'}")
+print("4. listener-visible subset and early-frame arm: see tables above (descriptive)")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
                         ("g4_test_preregistered.ipynb", G4), ("g5_episode_cv.ipynb", G5),
-                        ("g6a_listener_visibility.ipynb", G6A), ("g6b_listener_expression.ipynb", G6B)]:
+                        ("g6a_listener_visibility.ipynb", G6A), ("g6b_listener_expression.ipynb", G6B),
+                        ("g7b_faces_into_b1.ipynb", G7B)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

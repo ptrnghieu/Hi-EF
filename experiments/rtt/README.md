@@ -16,6 +16,8 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g5_episode_cv.ipynb` | G5: preregistered secondary — the primary contrast under 5-fold cross-validation over all 53 episodes (run after G4) |
 | `g6a_listener_visibility.ipynb` | G6a: gate for the listener-aware formulation — face detection + identity clustering on clips I–IV (train+val only) to measure how often B is visible while listening in clip III or spoke in clip I/II, plus annotated montages |
 | `g6b_listener_expression.ipynb` | G6b: does the listener's face in clip III (HSEmotion expression + valence/arousal, clips I–III only) forecast B's emotion beyond A's face? Logistic regressions train → val, overall and on listener-visible MCIS, with an early-frames-only boundary check and the listener identity tracked into clips I/II |
+| `g6c_listener_cv.py` | G6c: re-analysis of the G6b features — zero-shot listener vs A face, balanced logistic regression out-of-fold over all 45 train+val episodes, presence-only control, boundary split |
+| `g7b_faces_into_b1.ipynb` | G7b: B1 + role-grounded face features (A, listener, listener in I/II, dominant faces of I/II) through a zero-initialised branch; early-frame and presence-only arms; both selection protocols, 5 seeds (needs the `role-features` dataset) |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -79,3 +81,16 @@ The test split raises an error unless `UNLOCK_TEST = True`.
   B observable (usable face in III or a voice turn in I/II) 72.1%.
 * The clip I/II speaker is a third person (neither A nor B) in 36.7% / 40.5% of MCIS, so the rule
   "context speaker ≠ A ⇒ B" is only 47% / 40% precise. B must be anchored on the clip-III listener, not on turn-taking.
+
+## G6b / G6c results (train+val only)
+
+* HSEmotion reads Hi-EF faces: zero-shot A face → A label UAR 23.1 (chance 14.3).
+* Zero-shot, same 1,234 MCIS with a visible listener: listener face → B's next label UAR 20.18 vs A face 16.46,
+  ΔUAR +3.72 [+0.60, +7.24] (episode bootstrap over 45 episodes).
+* Balanced LR out-of-fold: A+listener − A = +2.1 / +2.6 / +1.9 UAR on all MCIS (3 fold shuffles), +3.7 / +5.6 / +4.6
+  on listener-visible MCIS; presence/frame-share only gives ≈ 0, so the gain comes from the expression.
+* 51% of listener frames lie in the last 20% of clip III; early-frame-only gains are smaller (+1.1 to +2.2, CI includes 0).
+  Decision: keep the original Hi-EF protocol (clip III is a legal input) and report the early-frame arm descriptively.
+* Adding the listener on top of context faces gains little overall (+0.3) because in 74% of listener-visible MCIS the
+  same person is already in clips I/II; where it is not, +2.3 / +7.7 / +3.8 UAR. The signal is B's own face anywhere
+  in the input, which motivates G7b.

@@ -13,6 +13,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g3_trajectory_forecaster.ipynb` | G3: cross-fitted recognizer gives soft emotion/polarity/confidence for clips I–III; forecaster arms B1, B1+certw, traj_only, B1+traj, B1+traj+certw with paired bootstrap vs B1 |
 | `g3b_robustness.ipynb` | G3b: robustness of `traj_only` — per-fold eval trajectories (no train/eval feature mismatch), 3 recognizer seeds, both selection protocols (inner-dev / val), clip ablation III · II–III · I–III, logistic-regression forecaster, gate summary |
 | `g4_test_preregistered.ipynb` | G4: the single preregistered test run — selection on val, evaluation on test (see below) |
+| `g5_episode_cv.ipynb` | G5: preregistered secondary — the primary contrast under 5-fold cross-validation over all 53 episodes (run after G4) |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -50,3 +51,9 @@ The test split raises an error unless `UNLOCK_TEST = True`.
   recognize-then-transition, majority / Copy-A oracle / Markov oracle.
 * G3b validation evidence: inner-dev ΔUAR +3.32 [+0.62, +5.42] (5/5 seeds); val-selected pair tied
   (26.23 vs 25.77 seed-mean UAR; ensemble ΔUAR −0.62 [−2.98, +2.52]); recognizer-seed spread 1.06 UAR.
+* **Preregistered secondary analysis (G5), added before test access:** the same contrast (`traj_I-III` vs `B1`,
+  both early-stopped on a selection split of 8 episodes) under 5-fold episode-level cross-validation over all 53
+  episodes (outer folds balanced by MCIS count; recognizer cross-fitted inside each outer training set with one seed
+  per inner fold; 3 forecaster seeds). Readout: pooled out-of-fold ΔUAR with 95% bootstrap over episodes, per-fold Δ,
+  and the same numbers on the 45 non-test and the 8 locked-test episodes. **Run order: G4 first, then G5**, because
+  the G5 folds evaluate on locked-test episodes. If G4 and G5 disagree, both are reported.

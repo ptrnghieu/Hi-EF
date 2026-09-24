@@ -1546,9 +1546,241 @@ np.savez(f"{OUT_DIR}/g4_{EVAL_SPLIT}_probs.npz", sample_id=ev.sample_id.values,
 ]
 
 
+# ---------------------------------------------------------------- G5: 53-episode cross-validation
+G5 = [
+    ("markdown", r'''
+# G5 — Episode-level cross-validation over all 53 episodes (preregistered secondary analysis)
+
+The locked test split has only 8 episodes, so G4's estimate is noisy. This notebook repeats the **primary
+contrast** (`traj_I-III` vs `B1`, both early-stopped on a selection split) under 5-fold cross-validation over
+**all 53 episodes**, so that every MCIS is predicted exactly once by models that never saw its episode.
+
+Per outer fold: test = ~1/5 of the episodes (folds balanced by MCIS count), selection = 8 other episodes,
+training = the rest. The trajectory recognizer is cross-fitted *inside* the outer training episodes only.
+
+Reported: pooled out-of-fold UAR/WAR with 95% bootstrap over the 53 episodes, the paired ΔUAR/ΔWAR, the per-fold
+Δ, seed wins, and the same numbers restricted to the 45 non-test episodes and to the 8 locked-test episodes.
+
+**Run this only after G4.** The folds evaluate on the locked-test episodes too, so running G5 first would
+break the blind status of G4. Both flags below must be set by hand.
+'''),
+    ("code", r'''
+# ======== CONFIG ========
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv"
+OUT_DIR = "/kaggle/working"
+
+N_OUTER = 5                 # outer folds over all 53 episodes
+N_SEL_SOURCES = 8           # selection (early-stopping) episodes per outer fold
+N_FOLDS = 5                 # inner cross-fitting folds for the recognizer
+CV_REC_SEEDS = [42]         # recognizer seeds per inner fold (G4 uses 3; 1 keeps G5 affordable)
+SEEDS = [42, 123, 456]      # forecaster seeds per outer fold
+ARMS = [("B1", "B1", (1, 2, 3)), ("traj_I-III", "traj", (1, 2, 3))]
+REC_EPOCHS, FC_EPOCHS, PATIENCE = 60, 50, 8
+REC_BATCH, FC_BATCH = 64, 32
+LR, WEIGHT_DECAY = 1e-4, 1e-5
+POL_WEIGHT = 0.3
+G4_DONE = False             # <- set True only after the single G4 test run has finished
+UNLOCK_TEST = False         # <- and this, since the folds evaluate on locked-test episodes
+'''),
+    ("code", COMMON + r'''
+import torch, torch.nn as nn, torch.nn.functional as F
+from tqdm.auto import tqdm
+
+if not (G4_DONE and UNLOCK_TEST):
+    raise RuntimeError("G5 evaluates on locked-test episodes. Run G4 first, then set G4_DONE = UNLOCK_TEST = True.")
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+ANNOT_CSV = os.path.join(DATASET_DIR, "Hi-EF-20260829T071606Z-1-001", "Hi-EF", "annotation.csv")
+ann, sp = load_tables(ANNOT_CSV, SPLIT_CSV)
+sp['unc_B'] = sp['clip4'].map(lambda c: str(ann.at[c, 8]))
+LOCKED_TEST_EPS = set(sp[sp.split == 'test'].source_folder)
+
+lab = ann[ann[7].notna()].copy()
+lab['ep'] = [c.split('/')[0] for c in lab.index]
+lab['y_e'] = lab[7].map(E2I)
+lab['y_p'] = lab[5].map(lambda p: P2I.get(p, -1))
+lab = lab[lab.y_e.notna()]
+
+# outer folds balanced by MCIS count (greedy, deterministic)
+sizes = sp.groupby('source_folder').size().sort_values(ascending=False)
+OUTER = [[] for _ in range(N_OUTER)]
+load = [0] * N_OUTER
+for ep_, n in sizes.items():
+    f = int(np.argmin(load)); OUTER[f].append(ep_); load[f] += n
+for f in range(N_OUTER):
+    print(f"outer fold {f}: {len(OUTER[f])} episodes, {load[f]} MCIS, locked-test episodes inside: "
+          f"{sorted(set(OUTER[f]) & LOCKED_TEST_EPS)}")
+
+# the feature-loading cell below checks these frames
+train_all, ev = sp, sp
+'''),
+    G3[3], G3[4], G3[6],
+    ("code", r'''
+COL = {1: 'clip1', 2: 'clip2', 3: 'clip3'}
+
+
+def fold_trajectories(tr_eps, ctx):
+    """Cross-fit the recognizer inside tr_eps. Returns (OOF map for tr_eps clips, per-inner-fold maps for ctx)."""
+    global train_all
+    srcs = sorted(tr_eps)
+    shuffled = srcs[:]
+    random.Random(0).shuffle(shuffled)
+    fold_of = {s: i % N_FOLDS for i, s in enumerate(shuffled)}
+    oof = {r: {} for r in CV_REC_SEEDS}
+    evp = {r: [None] * N_FOLDS for r in CV_REC_SEEDS}
+    for k in range(N_FOLDS):
+        held = [s for s in srcs if fold_of[s] == k]
+        rest = [s for s in srcs if fold_of[s] != k]
+        rdev = sorted(random.Random(100 + k).sample(rest, 4))
+        fit = [s for s in rest if s not in rdev]
+        held_clips = sorted(set(train_all[train_all.source_folder.isin(held)][['clip1', 'clip2', 'clip3']].values.ravel()))
+        for r in CV_REC_SEEDS:
+            model, _ = train_recognizer(fit, rdev, r + 1000 * k)
+            pe, pp = rec_predict(model, held_clips)
+            oof[r].update({c: (pe[i], pp[i]) for i, c in enumerate(held_clips)})
+            evp[r][k] = rec_predict(model, ctx)
+            del model
+            torch.cuda.empty_cache()
+    clips = sorted(oof[CV_REC_SEEDS[0]])
+    tmap = dict(zip(clips, rec_vector(np.mean([np.stack([oof[r][c][0] for c in clips]) for r in CV_REC_SEEDS], 0),
+                                      np.mean([np.stack([oof[r][c][1] for c in clips]) for r in CV_REC_SEEDS], 0))))
+    versions = [dict(zip(ctx, rec_vector(np.mean([evp[r][k][0] for r in CV_REC_SEEDS], 0),
+                                         np.mean([evp[r][k][1] for r in CV_REC_SEEDS], 0)))) for k in range(N_FOLDS)]
+    return tmap, versions
+
+
+def tensors(d, clips, tmap):
+    vals = d[[COL[c] for c in clips]].values
+    idx = torch.tensor([[CIDX[c] for c in r] for r in vals], device=DEVICE)
+    rec = (torch.zeros(len(d), len(clips), N_REC, device=DEVICE) if tmap is None else
+           torch.tensor(np.stack([np.stack([tmap[c] for c in r]) for r in vals]), device=DEVICE))
+    return idx, rec, torch.tensor(d.yB.values, device=DEVICE)
+
+
+def fc_predict(model, T, bs=256):
+    model.eval()
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(T[0]), bs):
+            out.append(F.softmax(model(T[0][i:i + bs], T[1][i:i + bs]), -1).cpu())
+    return torch.cat(out).numpy()
+
+
+def predict_avg(model, T_list):
+    return np.mean([fc_predict(model, T) for T in T_list], 0)
+
+
+def train_eval(arm, clips, seed, tr, sel, te, tmap, versions):
+    seed_all(seed)
+    traj = arm == 'traj'
+    T_tr = tensors(tr, clips, tmap if traj else None)
+    T_sel = [tensors(sel, clips, v if traj else None) for v in (versions if traj else [None])]
+    T_te = [tensors(te, clips, v if traj else None) for v in (versions if traj else [None])]
+    model = Forecaster(use_raw=not traj, use_traj=traj, positions=tuple(c - 1 for c in clips)).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    idx, rec, y = T_tr
+    y_sel = sel.yB.values
+    best, best_state, bad = -1, None, 0
+    for ep in range(FC_EPOCHS):
+        model.train()
+        perm = torch.randperm(len(y), device=DEVICE)
+        for i in range(0, len(perm), FC_BATCH):
+            j = perm[i:i + FC_BATCH]
+            loss = F.cross_entropy(model(idx[j], rec[j]), y[j])
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(predict_avg(model, T_sel).argmax(1), y_sel, 7)[1]
+        if u > best:
+            best, bad = u, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= PATIENCE:
+                break
+    model.load_state_dict(best_state)
+    return predict_avg(model, T_te)
+'''),
+    ("markdown", r'''
+## Outer loop
+'''),
+    ("code", r'''
+OOF_P = {name: np.zeros((len(SEEDS), len(sp), 7), dtype=np.float32) for name, _, _ in ARMS}
+fold_rows = []
+row_of = {s: i for i, s in enumerate(sp.sample_id)}
+for f in range(N_OUTER):
+    test_eps = OUTER[f]
+    rest = sorted(set(sp.source_folder) - set(test_eps))
+    sel_eps = sorted(random.Random(10 + f).sample(rest, N_SEL_SOURCES))
+    tr_eps = [s for s in rest if s not in sel_eps]
+    train_all = sp[sp.source_folder.isin(tr_eps)].reset_index(drop=True)
+    sel = sp[sp.source_folder.isin(sel_eps)].reset_index(drop=True)
+    te = sp[sp.source_folder.isin(test_eps)].reset_index(drop=True)
+    assert not (set(train_all.source_folder) & set(te.source_folder)) and not (set(sel.source_folder) & set(te.source_folder))
+    ctx = sorted(set(sel[['clip1', 'clip2', 'clip3']].values.ravel()) | set(te[['clip1', 'clip2', 'clip3']].values.ravel()))
+    tmap, versions = fold_trajectories(tr_eps, ctx)
+    rows = [row_of[s] for s in te.sample_id]
+    for name, arm, clips in ARMS:
+        for si, seed in enumerate(SEEDS):
+            p = train_eval(arm, clips, seed, train_all, sel, te, tmap, versions)
+            OOF_P[name][si, rows] = p
+            w, u = war_uar(p.argmax(1), te.yB.values, 7)
+            fold_rows.append({'fold': f, 'arm': name, 'seed': seed, 'UAR': u, 'WAR': w, 'n': len(te)})
+            print(fold_rows[-1])
+    torch.cuda.empty_cache()
+fold_df = pd.DataFrame(fold_rows)
+fold_df.to_csv(f"{OUT_DIR}/g5_fold_results.csv", index=False)
+np.savez(f"{OUT_DIR}/g5_oof_probs.npz", sample_id=sp.sample_id.values, **{k.replace('-', '_'): v for k, v in OOF_P.items()})
+'''),
+    ("markdown", r'''
+## Pooled results
+'''),
+    ("code", r'''
+y_all, src_all = sp.yB.values, sp.source_folder.values
+PRED = {n: OOF_P[n].mean(0).argmax(1) for n in OOF_P}
+a, b = "traj_I-III", "B1"
+
+
+def pooled(mask, label):
+    y, src = y_all[mask], src_all[mask]
+    print(f"\n== {label}: {mask.sum()} MCIS, {len(np.unique(src))} episodes ==")
+    for n in PRED:
+        report(n, PRED[n][mask], y, src)
+    rng = np.random.default_rng(0)
+    groups = [np.where(src == s)[0] for s in np.unique(src)]
+    d = []
+    for _ in range(2000):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        wa, ua = war_uar(PRED[a][mask][idx], y[idx], 7); wb, ub = war_uar(PRED[b][mask][idx], y[idx], 7)
+        d.append((ua - ub, wa - wb))
+    lo, hi = np.percentile(np.array(d), [2.5, 97.5], axis=0)
+    wa, ua = war_uar(PRED[a][mask], y, 7); wb, ub = war_uar(PRED[b][mask], y, 7)
+    eps = sum(war_uar(PRED[a][mask][src == s], y[src == s], 7)[0] > war_uar(PRED[b][mask][src == s], y[src == s], 7)[0]
+              for s in np.unique(src))
+    print(f"{a} - {b}: ΔUAR {ua - ub:+.2f} [{lo[0]:+.2f},{hi[0]:+.2f}]  ΔWAR {wa - wb:+.2f} [{lo[1]:+.2f},{hi[1]:+.2f}]  "
+          f"episodes won (WAR) {eps}/{len(np.unique(src))}")
+    return ua - ub, lo[0]
+
+
+d_all, lo_all = pooled(np.ones(len(sp), bool), "all 53 episodes (primary CV readout)")
+pooled(~sp.source_folder.isin(LOCKED_TEST_EPS).values, "45 non-test episodes")
+pooled(sp.source_folder.isin(LOCKED_TEST_EPS).values, "8 locked-test episodes (compare with G4)")
+
+per_fold = fold_df.groupby(['fold', 'arm']).UAR.mean().unstack()
+per_fold['Δ'] = per_fold[a] - per_fold[b]
+print("\n== per outer fold (seed-mean UAR) ==")
+print(per_fold.round(2).to_string())
+seed_wins = (fold_df[fold_df.arm == a].set_index(['fold', 'seed']).UAR >
+             fold_df[fold_df.arm == b].set_index(['fold', 'seed']).UAR).sum()
+print(f"(fold, seed) pairs won by {a}: {seed_wins}/{len(SEEDS) * N_OUTER}")
+print("\nCV VERDICT:", "CONFIRMED" if d_all > 0 and lo_all > 0 else ("DIRECTIONAL (CI includes 0)" if d_all > 0 else "NOT CONFIRMED"))
+'''),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
-                        ("g4_test_preregistered.ipynb", G4)]:
+                        ("g4_test_preregistered.ipynb", G4), ("g5_episode_cv.ipynb", G5)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

@@ -130,3 +130,34 @@ The test split raises an error unless `UNLOCK_TEST = True`.
   mouth–audio sync quality, split identities.
 * Not changed yet: the State–Transition head. The debate recommends a staged, cross-fitted, log-linear version with two
   paths (persistence, reaction to A). It is built only if the G8b diagnostics and results support it.
+
+## G8b results (5-fold CV over the 45 train+val episodes, 2,421 MCIS, 3 seeds; test untouched)
+
+**Diagnostics:**
+- Split identities are rare: the A-vs-L centroid cosine has a median of 0.01 and only 0.8% of values fall in [0.30, 0.45).
+- Mouth–audio sync is a weak cue (AUC 0.613).
+- Emotional persistence (clip-IV voice, analysis only):
+  - clip II: P(y_IV = y_II) is 50.6% when B spoke, 45.2% when a third person spoke, and about 35% when A spoke; B vs others Δ +8.4 [−0.5, +16.5];
+  - clip I: 43.0 / 42.6 / ~35%.
+
+**Main results:** seed ensemble, ΔUAR with 95% episode bootstrap. "LA" means scored with one post-hoc logit adjustment. The 6-class column is macro-recall without fear (fear has 32 examples; one extra fear hit is worth 0.45 UAR).
+
+| Contrast | LA, 7-class | LA, 6-class | plain, 7-class |
+|---|---|---|---|
+| **RoleNet − B1 (primary)** | **+4.83 [+2.40, +7.13]**, positive in 5/5 folds | +6.16 [+4.02, +7.96] | +4.44 [+2.64, +6.08] |
+| RoleNet − LateFusion | +3.15 [+0.97, +5.31] | +4.20 [+2.07, +6.18] | +2.13 [+0.78, +3.35] |
+| B1+faces-joint − B1 | +3.66 [+0.39, +6.85]* | +0.10 [−2.08, +2.07] | +0.51 [−1.38, +2.30] |
+| RoleNet − RoleNet-noRole | −1.14 [−3.13, +1.19]* | +0.75 [−0.78, +2.24] | +1.17 [−0.01, +2.29] |
+| RoleNet − RoleNet-noBalance | −0.02 | +1.02 [−0.85, +2.90] | +0.78 [−0.58, +2.06] |
+| facesOnly − ctxOnly | +3.05 [+0.68, +5.70] | +3.04 [+0.80, +5.26] | +2.98 [+1.25, +4.65] |
+
+\* Fear-driven: B1+faces-joint gets 10/32 fear hits, noRole 5, RoleNet 1.
+
+**Subsets:** RoleNet − B1 (LA) is +5.91 [+3.00, +8.88] where the listener is visible in clip III (n = 1,451) and +2.41 [−1.19, +6.03] where it is not (n = 970).
+
+**Reading:**
+- The compact role/expression model beats B1 and late fusion robustly.
+- Joint face training inside B1 does not help.
+- Faces carry more signal than the compact context.
+- The specific contribution of role assignment (about +1) and of the balance aids (about +1) is not established; per-fold 6-class Δ for role is −2.0 / +1.2 / +5.3 / −3.0 / +3.2.
+- CV results are exploratory, because the design was informed by analyses on the same episodes. The hyper-parameters and the primary contrast were fixed before the run.

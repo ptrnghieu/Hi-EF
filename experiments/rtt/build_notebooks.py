@@ -1809,9 +1809,12 @@ Gate: B observable (usable listening face or previous-turn voice) in ≥ 40–50
 (face and voice) are right in ≥ 80% of the cases where they fire. Results are split into two-person and multi-person scenes.
 '''),
     ("code", r'''
-# Kaggle ships the CPU build of onnxruntime, which shadows onnxruntime-gpu -> remove it first
+# insightface can pull the CPU build of onnxruntime, which overwrites onnxruntime-gpu (same package dir).
+# Install it first, then remove every onnxruntime build, then install the GPU build last.
+!pip install -q insightface speechbrain
 !pip uninstall -y -q onnxruntime onnxruntime-gpu
-!pip install -q onnxruntime-gpu insightface speechbrain
+!pip install -q onnxruntime-gpu
+!pip list 2>/dev/null | grep -i onnxruntime
 '''),
     ("code", r'''
 # ======== CONFIG ========
@@ -1876,8 +1879,14 @@ missing = [c for c in clips if video_path(c) is None]
 print(f"MCIS {len(sp)} | unique clips {len(clips)} | clips without video {len(missing)}", missing[:5])
 '''),
     ("code", r'''
+import torch  # loads the CUDA/cuDNN libraries that onnxruntime-gpu can reuse
 import onnxruntime as ort
-ON_GPU = 'CUDAExecutionProvider' in ort.get_available_providers()
+if hasattr(ort, 'preload_dlls'):
+    try:
+        ort.preload_dlls()
+    except Exception as e:
+        print("preload_dlls:", e)
+ON_GPU = 'CUDAExecutionProvider' in ort.get_available_providers() and torch.cuda.is_available()
 print("onnxruntime providers:", ort.get_available_providers())
 if not ON_GPU:
     # CPU fallback: keep the run to a manageable size instead of silently running for hours
@@ -1892,7 +1901,8 @@ if not ON_GPU:
 from insightface.app import FaceAnalysis
 app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition', 'landmark_3d_68'],
                    providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
-app.prepare(ctx_id=0, det_size=DET_SIZE)
+app.prepare(ctx_id=0 if ON_GPU else -1, det_size=DET_SIZE)
+print("providers actually used:", {k: m.session.get_providers() for k, m in app.models.items()})
 
 
 def read_frames(path):

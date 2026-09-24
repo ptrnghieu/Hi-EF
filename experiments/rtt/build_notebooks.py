@@ -1380,14 +1380,17 @@ _T = {}
 
 
 def make_T(rows_name, d, clips, tmap, key):
-    k = (rows_name, clips, key)
+    # the cache key must say whether a trajectory is attached: raw arms store an all-zero trajectory
+    k = (rows_name, clips, key, tmap is not None)
     if k not in _T:
         vals = d[[COL[c] for c in clips]].values
         idx = torch.tensor([[CIDX[c] for c in r] for r in vals], device=DEVICE)
         rec = (torch.zeros(len(d), len(clips), N_REC, device=DEVICE) if tmap is None else
                torch.tensor(np.stack([np.stack([tmap[c] for c in r]) for r in vals]), device=DEVICE))
         _T[k] = (idx, rec, torch.tensor(d.yB.values, device=DEVICE))
-    return _T[k]
+    out = _T[k]
+    assert (tmap is None) == bool((out[1] == 0).all()), f"trajectory tensor mismatch for {k}"
+    return out
 
 
 def fc_predict(model, T, bs=256):

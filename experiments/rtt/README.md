@@ -57,3 +57,14 @@ The test split raises an error unless `UNLOCK_TEST = True`.
   per inner fold; 3 forecaster seeds). Readout: pooled out-of-fold ΔUAR with 95% bootstrap over episodes, per-fold Δ,
   and the same numbers on the 45 non-test and the 8 locked-test episodes. **Run order: G4 first, then G5**, because
   the G5 folds evaluate on locked-test episodes. If G4 and G5 disagree, both are reported.
+
+## Test-run log
+
+* **G4 run 1 (invalid for trajectory arms):** a cache-key bug in `make_T` let the trajectory arms reuse the all-zero
+  trajectory tensor built for the raw arm with the same clips, so `traj_I-III@val`, `traj_I-III` and `traj_I-II@val`
+  were trained on constant inputs (val UAR 16.05 vs 26.23 for the identical configuration in G3b). Rows without a
+  preceding raw arm on the same clips (`B1@val`, `B0@val`, `B1`, `traj_II-III@val`, `traj_III@val`, LR, RtT, references)
+  were unaffected and reproduced G3b's validation numbers exactly.
+* **Fix:** the cache key now records whether a trajectory is attached, and an assertion checks the tensor. No method,
+  hyper-parameter, seed or selection change. G4 is re-run once with the fix; the fixed `traj_I-III@val` must reproduce
+  G3b's validation UAR (26.23 seed mean) before its test number is read. Both runs are reported.

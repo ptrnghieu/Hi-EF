@@ -10,9 +10,10 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `cheap_baselines.py` | Majority, Copy-A, Markov (gold A) and TF-IDF baselines, train → val, source-bootstrap CIs |
 | `g1_llm_recognition.ipynb` | G1: an OpenAI LLM reads subtitle lines I–III, predicts A's emotion/polarity and B directly; A posterior → `P(B \| E_A)` |
 | `g2_recognizer_all_labels.ipynb` | G2: multimodal A recognizer trained on clip III only vs. all labeled clips (III ∪ IV), 5 seeds; A posterior → `P(B \| E_A)` |
-| `build_notebooks.py` | Regenerates both notebooks |
+| `g3_trajectory_forecaster.ipynb` | G3: cross-fitted recognizer gives soft emotion/polarity/confidence for clips I–III; forecaster arms B1, B1+certw, traj_only, B1+traj, B1+traj+certw with paired bootstrap vs B1 |
+| `build_notebooks.py` | Regenerates the notebooks |
 
-All three use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
+All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
 The test split raises an error unless `UNLOCK_TEST = True`.
 
 ## Running on Kaggle
@@ -28,3 +29,6 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 * G2: arm `ALL` beats arm `III` on A recognition UAR, across seeds.
 * Either gate passing → the RtT forecast should move toward the oracle (≈28 UAR / ≈40 WAR);
   it must beat B1 (24.65 / 35.79) with a source-bootstrap CI that excludes zero before the test split is opened.
+* G3: `B1+traj` (or `B1+traj+certw`) beats `B1` with a paired source-bootstrap CI on ΔUAR that excludes zero
+  and wins on most seeds. Early stopping uses inner-dev training episodes, so G3's B1 is not numerically
+  identical to the report's B1 (selected on val); compare arms within G3.

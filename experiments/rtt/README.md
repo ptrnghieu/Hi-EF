@@ -12,6 +12,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g2_recognizer_all_labels.ipynb` | G2: multimodal A recognizer trained on clip III only vs. all labeled clips (III ∪ IV), 5 seeds; A posterior → `P(B \| E_A)` |
 | `g3_trajectory_forecaster.ipynb` | G3: cross-fitted recognizer gives soft emotion/polarity/confidence for clips I–III; forecaster arms B1, B1+certw, traj_only, B1+traj, B1+traj+certw with paired bootstrap vs B1 |
 | `g3b_robustness.ipynb` | G3b: robustness of `traj_only` — per-fold eval trajectories (no train/eval feature mismatch), 3 recognizer seeds, both selection protocols (inner-dev / val), clip ablation III · II–III · I–III, logistic-regression forecaster, gate summary |
+| `g4_test_preregistered.ipynb` | G4: the single preregistered test run — selection on val, evaluation on test (see below) |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -36,3 +37,16 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 * G3b: (1) `traj_I-III` beats `B1` under inner-dev selection with a paired CI on ΔUAR above zero,
   (2) `traj_I-III@val` is at least as good as `B1@val` (report protocol), (3) recognizer-seed spread of
   `traj_I-III` UAR ≤ 1.5 points. Only after this gate is the test split opened, once, for a preregistered set of models.
+
+## Preregistered test plan (frozen after G3b, before any test access)
+
+* **Method:** `traj_I-III` — forecaster on the soft trajectory of clips I–III (emotion + polarity posteriors,
+  max-prob, entropy per clip) from a recognizer cross-fitted over training episodes (5 folds × 3 seeds, seed
+  posteriors averaged; evaluation rows predicted once per fold model, predictions averaged). Early stopping on val.
+* **Primary contrast:** `traj_I-III@val` − `B1@val` on test, ΔUAR of the 5-seed ensemble, 95% paired bootstrap over
+  test episodes. Confirmed if ΔUAR > 0 with CI lower bound > 0; directional if ΔUAR > 0 with CI including 0.
+* **Secondary (descriptive):** ΔWAR, macro-F1, certain-label rows, per-episode wins, inner-dev pair, A's contribution
+  (`traj_I-III@val` vs `traj_I-II@val`, `B1@val` vs `B0@val`), clip ablation, logistic regression, deployable
+  recognize-then-transition, majority / Copy-A oracle / Markov oracle.
+* G3b validation evidence: inner-dev ΔUAR +3.32 [+0.62, +5.42] (5/5 seeds); val-selected pair tied
+  (26.23 vs 25.77 seed-mean UAR; ensemble ΔUAR −0.62 [−2.98, +2.52]); recognizer-seed spread 1.06 UAR.

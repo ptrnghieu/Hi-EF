@@ -736,9 +736,10 @@ N_REC = 12   # 7 emotion probs + 3 polarity probs + max prob + entropy
 
 
 class Forecaster(nn.Module):
-    def __init__(self, use_raw=True, use_traj=False, d=512):
+    def __init__(self, use_raw=True, use_traj=False, d=512, positions=None):
         super().__init__()
         self.use_raw, self.use_traj = use_raw, use_traj
+        self.positions = positions   # clip positions (0=I, 1=II, 2=III); None = the last n clips
         self.enc = ClipEncoder(d) if use_raw else None
         self.traj = nn.Sequential(nn.LayerNorm(N_REC), nn.Linear(N_REC, d), nn.GELU(), nn.Linear(d, d)) if use_traj else None
         self.clip_pos = nn.Parameter(torch.randn(1, 3, d) * 0.02)
@@ -756,7 +757,8 @@ class Forecaster(nn.Module):
             tok = self.enc(flat).reshape(B, n, -1)
         if self.use_traj:
             tok = tok + self.traj(rec)
-        h = self.inter(tok + self.clip_pos[:, 3 - n:])   # last n positions: clip III is always position 3
+        pos = self.clip_pos[:, list(self.positions)] if self.positions is not None else self.clip_pos[:, 3 - n:]
+        h = self.inter(tok + pos)
         return self.head(h.mean(1))
 '''),
     ("markdown", r'''
@@ -1264,8 +1266,289 @@ print("4. clip ablation: see traj_II-III / traj_III rows above (negative Δ = ea
 ]
 
 
+# ---------------------------------------------------------------- G4: preregistered test evaluation
+G4 = [
+    ("markdown", r'''
+# G4 — Preregistered test evaluation (run once)
+
+**Frozen method.** `traj_I-III`: a forecaster on the soft affective trajectory of clips I–III (per clip: emotion
+posterior, polarity posterior, max-prob, entropy) produced by a recognizer cross-fitted over training episodes
+(5 folds × 3 seeds, seed posteriors averaged; evaluation rows are predicted once per fold model and the
+predictions averaged). Early stopping on the validation split.
+
+**Primary contrast (decided before opening test).** `traj_I-III@val` − `B1@val` on **test**, ΔUAR of the
+5-seed ensemble, 95% paired bootstrap over test episodes.
+*Confirmed* if ΔUAR > 0 and the CI lower bound > 0; *directional* if ΔUAR > 0 but the CI includes 0;
+otherwise *not confirmed*.
+
+**Secondary (descriptive, no selection):** ΔWAR, macro-F1, rows with a *certain* B label, per-episode wins,
+inner-dev-selected pair (`traj_I-III` vs `B1`), whether A adds information (`traj_I-III@val` vs `traj_I-II@val`,
+`B1@val` vs `B0@val`), clip ablation (III, II–III), logistic regression on the trajectory, deployable
+recognize-then-transition, and label-only references (majority, Copy-A oracle, Markov oracle).
+
+Nothing in this notebook is tuned on test. `UNLOCK_TEST` must be switched on by hand.
+'''),
+    ("code", r'''
+# ======== CONFIG ========
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv"
+OUT_DIR = "/kaggle/working"
+
+SEEDS = [42, 123, 456, 789, 1024]
+REC_SEEDS = [42, 123, 456]
+N_FOLDS = 5
+N_INNER_DEV_SOURCES = 5
+REC_EPOCHS, FC_EPOCHS, PATIENCE = 60, 50, 8
+REC_BATCH, FC_BATCH = 64, 32
+LR, WEIGHT_DECAY = 1e-4, 1e-5
+POL_WEIGHT = 0.3
+CERT_WEIGHTS = {'1': 1.0, '2': 0.75, '3': 0.5}
+
+EXPERIMENTS = [   # (name, arm, clips, trajectory, protocol)
+    ("B1@val",          "B1",   (1, 2, 3), None,  "val"),        # primary baseline
+    ("traj_I-III@val",  "traj", (1, 2, 3), "avg", "val"),        # primary method
+    ("B0@val",          "B1",   (1, 2),    None,  "val"),
+    ("traj_I-II@val",   "traj", (1, 2),    "avg", "val"),
+    ("traj_II-III@val", "traj", (2, 3),    "avg", "val"),
+    ("traj_III@val",    "traj", (3,),      "avg", "val"),
+    ("B1",              "B1",   (1, 2, 3), None,  "inner_dev"),
+    ("traj_I-III",      "traj", (1, 2, 3), "avg", "inner_dev"),
+]
+PRIMARY = ("traj_I-III@val", "B1@val")
+SECONDARY = [("traj_I-III", "B1"), ("traj_I-III@val", "traj_I-II@val"), ("B1@val", "B0@val"),
+             ("traj_I-III@val", "traj_III@val"), ("traj_I-III@val", "traj_II-III@val"),
+             ("traj_I-III@val", "LR_traj_I-III"), ("traj_I-III@val", "RtT_soft")]
+SEL_SPLIT = "val"
+EVAL_SPLIT = "test"
+UNLOCK_TEST = False        # <- set to True by hand for the single preregistered run
+'''),
+    G3[2],
+    ("code", r'''
+sv = sp[sp.split == SEL_SPLIT].reset_index(drop=True)
+sv['unc_B'] = sv['clip4'].map(lambda c: str(ann.at[c, 8]))
+assert set(sv.source_folder).isdisjoint(ev.source_folder) and set(train_all.source_folder).isdisjoint(ev.source_folder)
+print(f"selection split '{SEL_SPLIT}': {len(sv)} MCIS / {sv.source_folder.nunique()} episodes | "
+      f"evaluation split '{EVAL_SPLIT}': {len(ev)} MCIS / {ev.source_folder.nunique()} episodes")
+print("PRIMARY:", PRIMARY)
+T, TP = transition_tables(train_all)   # P(B | E_A) from training labels, for the reference rows
+'''),
+    G3[3], G3[4], G3[6],
+    ("markdown", r'''
+## Stage 1 — cross-fitted recognizers (trajectories for train OOF, selection and evaluation rows)
+'''),
+    ("code", r'''
+ctx = sorted(set(sv[['clip1', 'clip2', 'clip3']].values.ravel()) | set(ev[['clip1', 'clip2', 'clip3']].values.ravel()))
+OOF = {r: {} for r in REC_SEEDS}
+EVP = {r: [None] * N_FOLDS for r in REC_SEEDS}
+for k in range(N_FOLDS):
+    held = [s for s in train_sources if FOLD_OF[s] == k]
+    rest = [s for s in train_sources if FOLD_OF[s] != k]
+    rdev = sorted(random.Random(100 + k).sample(rest, 4))
+    fit = [s for s in rest if s not in rdev]
+    held_clips = sorted(set(train_all[train_all.source_folder.isin(held)][['clip1', 'clip2', 'clip3']].values.ravel()))
+    for r in REC_SEEDS:
+        model, dev_uar = train_recognizer(fit, rdev, r + 1000 * k)
+        pe, pp = rec_predict(model, held_clips)
+        OOF[r].update({c: (pe[i], pp[i]) for i, c in enumerate(held_clips)})
+        EVP[r][k] = rec_predict(model, ctx)
+        print(f"fold {k} seed {r}: recognizer inner-dev UAR {dev_uar:.2f}")
+        del model
+        torch.cuda.empty_cache()
+
+clips_tr = sorted(OOF[REC_SEEDS[0]])
+pe = np.mean([np.stack([OOF[r][c][0] for c in clips_tr]) for r in REC_SEEDS], 0)
+pp = np.mean([np.stack([OOF[r][c][1] for c in clips_tr]) for r in REC_SEEDS], 0)
+TRAIN_MAP = dict(zip(clips_tr, rec_vector(pe, pp)))
+VERSIONS = [dict(zip(ctx, rec_vector(np.mean([EVP[r][k][0] for r in REC_SEEDS], 0),
+                                     np.mean([EVP[r][k][1] for r in REC_SEEDS], 0)))) for k in range(N_FOLDS)]
+for name, d in [('train OOF', train_all), (SEL_SPLIT, sv), (EVAL_SPLIT, ev)]:
+    if name == 'train OOF':
+        u = war_uar(np.stack([TRAIN_MAP[c][:7] for c in d.clip3]).argmax(1), d.yA, 7)[1]
+    else:
+        u = war_uar(np.mean([np.stack([v[c][:7] for c in d.clip3]) for v in VERSIONS], 0).argmax(1), d.yA, 7)[1]
+    print(f"clip-III recognition UAR on {name}: {u:.2f}")
+'''),
+    ("markdown", r'''
+## Stage 2 — forecasters (selection on val, evaluation on test)
+'''),
+    ("code", r'''
+fc_train = train_all[~train_all.source_folder.isin(inner_dev_sources)].reset_index(drop=True)
+fc_dev = train_all[train_all.source_folder.isin(inner_dev_sources)].reset_index(drop=True)
+COL = {1: 'clip1', 2: 'clip2', 3: 'clip3'}
+_T = {}
+
+
+def make_T(rows_name, d, clips, tmap, key):
+    k = (rows_name, clips, key)
+    if k not in _T:
+        vals = d[[COL[c] for c in clips]].values
+        idx = torch.tensor([[CIDX[c] for c in r] for r in vals], device=DEVICE)
+        rec = (torch.zeros(len(d), len(clips), N_REC, device=DEVICE) if tmap is None else
+               torch.tensor(np.stack([np.stack([tmap[c] for c in r]) for r in vals]), device=DEVICE))
+        _T[k] = (idx, rec, torch.tensor(d.yB.values, device=DEVICE))
+    return _T[k]
+
+
+def fc_predict(model, T, bs=256):
+    model.eval()
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(T[0]), bs):
+            out.append(F.softmax(model(T[0][i:i + bs], T[1][i:i + bs]), -1).cpu())
+    return torch.cat(out).numpy()
+
+
+def predict_avg(model, T_list):
+    return np.mean([fc_predict(model, T) for T in T_list], 0)
+
+
+def train_forecaster(arm, clips, protocol, seed):
+    seed_all(seed)
+    traj = arm == 'traj'
+    tr_rows, tr_name = (train_all, 'train_all') if protocol == 'val' else (fc_train, 'fc_train')
+    T_tr = make_T(tr_name, tr_rows, clips, TRAIN_MAP if traj else None, 'train')
+    evl = lambda name, d: [make_T(name, d, clips, v if traj else None, f'fold{k}' if traj else 'raw')
+                           for k, v in enumerate(VERSIONS if traj else [None])]
+    T_sv, T_ev = evl('sv', sv), evl('ev', ev)
+    T_sel = T_sv if protocol == 'val' else [make_T('fc_dev', fc_dev, clips, TRAIN_MAP if traj else None, 'train')]
+    model = Forecaster(use_raw=not traj, use_traj=traj, positions=tuple(c - 1 for c in clips)).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    idx, rec, y = T_tr
+    y_sel = T_sel[0][2].cpu().numpy()
+    best, best_state, bad = -1, None, 0
+    for ep in range(FC_EPOCHS):
+        model.train()
+        perm = torch.randperm(len(y), device=DEVICE)
+        for i in range(0, len(perm), FC_BATCH):
+            j = perm[i:i + FC_BATCH]
+            loss = F.cross_entropy(model(idx[j], rec[j]), y[j])
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        sel_uar = war_uar(predict_avg(model, T_sel).argmax(1), y_sel, 7)[1]
+        if sel_uar > best:
+            best, bad = sel_uar, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= PATIENCE:
+                break
+    model.load_state_dict(best_state)
+    return predict_avg(model, T_ev), predict_avg(model, T_sv), best
+
+
+yT, srcT, certT = ev.yB.values, ev.source_folder.values, (ev.unc_B == '1').values
+yV = sv.yB.values
+runs, PT, PV = [], {}, {}
+for name, arm, clips, _, protocol in EXPERIMENTS:
+    PT[name], PV[name] = [], []
+    for seed in SEEDS:
+        pt, pv, sel = train_forecaster(arm, clips, protocol, seed)
+        PT[name].append(pt); PV[name].append(pv)
+        wt, ut = war_uar(pt.argmax(1), yT, 7)
+        wv, uv = war_uar(pv.argmax(1), yV, 7)
+        runs.append({'exp': name, 'seed': seed, 'sel_UAR': sel, 'test_UAR': ut, 'test_WAR': wt, 'val_UAR': uv, 'val_WAR': wv})
+        print({k: round(v, 2) if isinstance(v, float) else v for k, v in runs[-1].items()})
+    torch.cuda.empty_cache()
+runs = pd.DataFrame(runs)
+runs.to_csv(f"{OUT_DIR}/g4_runs_per_seed.csv", index=False)
+print(runs.drop(columns='seed').groupby('exp', sort=False).agg(['mean', 'std']).round(2).to_string())
+'''),
+    ("markdown", r'''
+## Label-only references, deployable recognize-then-transition, logistic regression
+'''),
+    ("code", r'''
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+
+PRED = {n: np.mean(v, 0).argmax(1) for n, v in PT.items()}          # seed-ensemble predictions on test
+PRED['Majority'] = np.full(len(ev), np.bincount(train_all.yB, minlength=7).argmax())
+PRED['[oracle] Copy-A'] = ev.yA.values
+PRED['[oracle] Markov P(B|E_A)'] = rtt_forecast(np.eye(7)[ev.yA.values], T)[0]
+pA_test = np.mean([np.stack([v[c][:7] for c in ev.clip3]) for v in VERSIONS], 0)
+PRED['RtT_hard'], PRED['RtT_soft'], _ = rtt_forecast(pA_test, T)
+
+Xtr = np.hstack([np.stack([TRAIN_MAP[c] for c in train_all[COL[k]]]) for k in (1, 2, 3)])
+best = None
+for C in [0.01, 0.03, 0.1, 0.3, 1, 3]:
+    s = [war_uar(LogisticRegression(max_iter=3000, C=C).fit(Xtr[a], train_all.yB.values[a]).predict(Xtr[b]),
+                 train_all.yB.values[b], 7)[1]
+         for a, b in GroupKFold(5).split(Xtr, train_all.yB, train_all.source_folder)]
+    if best is None or np.mean(s) > best[0]:
+        best = (np.mean(s), C)
+clf = LogisticRegression(max_iter=3000, C=best[1]).fit(Xtr, train_all.yB.values)
+PRED['LR_traj_I-III'] = np.mean([clf.predict_proba(np.hstack([np.stack([v[c] for c in ev[COL[k]]]) for k in (1, 2, 3)]))
+                                 for v in VERSIONS], 0).argmax(1)
+print(f"LR C={best[1]}")
+'''),
+    ("markdown", r'''
+## Results
+'''),
+    ("code", r'''
+from sklearn.metrics import f1_score
+
+
+def paired(a, b, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    groups = [np.where(srcT == s)[0] for s in np.unique(srcT)]
+    d = []
+    for _ in range(n_boot):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        wa, ua = war_uar(PRED[a][idx], yT[idx], 7); wb, ub = war_uar(PRED[b][idx], yT[idx], 7)
+        d.append((ua - ub, wa - wb))
+    return np.percentile(np.array(d), [2.5, 97.5], axis=0)
+
+
+rows = []
+print(f"== {EVAL_SPLIT}: seed-ensemble (trained models) / deterministic references, 95% episode-bootstrap CI ==")
+for n, p in PRED.items():
+    r = report(n, p, yT, srcT)
+    r['macroF1'] = f1_score(yT, p, average='macro', labels=list(range(7)), zero_division=0) * 100
+    r['WAR_certain'], r['UAR_certain'] = war_uar(p[certT], yT[certT], 7)
+    if n in PT:
+        per = runs[runs.exp == n]
+        r['UAR_seed_mean'], r['UAR_seed_std'] = per.test_UAR.mean(), per.test_UAR.std()
+        r['val_UAR_seed_mean'] = per.val_UAR.mean()
+    rows.append(r)
+summary = pd.DataFrame(rows).set_index('name').round(2)
+summary.to_csv(f"{OUT_DIR}/g4_test_summary.csv")
+print(summary[['UAR', 'WAR', 'macroF1', 'UAR_certain', 'WAR_certain', 'UAR_seed_mean', 'UAR_seed_std', 'val_UAR_seed_mean']].to_string())
+
+print("\n== per-episode WAR (test) ==")
+print(pd.DataFrame({n: [war_uar(PRED[n][srcT == s], yT[srcT == s], 7)[0] for s in np.unique(srcT)]
+                    for n in [PRIMARY[0], PRIMARY[1], '[oracle] Markov P(B|E_A)']},
+                   index=np.unique(srcT)).round(1).to_string())
+
+
+def contrast(a, b):
+    lo, hi = paired(a, b)
+    wa, ua = war_uar(PRED[a], yT, 7); wb, ub = war_uar(PRED[b], yT, 7)
+    seeds = ""
+    if a in PT and b in PT:
+        pa = runs[runs.exp == a].set_index('seed').test_UAR; pb = runs[runs.exp == b].set_index('seed').test_UAR
+        seeds = f"seeds {int(((pa - pb) > 0).sum())}/{len(SEEDS)}"
+    eps = sum(war_uar(PRED[a][srcT == s], yT[srcT == s], 7)[0] > war_uar(PRED[b][srcT == s], yT[srcT == s], 7)[0]
+              for s in np.unique(srcT))
+    print(f"{a:<16} - {b:<16} ΔUAR {ua - ub:+5.2f} [{lo[0]:+5.2f},{hi[0]:+5.2f}]  ΔWAR {wa - wb:+5.2f} "
+          f"[{lo[1]:+5.2f},{hi[1]:+5.2f}]  {seeds}  episodes {eps}/{len(np.unique(srcT))}")
+    return ua - ub, lo[0]
+
+
+print("\n== PRIMARY ==")
+d, lo = contrast(*PRIMARY)
+print("VERDICT:", "CONFIRMED" if d > 0 and lo > 0 else ("DIRECTIONAL (CI includes 0)" if d > 0 else "NOT CONFIRMED"))
+print("\n== SECONDARY (descriptive) ==")
+for a, b in SECONDARY:
+    contrast(a, b)
+np.savez(f"{OUT_DIR}/g4_{EVAL_SPLIT}_probs.npz", sample_id=ev.sample_id.values,
+         **{n.replace('@', '_at_').replace('-', '_'): np.stack(v) for n, v in PT.items()})
+'''),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
-                        ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B)]:
+                        ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
+                        ("g4_test_preregistered.ipynb", G4)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

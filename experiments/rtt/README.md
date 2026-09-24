@@ -20,7 +20,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g7b_faces_into_b1.ipynb` | G7b: B1 + role-grounded face features (A, listener, listener in I/II, dominant faces of I/II) through a zero-initialised branch; early-frame and presence-only arms; both selection protocols, 5 seeds (needs the `role-features` dataset) |
 | `g7_late_fusion.py` | Late fusion of B1 (G3b val probabilities) with a face-only balanced LR, equal weight, presence-only control |
 | `g8a_role_features.ipynb` | G8a: role-agnostic extraction for every clip used as I–III (train/val/test inputs, no labels read): per-face box, pose, ArcFace, HSEmotion logits + 1280-d embedding, mouth opening, landmarks; per-clip ECAPA (whole + 1.5 s windows) and a 10 Hz energy envelope; resumable shards |
-| `g8b_rolenet_cv.ipynb` | G8b: RoleNet — role-tagged face tokens (A / listener / others × clips I–III, learned absent tokens), speech tokens with who-speaks cues, compact scene tokens, query readout; unimodal + A-emotion auxiliary heads and modality dropout. 5-fold CV over the 45 train+val episodes vs B1, late fusion and four ablations (needs the `g8a-features` dataset) |
+| `g8b_rolenet_cv.ipynb` | G8b: RoleNet (role-tagged face tokens, speech/scene tokens, balance aids) vs B1, B1+faces-joint (the G7b design), LateFusion with an unbalanced face LR, and four ablations; 5-fold CV over the 45 train+val episodes, PCA fitted per fold, scores plain and with one post-hoc logit adjustment; diagnostics for the design-debate hypotheses (split identities, mouth–audio sync AUC, person-specific inertia via clip-IV voice used for analysis only) |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -113,5 +113,20 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 * Development and model comparison use 5-fold cross-validation over the 45 train+val episodes (folds balanced by
   MCIS count, 5 inner episodes for early stopping, 3 seeds). The test split stays locked.
 * RoleNet hyper-parameters are set a priori in the notebook's CONFIG and are not tuned on the CV results.
-* Primary contrast: RoleNet − B1, pooled out-of-fold seed-ensemble ΔUAR, 95% bootstrap over the 45 episodes.
+* Every model is trained with plain cross-entropy; seed-averaged probabilities are scored plain and with one post-hoc
+  logit adjustment (log p − log π of the training fold, τ = 1). Adjusting only once follows the G7 check, where
+  class-balanced training plus adjustment cancelled the gain.
+* Primary contrast: RoleNet − B1 under the logit adjustment, pooled out-of-fold seed-ensemble ΔUAR, 95% bootstrap over
+  the 45 episodes.
   Secondary: RoleNet vs LateFusion (weight 0.5), vs RoleNet-noRole, vs RoleNet-noBalance; faces-only vs context-only.
+
+## Design debate (four critic agents, two rounds) and the logit-adjustment check
+
+* Check run on val (test untouched): B1 with a post-hoc logit adjustment alone gives +1.77 [−3.55, +8.32] and is very
+  seed-unstable. B1 ⊕ an **unbalanced** face LR gives +2.10 [+0.09, +4.52] (WAR +4.4). About half of the earlier
+  +4.5 late-fusion gain was therefore prior correction, and about +2 UAR is face information.
+* The critics read a written summary, not the data. Their claims are therefore tested in G8b rather than adopted:
+  joint face training inside B1 (was one seed in G7b), person-specific inertia (was based on a weak proxy),
+  mouth–audio sync quality, split identities.
+* Not changed yet: the State–Transition head. The debate recommends a staged, cross-fitted, log-linear version with two
+  paths (persistence, reaction to A). It is built only if the G8b diagnostics and results support it.

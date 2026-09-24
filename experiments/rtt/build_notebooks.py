@@ -3086,30 +3086,63 @@ G8B = [
 # G8b — Role-grounded forecasting of B's emotion (episode-level cross-validation)
 
 **Idea.** B1 encodes whole frames and never knows *who* is on screen. RoleNet turns the context into tokens tagged
-with **who** they are about, assigned automatically from the G8a features (no manual annotation, no clip IV):
+with **who** they are about. Roles are assigned automatically from the G8a features, with no manual annotation and
+no clip IV input:
 
-* **A** = most frequent identity in clip III (the speaker); **L** = most frequent *other* identity in clip III
-  (the listener — B in ~81% of cases, G6a); **O** = everyone else. Identities are clustered jointly over clips I–III,
-  so A and L are also found in clips I/II.
-* **Face tokens** (3 roles × 3 clips): attention-pooled per-frame features (HSEmotion embedding → PCA-128,
-  emotion probabilities, valence/arousal, head pose, box, mouth opening, time). A role missing from a clip gets a
-  learned **absent** token instead of zeros.
-* **Speech tokens** (per clip): text + audio features of the benchmark, plus who seems to speak (voice similarity to
-  clip III, mouth–audio synchrony per role). **Scene tokens** (per clip): compact whole-frame / face-crop CLIP means.
-* A query token reads out B's clip-IV emotion through a 2-layer Transformer.
-* **Against modality imbalance** (G7: a large jointly trained encoder crowds the face signal out): unimodal auxiliary
-  heads (faces only, context only), an auxiliary head that predicts **A's** emotion from A's clip-III token, and
-  modality dropout.
+* **A** = the most frequent identity in clip III (the speaker).
+* **L** = the most frequent *other* identity in clip III (the listener; this is B in about 81% of MCIS, per G6a).
+* **O** = everyone else.
+* Identities are clustered jointly over clips I–III, so A and L are also found in clips I and II.
 
-**Protocol (fixed before running).** 5-fold cross-validation over the 45 train+val episodes (folds balanced by MCIS
-count); inside each outer training set 5 episodes are held out for early stopping; 3 seeds; test untouched.
-Hyper-parameters below are set a priori and not tuned. Arms: `B1` (G3b's model), `LateFusion` (B1 ⊕ G6b-style face
-LR, weight 0.5 fixed in advance), `RoleNet` and four ablations (no role assignment, no balancing, faces only,
-context only).
+RoleNet has three token types plus a query and an encoder:
 
-**Primary contrast:** `RoleNet` − `B1`, pooled out-of-fold ΔUAR of the seed ensemble, 95% bootstrap over the 45
-episodes. Secondary: `RoleNet` vs `LateFusion`, `RoleNet` vs `RoleNet-noRole` (does role grounding matter?),
-`RoleNet` vs `RoleNet-noBalance`.
+* **Face tokens (3 roles × 3 clips).** Attention-pooled per-frame features:
+  * the HSEmotion embedding reduced to 128 dims by PCA, fitted **inside each training fold**;
+  * emotion probabilities, valence/arousal;
+  * head pose, box, mouth opening, time.
+
+  A role missing from a clip gets a learned **absent** token.
+* **Speech tokens (one per clip).** The benchmark's text and audio features, plus who-speaks cues.
+* **Scene tokens (one per clip).** Means of the whole-frame and face-crop CLIP features.
+* **Encoder.** A 2-layer Transformer with a query token.
+* **Balance aids.** Unimodal auxiliary heads, an auxiliary head for A's emotion, and modality dropout.
+
+**Arms (same folds, same seeds):**
+
+| Arm | What it is |
+|---|---|
+| `B1` | G3b's model |
+| `B1+faces-joint` | B1 plus G6b-style face features in a jointly trained, zero-initialised branch (the G7b design) |
+| `LateFusion` | B1 ⊕ **unbalanced** face LR, equal log-space weights |
+| `LateFusion-balancedLR` | The old G7 variant, kept for reference |
+| `RoleNet` | The full model above |
+| RoleNet ablations | noRole, noBalance, facesOnly, ctxOnly |
+
+**Prior handling (same for every arm, fixed in advance).**
+
+* Every model is trained with plain cross-entropy.
+* The seed-averaged probabilities are scored twice:
+  * *plain*: argmax;
+  * *LA*: argmax of log p − 1·log π, where π is the training-fold class prior.
+
+  This logit adjustment is applied exactly once.
+
+**Protocol (fixed before running).** 5-fold CV over the 45 train+val episodes, with folds balanced by MCIS count.
+Inside each outer training set, 5 episodes are held out for early stopping. 3 seeds per arm. Hyper-parameters are
+set a priori. The test split stays untouched.
+
+**Primary contrast:** `RoleNet` − `B1` under LA. This is the pooled out-of-fold ΔUAR of the seed ensemble, with a 95%
+bootstrap over the 45 episodes.
+
+**Diagnostics.** These test hypotheses raised in the design debate:
+
+1. Is one person split into two identities?
+2. Does mouth–audio synchrony point to the speaker?
+3. Is emotional inertia specific to B? Clip IV audio is read **only** for this analysis: it answers whether B spoke
+   in clip I or II. It is never a model input.
+"""),
+    ("code", r"""
+!pip install -q speechbrain
 """),
     ("code", r"""
 # ======== CONFIG ========
@@ -3141,16 +3174,20 @@ RN = dict(D=128, heads=4, layers=2, dropout=0.2, lr=3e-4, wd=1e-2, epochs=80, pa
 PCA_DIM, MAXF, MAXF_POOL = 128, 24, 32
 SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
 LATE_W = 0.5
+LA_TAU = 1.0                 # post-hoc logit adjustment, applied once to seed-averaged probabilities
+VOICE_SAME_COS = 0.35        # ECAPA cosine taken as "same speaker" (as in G6a)
+RUN_PERSISTENCE_DIAG = True  # reads clip-IV audio for an analysis only (never a model input)
 DEBUG_PER_EPISODE = None     # e.g. 6 for a quick smoke test
 
 FULL = dict(role=True, faces=True, ctx=True, aux=True, mdrop=True)
 EXPERIMENTS = [
-    ("B1",                'b1',   None),
-    ("RoleNet",           'role', FULL),
-    ("RoleNet-noRole",    'role', {**FULL, 'role': False}),
-    ("RoleNet-noBalance", 'role', {**FULL, 'aux': False, 'mdrop': False}),
-    ("RoleNet-facesOnly", 'role', {**FULL, 'ctx': False, 'mdrop': False}),
-    ("RoleNet-ctxOnly",   'role', {**FULL, 'faces': False, 'mdrop': False}),
+    ("B1",                'b1',     None),
+    ("B1+faces-joint",    'b1face', None),
+    ("RoleNet",           'role',   FULL),
+    ("RoleNet-noRole",    'role',   {**FULL, 'role': False}),
+    ("RoleNet-noBalance", 'role',   {**FULL, 'aux': False, 'mdrop': False}),
+    ("RoleNet-facesOnly", 'role',   {**FULL, 'ctx': False, 'mdrop': False}),
+    ("RoleNet-ctxOnly",   'role',   {**FULL, 'faces': False, 'mdrop': False}),
 ]
 """),
     ("code", COMMON + r"""
@@ -3177,7 +3214,7 @@ def seed_all(s):
 """),
     G3[3], G3[4],
     ("markdown", r"""
-## From G8a features to role-tagged tensors
+## From G8a features to role-tagged slots
 """),
     ("code", r"""
 from collections import defaultdict
@@ -3191,40 +3228,32 @@ need = sorted(set(DEV[['clip1', 'clip2', 'clip3']].values.ravel()))
 miss = [c for c in need if c not in G8]
 assert not miss, f"{len(miss)} clips missing from G8a, e.g. {miss[:3]}"
 
-# PCA of the HSEmotion embedding, fitted on faces of development clips (unsupervised, no labels)
-rng = np.random.default_rng(0)
-embs = [d['fer_emb'] for c in need for d in G8[c]['faces'] if 'fer_emb' in d]
-HAS_EMB = len(embs) > 0
-if HAS_EMB:
-    pick = rng.choice(len(embs), min(60000, len(embs)), replace=False)
-    pca = PCA(PCA_DIM, random_state=0).fit(np.stack([embs[i] for i in pick]).astype(np.float32))
-    print(f"PCA on {len(pick)} faces: {pca.explained_variance_ratio_.sum() * 100:.1f}% variance kept")
-FDIM = (PCA_DIM if HAS_EMB else 0) + 8 + 2 + 3 + 3 + 1 + 1
-
 
 def softmax(z):
     e = np.exp(z - z.max(-1, keepdims=True))
     return e / e.sum(-1, keepdims=True)
 
 
-FV = {}      # clip -> [n_faces, FDIM] frame-level face vectors
+# per-clip frame features except the PCA part (18 dims), and the raw HSEmotion embeddings
+FB, EMB = {}, {}
 for c in need:
     fs = G8[c]['faces']
     if not fs:
-        FV[c] = np.zeros((0, FDIM), np.float32)
+        FB[c], EMB[c] = np.zeros((0, 18), np.float32), None
         continue
     dur = max(G8[c]['meta'].get('duration') or 0.0, 1e-3)
     fer = np.stack([d['fer'] for d in fs]).astype(np.float32)
     box = np.stack([d['box'] for d in fs])
-    parts = []
-    if HAS_EMB:
-        parts.append(pca.transform(np.stack([d['fer_emb'] for d in fs]).astype(np.float32)))
-    parts += [softmax(fer[:, :8]), fer[:, 8:10], np.stack([d['pose'] for d in fs]) / 90.0,
-              np.stack([(box[:, 0] + box[:, 2]) / 2, (box[:, 1] + box[:, 3]) / 2,
-                        np.sqrt(np.clip((box[:, 2] - box[:, 0]) * (box[:, 3] - box[:, 1]), 0, None))], 1),
-              np.nan_to_num(np.array([[d['mouth'] * 10] for d in fs], np.float32)),
-              np.array([[min(d['t'] / dur, 1.0)] for d in fs], np.float32)]
-    FV[c] = np.concatenate(parts, 1).astype(np.float32)
+    FB[c] = np.concatenate([
+        softmax(fer[:, :8]), fer[:, 8:10], np.stack([d['pose'] for d in fs]) / 90.0,
+        np.stack([(box[:, 0] + box[:, 2]) / 2, (box[:, 1] + box[:, 3]) / 2,
+                  np.sqrt(np.clip((box[:, 2] - box[:, 0]) * (box[:, 3] - box[:, 1]), 0, None))], 1),
+        np.nan_to_num(np.array([[d['mouth'] * 10] for d in fs], np.float32)),
+        np.array([[min(d['t'] / dur, 1.0)] for d in fs], np.float32)], 1).astype(np.float32)
+    EMB[c] = np.stack([d['fer_emb'] for d in fs]) if all('fer_emb' in d for d in fs) else None
+HAS_EMB = all(EMB[c] is not None for c in need if len(G8[c]['faces']))
+FDIM = (PCA_DIM if HAS_EMB else 0) + 18
+print(f"HSEmotion embedding available: {HAS_EMB} | frame feature dim {FDIM}")
 
 
 def pick_frames(idx, cap):
@@ -3245,17 +3274,26 @@ def sync(c, face_ids):
     return r, float(m.std() * 10)
 
 
+def mean12(c_faces, n_sampled):
+    if not c_faces:
+        return np.zeros(12, np.float32)
+    fer = np.stack([d['fer'] for d in c_faces]).astype(np.float32)
+    v = np.concatenate([softmax(fer[:, :8]), fer[:, 8:10]], 1).mean(0)
+    return np.concatenate([v, [1.0, len({d['frame'] for d in c_faces}) / max(n_sampled, 1)]]).astype(np.float32)
+
+
 NVOICE = 3 * 2 + 3
-FACE = np.zeros((N, 3, 3, MAXF, FDIM), np.float16); FMASK = np.zeros((N, 3, 3, MAXF), bool)
-POOL = np.zeros((N, 1, 3, MAXF_POOL, FDIM), np.float16); PMASK = np.zeros((N, 1, 3, MAXF_POOL), bool)
+SLOT, PSLOT = {}, {}                      # (n, role, clip) / (n, clip) -> (clip id, face indices)
+FMASK = np.zeros((N, 3, 3, MAXF), bool); PMASK = np.zeros((N, 1, 3, MAXF_POOL), bool)
 VOI = np.zeros((N, 3, NVOICE), np.float32)
-LRF = np.zeros((N, 60), np.float32)       # G6b-style role means for the late-fusion baseline
+LRF = np.zeros((N, 60), np.float32)       # G6b-style role means (late fusion and the joint-branch arm)
+CENT_COS = np.full(N, np.nan, np.float32)
 for n, row in enumerate(tqdm(DEV.itertuples(), total=N, desc='roles')):
     cl = [row.clip1, row.clip2, row.clip3]
     items = [(k, j) for k, c in enumerate(cl) for j in range(len(G8[c]['faces']))]
     lab = np.zeros(len(items), int)
+    E = np.stack([G8[cl[k]]['faces'][j]['arc'] for k, j in items]).astype(np.float32) if items else None
     if len(items) > 1:
-        E = np.stack([G8[cl[k]]['faces'][j]['arc'] for k, j in items]).astype(np.float32)
         lab = AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
                                       distance_threshold=1 - SAME_PERSON_COS).fit_predict(E)
     frames = defaultdict(set)
@@ -3264,30 +3302,25 @@ for n, row in enumerate(tqdm(DEV.itertuples(), total=N, desc='roles')):
     ids3 = sorted({p for (k, p) in frames if k == 2}, key=lambda p: -len(frames[(2, p)]))
     A = ids3[0] if ids3 else None
     L = ids3[1] if len(ids3) > 1 else None
+    if A is not None and L is not None:
+        ca, cb = E[lab == A].mean(0), E[lab == L].mean(0)
+        CENT_COS[n] = float(ca @ cb / (np.linalg.norm(ca) * np.linalg.norm(cb) + 1e-9))
     role = lambda p: 0 if p == A else (1 if p == L else 2)
-    by = defaultdict(list)          # (role, clip) -> face indices in time order
+    by = defaultdict(list)
     for (k, j), p in zip(items, lab):
         by[(role(p), k)].append(j)
         by[('pool', k)].append(j)
     for k, c in enumerate(cl):
         for r in range(3):
             idx = pick_frames(sorted(by[(r, k)], key=lambda j: G8[c]['faces'][j]['t']), MAXF)
-            FACE[n, r, k, :len(idx)] = FV[c][idx]; FMASK[n, r, k, :len(idx)] = True
+            SLOT[(n, r, k)] = (c, idx); FMASK[n, r, k, :len(idx)] = True
         idx = pick_frames(sorted(by[('pool', k)], key=lambda j: G8[c]['faces'][j]['t']), MAXF_POOL)
-        POOL[n, 0, k, :len(idx)] = FV[c][idx]; PMASK[n, 0, k, :len(idx)] = True
-        # who speaks in clip k: synchrony per role, voice similarity to clip III, crowdedness
+        PSLOT[(n, k)] = (c, idx); PMASK[n, 0, k, :len(idx)] = True
         v = [x for r in range(3) for x in sync(c, by[(r, k)])]
         a3, ak = G8[cl[2]]['audio'], G8[c]['audio']
         ok = a3 is not None and ak is not None and a3.get('ecapa') is not None and ak.get('ecapa') is not None
         vcos = float(a3['ecapa'].astype(np.float32) @ ak['ecapa'].astype(np.float32)) if ok else 0.0
         VOI[n, k] = v + [vcos, float(ok), len(set(lab)) / 5.0]
-    # late-fusion baseline features (as G6b): A in III, L in III, L in I/II, dominant of II, dominant of I
-    def mean12(c_faces, n_sampled):
-        if not c_faces:
-            return np.zeros(12, np.float32)
-        fer = np.stack([d['fer'] for d in c_faces]).astype(np.float32)
-        v = np.concatenate([softmax(fer[:, :8]), fer[:, 8:10]], 1).mean(0)
-        return np.concatenate([v, [1.0, len({d['frame'] for d in c_faces}) / max(n_sampled, 1)]]).astype(np.float32)
 
     def faces_of(k, p):
         return [G8[cl[k]]['faces'][j] for (kk, j), q in zip(items, lab) if kk == k and q == p]
@@ -3307,21 +3340,148 @@ for n, row in enumerate(tqdm(DEV.itertuples(), total=N, desc='roles')):
 
 VIS = FMASK[:, 1, 2].any(-1)
 print(f"A found in III {FMASK[:, 0, 2].any(-1).mean() * 100:.1f}% | listener visible in III {VIS.mean() * 100:.1f}% | "
-      f"listener also in I/II {FMASK[:, 1, :2].any((-1, -2)).mean() * 100:.1f}% | FDIM {FDIM}")
+      f"listener also in I/II {FMASK[:, 1, :2].any((-1, -2)).mean() * 100:.1f}%")
 
+
+def build_face_tensors(fit_clips):
+    # PCA of the HSEmotion embedding fitted on faces of the training clips of the current fold only
+    pca, var = None, None
+    if HAS_EMB:
+        pool = np.concatenate([EMB[c] for c in fit_clips if EMB.get(c) is not None])
+        pick = np.random.default_rng(0).choice(len(pool), min(60000, len(pool)), replace=False)
+        pca = PCA(PCA_DIM, random_state=0).fit(pool[pick].astype(np.float32))
+        var = float(pca.explained_variance_ratio_.sum())
+    FV = {}
+    for c in need:
+        if len(FB[c]) == 0:
+            FV[c] = np.zeros((0, FDIM), np.float32)
+        else:
+            FV[c] = np.concatenate([pca.transform(EMB[c].astype(np.float32)), FB[c]], 1) if HAS_EMB else FB[c]
+    Fa = np.zeros((N, 3, 3, MAXF, FDIM), np.float16)
+    Pa = np.zeros((N, 1, 3, MAXF_POOL, FDIM), np.float16)
+    for (n, r, k), (c, idx) in SLOT.items():
+        if idx:
+            Fa[n, r, k, :len(idx)] = FV[c][idx]
+    for (n, k), (c, idx) in PSLOT.items():
+        if idx:
+            Pa[n, 0, k, :len(idx)] = FV[c][idx]
+    return torch.tensor(Fa, device=DEVICE), torch.tensor(Pa, device=DEVICE), var
+"""),
+    ("markdown", r"""
+## Diagnostics for hypotheses raised in the design debate (no model involved)
+"""),
+    ("code", r"""
+from sklearn.metrics import roc_auc_score
+
+# (1) is one person split into two identities? cosine between the mean ArcFace embeddings of A and L
+cc = CENT_COS[np.isfinite(CENT_COS)]
+if len(cc):
+    print(f"(1) A-vs-L centroid cosine, quantiles 10/25/50/75/90%: {np.percentile(cc, [10, 25, 50, 75, 90]).round(2)} | "
+          f"share in [0.30, 0.45) (possible split person): {((cc >= 0.30) & (cc < 0.45)).mean() * 100:.1f}%")
+
+# (2) does mouth-audio synchrony point to the speaker? In clips I/II the voice says whether A speaks (ECAPA vs clip III).
+xs, ys = [], []
+for n in range(N):
+    for k in (0, 1):
+        v = VOI[n, k]
+        others = [v[2] if FMASK[n, 1, k].any() else None, v[4] if FMASK[n, 2, k].any() else None]
+        others = [o for o in others if o is not None]
+        if v[7] < 1 or not FMASK[n, 0, k].any() or not others:
+            continue
+        xs.append(v[0] - max(others)); ys.append(v[6] >= VOICE_SAME_COS)
+if len(set(ys)) == 2:
+    print(f"(2) sync margin (A minus others) separates 'A speaks' from 'someone else speaks': AUC {roc_auc_score(ys, xs):.3f} "
+          f"on {len(ys)} context clips (0.5 = noise; >= 0.7 = usable)")
+else:
+    print("(2) not enough context clips with both A and another face for the sync check")
+"""),
+    ("code", r"""
+# (3) is emotional inertia person-specific? Clip IV voice (analysis only) says whether B spoke in clip I / II.
+if RUN_PERSISTENCE_DIAG:
+    import librosa
+    try:
+        from speechbrain.inference.speaker import EncoderClassifier
+    except ImportError:
+        from speechbrain.pretrained import EncoderClassifier
+    spk = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb", savedir=f"{OUT_DIR}/ecapa",
+                                         run_opts={"device": DEVICE})
+    AUDIO_ROOTS = [os.path.join(r, 'audio') for r in glob.glob(os.path.join(DATASET_DIR, '*', 'Hi-EF'))]
+
+    def audio_path(c):
+        ep, num = c.split('/')
+        for root in AUDIO_ROOTS:
+            for ext in ('.mp3', '.wav', '.flac', '.m4a'):
+                p = os.path.join(root, ep, num + ext)
+                if os.path.exists(p):
+                    return p
+        return None
+
+    V4 = {}
+    for c in tqdm(sorted(set(DEV.clip4)), desc='clip IV voice (analysis only)'):
+        p = audio_path(c)
+        if p is None:
+            continue
+        try:
+            wav, _ = librosa.load(p, sr=16000, mono=True)
+        except Exception:
+            continue
+        if len(wav) < 8000:
+            continue
+        with torch.no_grad():
+            e = spk.encode_batch(torch.tensor(wav, dtype=torch.float32).unsqueeze(0)).reshape(-1).cpu().numpy()
+        V4[c] = e / (np.linalg.norm(e) + 1e-9)
+    del spk; torch.cuda.empty_cache()
+
+    def gold(c):
+        e = ann.at[c, 7] if c in ann.index else None
+        return E2I.get(e, -1) if isinstance(e, str) else -1
+
+    rows_ = []
+    for n, row in enumerate(DEV.itertuples()):
+        if row.clip4 not in V4:
+            continue
+        for k, (name, c) in enumerate((('I', row.clip1), ('II', row.clip2))):
+            a, y = G8[c]['audio'], gold(c)
+            if a is None or a.get('ecapa') is None or y < 0:
+                continue
+            isB = float(a['ecapa'].astype(np.float32) @ V4[row.clip4].astype(np.float32)) >= VOICE_SAME_COS
+            rows_.append({'ep': row.source_folder, 'ctx': name, 'B_spoke': bool(isB), 'same': bool(y == row.yB),
+                          'A_spoke': bool(VOI[n, k, 6] >= VOICE_SAME_COS)})
+    pdf = pd.DataFrame(rows_, columns=['ep', 'ctx', 'B_spoke', 'same', 'A_spoke'])
+    print(f"(3) clip IV voice found for {len(V4)}/{DEV.clip4.nunique()} clips; labelled context clips analysed: {len(pdf)}")
+    rng_ = np.random.default_rng(0)
+    for name in ('I', 'II'):
+        d = pdf[pdf['ctx'] == name]
+        if d.B_spoke.sum() < 10 or (~d.B_spoke).sum() < 10:
+            print(f"  clip {name}: too few rows"); continue
+        eps_ = d.ep.unique()
+        diffs = []
+        for _ in range(2000):
+            s = pd.concat([d[d.ep == e] for e in rng_.choice(eps_, len(eps_))])
+            if s.B_spoke.any() and (~s.B_spoke).any():
+                diffs.append(s[s.B_spoke].same.mean() - s[~s.B_spoke].same.mean())
+        lo, hi = np.percentile(diffs, [2.5, 97.5]) * 100
+        third = d[~d.B_spoke & ~d.A_spoke]
+        print(f"  clip {name}: P(y_IV = y_{name}) when B spoke {d[d.B_spoke].same.mean() * 100:.1f}% (n={d.B_spoke.sum()}) | "
+              f"when someone else spoke {d[~d.B_spoke].same.mean() * 100:.1f}% (n={(~d.B_spoke).sum()}; third person only "
+              f"{third.same.mean() * 100 if len(third) else float('nan'):.1f}%, n={len(third)}) | difference CI [{lo:+.1f}, {hi:+.1f}]")
+    print("  -> a clearly positive difference supports a separate B-inertia path; ~0 supports one merged persistence path")
+"""),
+    ("markdown", r"""
+## Models
+"""),
+    ("code", r"""
 T = lambda a, dt=None: torch.tensor(a, device=DEVICE) if dt is None else torch.tensor(a, dtype=dt, device=DEVICE)
-FACE, FMASK, POOL, PMASK, VOI = T(FACE), T(FMASK), T(POOL), T(PMASK), T(VOI)
+FMASK, PMASK, VOI = T(FMASK), T(PMASK), T(VOI)
+FACE = POOL = LRFZ = None             # set per fold
 CLIPIDX = T([[CIDX[c] for c in r] for r in DEV[['clip1', 'clip2', 'clip3']].values])
 TXT, AUD, AFD = FEAT['text'][CLIPIDX], F.normalize(FEAT['audio'][CLIPIDX], dim=-1), FEAT['afound'][CLIPIDX].float()
 fm = FEAT['fmask'][CLIPIDX].unsqueeze(-1).float()
 SCN = torch.cat([FEAT['ori'][CLIPIDX].mean(2), (FEAT['face'][CLIPIDX] * fm).sum(2) / fm.sum(2).clamp(min=1)], -1)
 ZREC = torch.zeros(N, 3, N_REC, device=DEVICE)
 YB, YA = T(DEV.yB.values), T(DEV.yA.values)
-"""),
-    ("markdown", r"""
-## Models
-"""),
-    ("code", r"""
+
+
 class FramePool(nn.Module):
     def __init__(self, fin, d):
         super().__init__()
@@ -3374,9 +3534,9 @@ class RoleNet(nn.Module):
                 tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
                 aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
         if self.cfg['ctx']:
-            spk = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
+            spk_ = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
             scn = self.scene(SCN[ix]) + self.ctx_role[1]
-            ct = torch.cat([spk + self.clip_emb, scn + self.clip_emb], 1)      # [B, 6, d]
+            ct = torch.cat([spk_ + self.clip_emb, scn + self.clip_emb], 1)     # [B, 6, d]
             groups.append(ct)
             if self.head_ctx is not None:
                 aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
@@ -3402,10 +3562,28 @@ class B1Wrap(nn.Module):
         return self.f(CLIPIDX[ix], ZREC[ix]), {}
 
 
+class B1FaceWrap(nn.Module):
+    # B1 + the 60-d G6b-style role-face vector through a zero-initialised branch, trained jointly (the G7b design)
+    def __init__(self, n_face=60, d=512):
+        super().__init__()
+        self.f = Forecaster(use_raw=True, use_traj=False, d=d)
+        self.face = nn.Sequential(nn.Linear(n_face, d // 2), nn.GELU(), nn.Dropout(0.3), nn.Linear(d // 2, d))
+        nn.init.zeros_(self.face[-1].weight); nn.init.zeros_(self.face[-1].bias)
+
+    def forward(self, ix, train=False):
+        b, clip_idx = self.f, CLIPIDX[ix]
+        B, n = clip_idx.shape
+        feats = gather(clip_idx)
+        tok = b.enc({k: v.reshape(B * n, *v.shape[2:]) for k, v in feats.items()}).reshape(B, n, -1)
+        h = b.inter(tok + b.clip_pos[:, 3 - n:])
+        return b.head(h.mean(1) + self.face(LRFZ[ix])), {}
+
+
 HP = {'b1': dict(lr=LR, wd=WEIGHT_DECAY, epochs=FC_EPOCHS, patience=PATIENCE, batch=FC_BATCH),
       'role': dict(lr=RN['lr'], wd=RN['wd'], epochs=RN['epochs'], patience=RN['patience'], batch=RN['batch'])}
-nparams = {n: sum(p.numel() for p in (B1Wrap() if k == 'b1' else RoleNet(c)).parameters()) for n, k, c in EXPERIMENTS}
-print("parameters:", {k: f"{v / 1e6:.2f}M" for k, v in nparams.items()})
+HP['b1face'] = HP['b1']
+MAKE = {'b1': lambda cfg: B1Wrap(), 'b1face': lambda cfg: B1FaceWrap(), 'role': lambda cfg: RoleNet(cfg)}
+print("parameters:", {n: f"{sum(p.numel() for p in MAKE[k](c).parameters()) / 1e6:.2f}M" for n, k, c in EXPERIMENTS})
 
 
 def predict(model, ix, bs=256):
@@ -3420,7 +3598,7 @@ def predict(model, ix, bs=256):
 def train_eval(kind, cfg, tr, dev, te, seed):
     seed_all(seed)
     hp = HP[kind]
-    model = (B1Wrap() if kind == 'b1' else RoleNet(cfg)).to(DEVICE)
+    model = MAKE[kind](cfg).to(DEVICE)
     opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
     y_dev = YB[dev].cpu().numpy()
     best, best_state, bad = -1, None, 0
@@ -3455,7 +3633,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupKFold
 from sklearn.preprocessing import StandardScaler
 
-# outer folds balanced by MCIS count
 sizes = DEV.source_folder.value_counts()
 order = list(sizes.index)
 random.Random(0).shuffle(order)
@@ -3469,16 +3646,39 @@ print("fold sizes (MCIS):", load_)
 y_all = DEV.yB.values
 src = DEV.source_folder.values
 OOF = {name: np.full((len(SEEDS), N, 7), np.nan, np.float32) for name, _, _ in EXPERIMENTS}
-OOF_LR = np.full((N, 7), np.nan, np.float32)
+OOF_LR = {'unbalanced': np.full((N, 7), np.nan, np.float32), 'balanced': np.full((N, 7), np.nan, np.float32)}
+LOGPI = np.zeros((N, 7), np.float32)       # log class prior of each row's training fold
 log = []
 t0 = time.time()
+
+
+def face_lr(Xtr, ytr, gtr, Xte, cw):
+    best = None
+    for C in [0.003, 0.01, 0.03, 0.1, 0.3, 1]:
+        s = [war_uar(LogisticRegression(max_iter=3000, C=C, class_weight=cw).fit(Xtr[a], ytr[a]).predict(Xtr[b]),
+                     ytr[b], 7)[1] for a, b in GroupKFold(5).split(Xtr, ytr, gtr)]
+        if best is None or np.mean(s) > best[0]:
+            best = (np.mean(s), C)
+    clf = LogisticRegression(max_iter=3000, C=best[1], class_weight=cw).fit(Xtr, ytr)
+    pr = np.full((len(Xte), 7), 1e-6, np.float32)
+    pr[:, clf.classes_] = clf.predict_proba(Xte)      # a class absent from training keeps ~0 probability
+    return pr / pr.sum(1, keepdims=True)
+
+
 for f in range(N_OUTER):
-    te_eps = [e for e in EPS if FOLD[e] == f]
     tr_eps = [e for e in EPS if FOLD[e] != f]
     dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
     fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
     dev_rows = np.where(np.isin(src, dev_eps))[0]
     te_rows = np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    mu, sd = LRF[trr].mean(0), LRF[trr].std(0) + 1e-6
+    LRFZ = T(((LRF - mu) / sd).astype(np.float32))
+    LOGPI[te_rows] = np.log((np.bincount(y_all[trr], minlength=7) + 1) / (len(trr) + 7))
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)} | PCA variance kept "
+          f"{var if var is None else round(var, 3)}", flush=True)
     tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
     for name, kind, cfg in EXPERIMENTS:
         for si, seed in enumerate(SEEDS):
@@ -3489,32 +3689,21 @@ for f in range(N_OUTER):
             print(f"fold {f} {name:<18} seed {seed}: sel {sel:5.2f} | UAR {u:5.2f} WAR {w:5.2f} | "
                   f"{(time.time() - t0) / 60:.1f} min", flush=True)
             torch.cuda.empty_cache()
-    # late-fusion face model: balanced LR on the G6b-style role means, trained on the outer training episodes
-    trr = np.where(np.isin(src, tr_eps))[0]
     sc = StandardScaler().fit(LRF[trr])
-    Xtr, Xte = sc.transform(LRF[trr]), sc.transform(LRF[te_rows])
-    best = None
-    for C in [0.003, 0.01, 0.03, 0.1, 0.3, 1]:
-        s = [war_uar(LogisticRegression(max_iter=3000, C=C, class_weight='balanced').fit(Xtr[a], y_all[trr][a])
-                     .predict(Xtr[b]), y_all[trr][b], 7)[1] for a, b in GroupKFold(5).split(Xtr, y_all[trr], src[trr])]
-        if best is None or np.mean(s) > best[0]:
-            best = (np.mean(s), C)
-    clf = LogisticRegression(max_iter=3000, C=best[1], class_weight='balanced').fit(Xtr, y_all[trr])
-    pr = np.zeros((len(te_rows), 7), np.float32)
-    pr[:, clf.classes_] = clf.predict_proba(Xte)      # a class absent from training keeps probability 0
-    OOF_LR[te_rows] = pr
+    for key, cw in (('unbalanced', None), ('balanced', 'balanced')):
+        OOF_LR[key][te_rows] = face_lr(sc.transform(LRF[trr]), y_all[trr], src[trr], sc.transform(LRF[te_rows]), cw)
 
-assert not np.isnan(OOF_LR).any() and all(not np.isnan(v).any() for v in OOF.values())
+assert all(not np.isnan(v).any() for v in list(OOF.values()) + list(OOF_LR.values()))
 fuse = lambda pb, pf: np.exp((1 - LATE_W) * np.log(pb + 1e-9) + LATE_W * np.log(pf + 1e-9))
-OOF['LateFusion'] = np.stack([fuse(OOF['B1'][s], OOF_LR) for s in range(len(SEEDS))])
-OOF['FaceLR'] = OOF_LR[None]
-logdf = pd.DataFrame(log)
-logdf.to_csv(f"{OUT_DIR}/g8b_fold_seed_log.csv", index=False)
-np.savez(f"{OUT_DIR}/g8b_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row,
-         **{k.replace('-', '_'): v for k, v in OOF.items()})
+OOF['LateFusion'] = np.stack([fuse(OOF['B1'][s], OOF_LR['unbalanced']) for s in range(len(SEEDS))])
+OOF['LateFusion-balancedLR'] = np.stack([fuse(OOF['B1'][s], OOF_LR['balanced']) for s in range(len(SEEDS))])
+OOF['FaceLR'] = OOF_LR['unbalanced'][None]
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g8b_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g8b_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, logpi=LOGPI,
+         **{k.replace('-', '_').replace('+', '_'): v for k, v in OOF.items()})
 """),
     ("markdown", r"""
-## Results: pooled out-of-fold scores, paired contrasts, subsets
+## Results: pooled out-of-fold scores (plain and logit-adjusted), paired contrasts, subsets
 """),
     ("code", r"""
 def boot_delta(pa, pb, y, s, n_boot=2000, seed=0):
@@ -3528,42 +3717,59 @@ def boot_delta(pa, pb, y, s, n_boot=2000, seed=0):
     return np.percentile(np.array(d), [2.5, 97.5], axis=0)
 
 
-ENS = {k: v.mean(0).argmax(1) for k, v in OOF.items()}
-print(f"== per-seed pooled out-of-fold UAR / WAR ({N} MCIS, {len(EPS)} episodes) ==")
+def recalls(p, y):
+    return np.array([(p[y == c] == c).mean() * 100 if (y == c).any() else np.nan for c in range(7)])
+
+
+LOGP = {k: np.log(v.mean(0) + 1e-9) for k, v in OOF.items()}
+PRED = {'plain': {k: v.argmax(1) for k, v in LOGP.items()},
+        'LA': {k: (v - LA_TAU * LOGPI).argmax(1) for k, v in LOGP.items()}}
+
+print(f"== per-seed pooled out-of-fold UAR, plain ({N} MCIS, {len(EPS)} episodes) ==")
 for k, v in OOF.items():
-    per = [war_uar(v[s].argmax(1), y_all, 7) for s in range(len(v))]
-    print(f"  {k:<18} UAR " + " ".join(f"{u:5.2f}" for _, u in per) + f"  (mean {np.mean([u for _, u in per]):.2f})"
-          + "   WAR " + " ".join(f"{w:5.2f}" for w, _ in per))
-print("\n== seed ensemble (95% bootstrap over episodes) ==")
-for k in ENS:
-    report(k, ENS[k], y_all, src)
+    per = [war_uar(v[s].argmax(1), y_all, 7)[1] for s in range(len(v))]
+    print(f"  {k:<22} " + " ".join(f"{u:5.2f}" for u in per) + f"  (mean {np.mean(per):.2f})")
+for mode in ('LA', 'plain'):
+    print(f"\n== seed ensemble, {mode} (95% bootstrap over episodes) ==")
+    for k in PRED[mode]:
+        report(k, PRED[mode][k], y_all, src)
 
-CONTRASTS = [("RoleNet", "B1"), ("RoleNet", "LateFusion"), ("LateFusion", "B1"), ("RoleNet", "RoleNet-noRole"),
-             ("RoleNet", "RoleNet-noBalance"), ("RoleNet-facesOnly", "RoleNet-ctxOnly"), ("RoleNet", "RoleNet-ctxOnly")]
+print("\n== per-class recall, LA, seed ensemble (6-class = without fear) ==")
+print(f"  {'':<22}" + "".join(f"{e[:7]:>8}" for e in EMO) + "   6-class")
+for k, p in PRED['LA'].items():
+    r = recalls(p, y_all)
+    print(f"  {k:<22}" + "".join(f"{x:8.1f}" for x in r) + f"   {np.nanmean(np.delete(r, E2I['fear'])):6.2f}")
+
+CONTRASTS = [("RoleNet", "B1"), ("RoleNet", "LateFusion"), ("LateFusion", "B1"), ("B1+faces-joint", "B1"),
+             ("RoleNet", "RoleNet-noRole"), ("RoleNet", "RoleNet-noBalance"), ("RoleNet-facesOnly", "RoleNet-ctxOnly")]
 SUBSETS = {'all': np.ones(N, bool), 'listener visible in III': VIS, 'listener not visible': ~VIS}
-for sname, m in SUBSETS.items():
-    print(f"\n== paired contrasts, {sname} (n={m.sum()}) ==")
-    if m.sum() < 30:
-        print("  too few MCIS, skipped")
-        continue
-    for a, b in CONTRASTS:
-        lo, hi = boot_delta(ENS[a][m], ENS[b][m], y_all[m], src[m])
-        wa, ua = war_uar(ENS[a][m], y_all[m], 7); wb, ub = war_uar(ENS[b][m], y_all[m], 7)
-        print(f"  {a:<18} - {b:<18} ΔUAR {ua - ub:+5.2f} [{lo[0]:+5.2f},{hi[0]:+5.2f}]  "
-              f"ΔWAR {wa - wb:+5.2f} [{lo[1]:+5.2f},{hi[1]:+5.2f}]")
+for mode in ('LA', 'plain'):
+    for sname, m in SUBSETS.items():
+        if mode == 'plain' and sname != 'all':
+            continue
+        print(f"\n== paired contrasts, {mode}, {sname} (n={m.sum()}) ==")
+        if m.sum() < 30:
+            print("  too few MCIS, skipped")
+            continue
+        for a, b in CONTRASTS:
+            pa, pb = PRED[mode][a][m], PRED[mode][b][m]
+            lo, hi = boot_delta(pa, pb, y_all[m], src[m])
+            wa, ua = war_uar(pa, y_all[m], 7); wb, ub = war_uar(pb, y_all[m], 7)
+            print(f"  {a:<18} - {b:<18} ΔUAR {ua - ub:+5.2f} [{lo[0]:+5.2f},{hi[0]:+5.2f}]  "
+                  f"ΔWAR {wa - wb:+5.2f} [{lo[1]:+5.2f},{hi[1]:+5.2f}]")
 
-print("\n== per-fold ΔUAR, RoleNet − B1 (seed ensemble) ==")
+print("\n== per-fold ΔUAR, RoleNet − B1 (LA, seed ensemble) ==")
 for f in range(N_OUTER):
     m = fold_of_row == f
-    print(f"  fold {f}: {war_uar(ENS['RoleNet'][m], y_all[m], 7)[1] - war_uar(ENS['B1'][m], y_all[m], 7)[1]:+.2f}")
+    print(f"  fold {f}: {war_uar(PRED['LA']['RoleNet'][m], y_all[m], 7)[1] - war_uar(PRED['LA']['B1'][m], y_all[m], 7)[1]:+.2f}")
 
-lo, hi = boot_delta(ENS['RoleNet'], ENS['B1'], y_all, src)
-d = war_uar(ENS['RoleNet'], y_all, 7)[1] - war_uar(ENS['B1'], y_all, 7)[1]
-print(f"\nPRIMARY: RoleNet − B1 ΔUAR {d:+.2f} [{lo[0]:+.2f},{hi[0]:+.2f}] -> "
+pa, pb = PRED['LA']['RoleNet'], PRED['LA']['B1']
+lo, hi = boot_delta(pa, pb, y_all, src)
+d = war_uar(pa, y_all, 7)[1] - war_uar(pb, y_all, 7)[1]
+print(f"\nPRIMARY (LA): RoleNet − B1 ΔUAR {d:+.2f} [{lo[0]:+.2f},{hi[0]:+.2f}] -> "
       f"{'CONFIRMED' if lo[0] > 0 else ('DIRECTIONAL (CI includes 0)' if d > 0 else 'NOT SUPPORTED')}")
 """),
 ]
-
 
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),

@@ -3079,11 +3079,498 @@ print({k: (len(v), round(float(np.mean(v)), 3) if v else None) for k, v in cors.
 ]
 
 
+
+# ---------------------------------------------------------------- G8b: role-grounded forecaster, episode CV
+G8B = [
+    ("markdown", r"""
+# G8b — Role-grounded forecasting of B's emotion (episode-level cross-validation)
+
+**Idea.** B1 encodes whole frames and never knows *who* is on screen. RoleNet turns the context into tokens tagged
+with **who** they are about, assigned automatically from the G8a features (no manual annotation, no clip IV):
+
+* **A** = most frequent identity in clip III (the speaker); **L** = most frequent *other* identity in clip III
+  (the listener — B in ~81% of cases, G6a); **O** = everyone else. Identities are clustered jointly over clips I–III,
+  so A and L are also found in clips I/II.
+* **Face tokens** (3 roles × 3 clips): attention-pooled per-frame features (HSEmotion embedding → PCA-128,
+  emotion probabilities, valence/arousal, head pose, box, mouth opening, time). A role missing from a clip gets a
+  learned **absent** token instead of zeros.
+* **Speech tokens** (per clip): text + audio features of the benchmark, plus who seems to speak (voice similarity to
+  clip III, mouth–audio synchrony per role). **Scene tokens** (per clip): compact whole-frame / face-crop CLIP means.
+* A query token reads out B's clip-IV emotion through a 2-layer Transformer.
+* **Against modality imbalance** (G7: a large jointly trained encoder crowds the face signal out): unimodal auxiliary
+  heads (faces only, context only), an auxiliary head that predicts **A's** emotion from A's clip-III token, and
+  modality dropout.
+
+**Protocol (fixed before running).** 5-fold cross-validation over the 45 train+val episodes (folds balanced by MCIS
+count); inside each outer training set 5 episodes are held out for early stopping; 3 seeds; test untouched.
+Hyper-parameters below are set a priori and not tuned. Arms: `B1` (G3b's model), `LateFusion` (B1 ⊕ G6b-style face
+LR, weight 0.5 fixed in advance), `RoleNet` and four ablations (no role assignment, no balancing, faces only,
+context only).
+
+**Primary contrast:** `RoleNet` − `B1`, pooled out-of-fold ΔUAR of the seed ensemble, 95% bootstrap over the 45
+episodes. Secondary: `RoleNet` vs `LateFusion`, `RoleNet` vs `RoleNet-noRole` (does role grounding matter?),
+`RoleNet` vs `RoleNet-noBalance`.
+"""),
+    ("code", r"""
+# ======== CONFIG ========
+import os
+
+
+def first_existing(*paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"none of {paths}")
+
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = first_existing("/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv",
+                           "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv")
+G8A_DIR = first_existing("/kaggle/input/datasets/ptrnghieu/g8a-features", "/kaggle/input/g8a-features")
+OUT_DIR = "/kaggle/working"
+
+N_OUTER, N_INNER_DEV = 5, 5
+SEEDS = [42, 123, 456]
+# B1, exactly as G3b
+LR, WEIGHT_DECAY = 1e-4, 1e-5
+FC_EPOCHS, PATIENCE, FC_BATCH = 50, 8, 32
+# RoleNet, set a priori (not tuned)
+RN = dict(D=128, heads=4, layers=2, dropout=0.2, lr=3e-4, wd=1e-2, epochs=80, patience=12, batch=64,
+          aux_w=0.3, a_w=0.3, p_drop_ctx=0.3, p_drop_face=0.15)
+PCA_DIM, MAXF, MAXF_POOL = 128, 24, 32
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
+LATE_W = 0.5
+DEBUG_PER_EPISODE = None     # e.g. 6 for a quick smoke test
+
+FULL = dict(role=True, faces=True, ctx=True, aux=True, mdrop=True)
+EXPERIMENTS = [
+    ("B1",                'b1',   None),
+    ("RoleNet",           'role', FULL),
+    ("RoleNet-noRole",    'role', {**FULL, 'role': False}),
+    ("RoleNet-noBalance", 'role', {**FULL, 'aux': False, 'mdrop': False}),
+    ("RoleNet-facesOnly", 'role', {**FULL, 'ctx': False, 'mdrop': False}),
+    ("RoleNet-ctxOnly",   'role', {**FULL, 'faces': False, 'mdrop': False}),
+]
+"""),
+    ("code", COMMON + r"""
+import glob, pickle
+import torch, torch.nn as nn, torch.nn.functional as F
+from tqdm.auto import tqdm
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+ANNOT_CSV = glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF", "annotation.csv"))[0]
+ann, sp = load_tables(ANNOT_CSV, SPLIT_CSV)
+sp = sp[sp.split.isin(['train', 'val'])].reset_index(drop=True)      # test rows are dropped here
+assert 'test' not in set(sp.split)
+if DEBUG_PER_EPISODE:
+    sp = sp.groupby('source_folder', group_keys=False).head(DEBUG_PER_EPISODE).reset_index(drop=True)
+DEV = sp
+train_all = ev = DEV          # names used by the shared feature-loading cell
+N = len(DEV)
+EPS = np.array(sorted(DEV.source_folder.unique()))
+print(f"development MCIS {N} | episodes {len(EPS)}")
+
+
+def seed_all(s):
+    random.seed(s); np.random.seed(s); torch.manual_seed(s); torch.cuda.manual_seed_all(s)
+"""),
+    G3[3], G3[4],
+    ("markdown", r"""
+## From G8a features to role-tagged tensors
+"""),
+    ("code", r"""
+from collections import defaultdict
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.decomposition import PCA
+
+G8 = {}
+for f in sorted(glob.glob(os.path.join(G8A_DIR, '**', 'shard_*.pkl'), recursive=True)):
+    G8.update(pickle.load(open(f, 'rb')))
+need = sorted(set(DEV[['clip1', 'clip2', 'clip3']].values.ravel()))
+miss = [c for c in need if c not in G8]
+assert not miss, f"{len(miss)} clips missing from G8a, e.g. {miss[:3]}"
+
+# PCA of the HSEmotion embedding, fitted on faces of development clips (unsupervised, no labels)
+rng = np.random.default_rng(0)
+embs = [d['fer_emb'] for c in need for d in G8[c]['faces'] if 'fer_emb' in d]
+HAS_EMB = len(embs) > 0
+if HAS_EMB:
+    pick = rng.choice(len(embs), min(60000, len(embs)), replace=False)
+    pca = PCA(PCA_DIM, random_state=0).fit(np.stack([embs[i] for i in pick]).astype(np.float32))
+    print(f"PCA on {len(pick)} faces: {pca.explained_variance_ratio_.sum() * 100:.1f}% variance kept")
+FDIM = (PCA_DIM if HAS_EMB else 0) + 8 + 2 + 3 + 3 + 1 + 1
+
+
+def softmax(z):
+    e = np.exp(z - z.max(-1, keepdims=True))
+    return e / e.sum(-1, keepdims=True)
+
+
+FV = {}      # clip -> [n_faces, FDIM] frame-level face vectors
+for c in need:
+    fs = G8[c]['faces']
+    if not fs:
+        FV[c] = np.zeros((0, FDIM), np.float32)
+        continue
+    dur = max(G8[c]['meta'].get('duration') or 0.0, 1e-3)
+    fer = np.stack([d['fer'] for d in fs]).astype(np.float32)
+    box = np.stack([d['box'] for d in fs])
+    parts = []
+    if HAS_EMB:
+        parts.append(pca.transform(np.stack([d['fer_emb'] for d in fs]).astype(np.float32)))
+    parts += [softmax(fer[:, :8]), fer[:, 8:10], np.stack([d['pose'] for d in fs]) / 90.0,
+              np.stack([(box[:, 0] + box[:, 2]) / 2, (box[:, 1] + box[:, 3]) / 2,
+                        np.sqrt(np.clip((box[:, 2] - box[:, 0]) * (box[:, 3] - box[:, 1]), 0, None))], 1),
+              np.nan_to_num(np.array([[d['mouth'] * 10] for d in fs], np.float32)),
+              np.array([[min(d['t'] / dur, 1.0)] for d in fs], np.float32)]
+    FV[c] = np.concatenate(parts, 1).astype(np.float32)
+
+
+def pick_frames(idx, cap):
+    return idx if len(idx) <= cap else [idx[i] for i in np.linspace(0, len(idx) - 1, cap).astype(int)]
+
+
+def sync(c, face_ids):
+    # correlation of mouth opening with the audio energy envelope, and mouth variability, for a set of faces
+    A = G8[c]['audio']
+    fs = [G8[c]['faces'][j] for j in face_ids]
+    fs = [d for d in fs if np.isfinite(d['mouth'])]
+    if A is None or len(fs) < 4:
+        return 0.0, 0.0
+    m = np.array([d['mouth'] for d in fs])
+    env = A['env']
+    e = np.array([env[min(int(d['t'] * 10), len(env) - 1)] for d in fs]) if len(env) else np.zeros(len(fs))
+    r = float(np.corrcoef(m, e)[0, 1]) if m.std() > 1e-6 and e.std() > 1e-9 else 0.0
+    return r, float(m.std() * 10)
+
+
+NVOICE = 3 * 2 + 3
+FACE = np.zeros((N, 3, 3, MAXF, FDIM), np.float16); FMASK = np.zeros((N, 3, 3, MAXF), bool)
+POOL = np.zeros((N, 1, 3, MAXF_POOL, FDIM), np.float16); PMASK = np.zeros((N, 1, 3, MAXF_POOL), bool)
+VOI = np.zeros((N, 3, NVOICE), np.float32)
+LRF = np.zeros((N, 60), np.float32)       # G6b-style role means for the late-fusion baseline
+for n, row in enumerate(tqdm(DEV.itertuples(), total=N, desc='roles')):
+    cl = [row.clip1, row.clip2, row.clip3]
+    items = [(k, j) for k, c in enumerate(cl) for j in range(len(G8[c]['faces']))]
+    lab = np.zeros(len(items), int)
+    if len(items) > 1:
+        E = np.stack([G8[cl[k]]['faces'][j]['arc'] for k, j in items]).astype(np.float32)
+        lab = AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
+                                      distance_threshold=1 - SAME_PERSON_COS).fit_predict(E)
+    frames = defaultdict(set)
+    for (k, j), p in zip(items, lab):
+        frames[(k, p)].add(G8[cl[k]]['faces'][j]['frame'])
+    ids3 = sorted({p for (k, p) in frames if k == 2}, key=lambda p: -len(frames[(2, p)]))
+    A = ids3[0] if ids3 else None
+    L = ids3[1] if len(ids3) > 1 else None
+    role = lambda p: 0 if p == A else (1 if p == L else 2)
+    by = defaultdict(list)          # (role, clip) -> face indices in time order
+    for (k, j), p in zip(items, lab):
+        by[(role(p), k)].append(j)
+        by[('pool', k)].append(j)
+    for k, c in enumerate(cl):
+        for r in range(3):
+            idx = pick_frames(sorted(by[(r, k)], key=lambda j: G8[c]['faces'][j]['t']), MAXF)
+            FACE[n, r, k, :len(idx)] = FV[c][idx]; FMASK[n, r, k, :len(idx)] = True
+        idx = pick_frames(sorted(by[('pool', k)], key=lambda j: G8[c]['faces'][j]['t']), MAXF_POOL)
+        POOL[n, 0, k, :len(idx)] = FV[c][idx]; PMASK[n, 0, k, :len(idx)] = True
+        # who speaks in clip k: synchrony per role, voice similarity to clip III, crowdedness
+        v = [x for r in range(3) for x in sync(c, by[(r, k)])]
+        a3, ak = G8[cl[2]]['audio'], G8[c]['audio']
+        ok = a3 is not None and ak is not None and a3.get('ecapa') is not None and ak.get('ecapa') is not None
+        vcos = float(a3['ecapa'].astype(np.float32) @ ak['ecapa'].astype(np.float32)) if ok else 0.0
+        VOI[n, k] = v + [vcos, float(ok), len(set(lab)) / 5.0]
+    # late-fusion baseline features (as G6b): A in III, L in III, L in I/II, dominant of II, dominant of I
+    def mean12(c_faces, n_sampled):
+        if not c_faces:
+            return np.zeros(12, np.float32)
+        fer = np.stack([d['fer'] for d in c_faces]).astype(np.float32)
+        v = np.concatenate([softmax(fer[:, :8]), fer[:, 8:10]], 1).mean(0)
+        return np.concatenate([v, [1.0, len({d['frame'] for d in c_faces}) / max(n_sampled, 1)]]).astype(np.float32)
+
+    def faces_of(k, p):
+        return [G8[cl[k]]['faces'][j] for (kk, j), q in zip(items, lab) if kk == k and q == p]
+
+    def dominant(k):
+        ns = G8[cl[k]]['meta']['n_sampled']
+        cand = sorted({q for (kk, q) in frames if kk == k}, key=lambda q: -len(frames[(k, q)]))
+        return cand[0] if cand and len(frames[(k, cand[0])]) / max(ns, 1) >= DOMINANT_MIN_FRAC else None
+
+    n3 = G8[cl[2]]['meta']['n_sampled']
+    blocks = [mean12(faces_of(2, A) if A is not None else [], n3), mean12(faces_of(2, L) if L is not None else [], n3),
+              mean12((faces_of(0, L) + faces_of(1, L)) if L is not None else [], n3)]
+    for k in (1, 0):
+        d = dominant(k)
+        blocks.append(mean12(faces_of(k, d) if d is not None else [], G8[cl[k]]['meta']['n_sampled']))
+    LRF[n] = np.concatenate(blocks)
+
+VIS = FMASK[:, 1, 2].any(-1)
+print(f"A found in III {FMASK[:, 0, 2].any(-1).mean() * 100:.1f}% | listener visible in III {VIS.mean() * 100:.1f}% | "
+      f"listener also in I/II {FMASK[:, 1, :2].any((-1, -2)).mean() * 100:.1f}% | FDIM {FDIM}")
+
+T = lambda a, dt=None: torch.tensor(a, device=DEVICE) if dt is None else torch.tensor(a, dtype=dt, device=DEVICE)
+FACE, FMASK, POOL, PMASK, VOI = T(FACE), T(FMASK), T(POOL), T(PMASK), T(VOI)
+CLIPIDX = T([[CIDX[c] for c in r] for r in DEV[['clip1', 'clip2', 'clip3']].values])
+TXT, AUD, AFD = FEAT['text'][CLIPIDX], F.normalize(FEAT['audio'][CLIPIDX], dim=-1), FEAT['afound'][CLIPIDX].float()
+fm = FEAT['fmask'][CLIPIDX].unsqueeze(-1).float()
+SCN = torch.cat([FEAT['ori'][CLIPIDX].mean(2), (FEAT['face'][CLIPIDX] * fm).sum(2) / fm.sum(2).clamp(min=1)], -1)
+ZREC = torch.zeros(N, 3, N_REC, device=DEVICE)
+YB, YA = T(DEV.yB.values), T(DEV.yA.values)
+"""),
+    ("markdown", r"""
+## Models
+"""),
+    ("code", r"""
+class FramePool(nn.Module):
+    def __init__(self, fin, d):
+        super().__init__()
+        self.proj = nn.Sequential(nn.LayerNorm(fin), nn.Linear(fin, d), nn.GELU(), nn.Linear(d, d))
+        self.score = nn.Linear(d, 1)
+
+    def forward(self, x, m):                      # x [..., F, fin], m [..., F]
+        h = self.proj(x.float())
+        a = self.score(h).squeeze(-1).masked_fill(~m, -1e4)
+        w = torch.softmax(a, -1) * m.float()
+        return (w.unsqueeze(-1) * h).sum(-2), m.any(-1)
+
+
+class RoleNet(nn.Module):
+    def __init__(self, cfg, d=RN['D']):
+        super().__init__()
+        self.cfg, self.R = cfg, (3 if cfg['role'] else 1)
+        if cfg['faces']:
+            self.pool = FramePool(FDIM, d)
+            self.absent = nn.Parameter(torch.randn(self.R, 3, d) * 0.02)
+            self.face_role = nn.Parameter(torch.randn(self.R, d) * 0.02)
+        if cfg['ctx']:
+            self.text = nn.Sequential(nn.LayerNorm(512), nn.Linear(512, d))
+            self.audio = nn.Sequential(nn.LayerNorm(527), nn.Linear(527, d))
+            self.voice = nn.Linear(NVOICE, d)
+            self.scene = nn.Sequential(nn.LayerNorm(1024), nn.Linear(1024, d))
+            self.ctx_role = nn.Parameter(torch.randn(2, d) * 0.02)
+        self.clip_emb = nn.Parameter(torch.randn(3, d) * 0.02)
+        self.query = nn.Parameter(torch.randn(1, 1, d) * 0.02)
+        layer = nn.TransformerEncoderLayer(d, RN['heads'], 4 * d, RN['dropout'], batch_first=True, norm_first=True)
+        self.enc = nn.TransformerEncoder(layer, RN['layers'], enable_nested_tensor=False)
+        mk = lambda: nn.Sequential(nn.LayerNorm(d), nn.Dropout(0.3), nn.Linear(d, 7))
+        self.head = mk()
+        self.head_face = mk() if cfg['aux'] and cfg['faces'] else None
+        self.head_ctx = mk() if cfg['aux'] and cfg['ctx'] else None
+        self.head_A = mk() if cfg['aux'] and cfg['faces'] and cfg['role'] else None
+
+    def forward(self, ix, train=False):
+        B, groups, aux = len(ix), [], {}
+        if self.cfg['faces']:
+            x, m = (FACE[ix], FMASK[ix]) if self.R == 3 else (POOL[ix], PMASK[ix])
+            h, present = self.pool(x, m)                                      # [B, R, 3, d]
+            h = torch.where(present.unsqueeze(-1), h, self.absent.unsqueeze(0).expand(B, -1, -1, -1))
+            h = h + self.face_role[None, :, None] + self.clip_emb[None, None]
+            ft = h.reshape(B, self.R * 3, -1)
+            groups.append(ft)
+            if self.head_face is not None:
+                aux['face'] = (self.head_face(ft.mean(1)), YB[ix], RN['aux_w'])
+            if self.head_A is not None:
+                tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+                aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
+        if self.cfg['ctx']:
+            spk = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
+            scn = self.scene(SCN[ix]) + self.ctx_role[1]
+            ct = torch.cat([spk + self.clip_emb, scn + self.clip_emb], 1)      # [B, 6, d]
+            groups.append(ct)
+            if self.head_ctx is not None:
+                aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
+        toks = torch.cat([self.query.expand(B, -1, -1)] + groups, 1)
+        valid = torch.ones(toks.shape[:2], dtype=torch.bool, device=toks.device)
+        if train and self.cfg['mdrop'] and len(groups) == 2:
+            u = torch.rand(B, device=toks.device)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+            nf = groups[0].shape[1]
+            valid[:, 1:1 + nf] &= ~drop_face.unsqueeze(1)
+            valid[:, 1 + nf:] &= ~drop_ctx.unsqueeze(1)
+        out = self.enc(toks, src_key_padding_mask=~valid)
+        return self.head(out[:, 0]), aux
+
+
+class B1Wrap(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.f = Forecaster(use_raw=True, use_traj=False)
+
+    def forward(self, ix, train=False):
+        return self.f(CLIPIDX[ix], ZREC[ix]), {}
+
+
+HP = {'b1': dict(lr=LR, wd=WEIGHT_DECAY, epochs=FC_EPOCHS, patience=PATIENCE, batch=FC_BATCH),
+      'role': dict(lr=RN['lr'], wd=RN['wd'], epochs=RN['epochs'], patience=RN['patience'], batch=RN['batch'])}
+nparams = {n: sum(p.numel() for p in (B1Wrap() if k == 'b1' else RoleNet(c)).parameters()) for n, k, c in EXPERIMENTS}
+print("parameters:", {k: f"{v / 1e6:.2f}M" for k, v in nparams.items()})
+
+
+def predict(model, ix, bs=256):
+    model.eval()
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(ix), bs):
+            out.append(F.softmax(model(ix[i:i + bs])[0], -1).cpu())
+    return torch.cat(out).numpy()
+
+
+def train_eval(kind, cfg, tr, dev, te, seed):
+    seed_all(seed)
+    hp = HP[kind]
+    model = (B1Wrap() if kind == 'b1' else RoleNet(cfg)).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    best, best_state, bad = -1, None, 0
+    for ep in range(hp['epochs']):
+        model.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm), hp['batch']):
+            j = perm[i:i + hp['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, w in aux.values():
+                if (t >= 0).any():
+                    loss = loss + w * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(predict(model, dev).argmax(1), y_dev, 7)[1]
+        if u > best:
+            best, bad = u, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    return predict(model, te), best
+"""),
+    ("markdown", r"""
+## 5-fold episode cross-validation (45 train+val episodes)
+"""),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+
+# outer folds balanced by MCIS count
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_)
+
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+OOF = {name: np.full((len(SEEDS), N, 7), np.nan, np.float32) for name, _, _ in EXPERIMENTS}
+OOF_LR = np.full((N, 7), np.nan, np.float32)
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    te_eps = [e for e in EPS if FOLD[e] == f]
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for name, kind, cfg in EXPERIMENTS:
+        for si, seed in enumerate(SEEDS):
+            p, sel = train_eval(kind, cfg, tr, dev, te, seed + 1000 * f)
+            OOF[name][si, te_rows] = p
+            w, u = war_uar(p.argmax(1), y_all[te_rows], 7)
+            log.append({'fold': f, 'exp': name, 'seed': seed, 'sel_UAR': sel, 'UAR': u, 'WAR': w})
+            print(f"fold {f} {name:<18} seed {seed}: sel {sel:5.2f} | UAR {u:5.2f} WAR {w:5.2f} | "
+                  f"{(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+    # late-fusion face model: balanced LR on the G6b-style role means, trained on the outer training episodes
+    trr = np.where(np.isin(src, tr_eps))[0]
+    sc = StandardScaler().fit(LRF[trr])
+    Xtr, Xte = sc.transform(LRF[trr]), sc.transform(LRF[te_rows])
+    best = None
+    for C in [0.003, 0.01, 0.03, 0.1, 0.3, 1]:
+        s = [war_uar(LogisticRegression(max_iter=3000, C=C, class_weight='balanced').fit(Xtr[a], y_all[trr][a])
+                     .predict(Xtr[b]), y_all[trr][b], 7)[1] for a, b in GroupKFold(5).split(Xtr, y_all[trr], src[trr])]
+        if best is None or np.mean(s) > best[0]:
+            best = (np.mean(s), C)
+    clf = LogisticRegression(max_iter=3000, C=best[1], class_weight='balanced').fit(Xtr, y_all[trr])
+    pr = np.zeros((len(te_rows), 7), np.float32)
+    pr[:, clf.classes_] = clf.predict_proba(Xte)      # a class absent from training keeps probability 0
+    OOF_LR[te_rows] = pr
+
+assert not np.isnan(OOF_LR).any() and all(not np.isnan(v).any() for v in OOF.values())
+fuse = lambda pb, pf: np.exp((1 - LATE_W) * np.log(pb + 1e-9) + LATE_W * np.log(pf + 1e-9))
+OOF['LateFusion'] = np.stack([fuse(OOF['B1'][s], OOF_LR) for s in range(len(SEEDS))])
+OOF['FaceLR'] = OOF_LR[None]
+logdf = pd.DataFrame(log)
+logdf.to_csv(f"{OUT_DIR}/g8b_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g8b_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row,
+         **{k.replace('-', '_'): v for k, v in OOF.items()})
+"""),
+    ("markdown", r"""
+## Results: pooled out-of-fold scores, paired contrasts, subsets
+"""),
+    ("code", r"""
+def boot_delta(pa, pb, y, s, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    groups = [np.where(s == e)[0] for e in np.unique(s)]
+    d = []
+    for _ in range(n_boot):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        wa, ua = war_uar(pa[idx], y[idx], 7); wb, ub = war_uar(pb[idx], y[idx], 7)
+        d.append((ua - ub, wa - wb))
+    return np.percentile(np.array(d), [2.5, 97.5], axis=0)
+
+
+ENS = {k: v.mean(0).argmax(1) for k, v in OOF.items()}
+print(f"== per-seed pooled out-of-fold UAR / WAR ({N} MCIS, {len(EPS)} episodes) ==")
+for k, v in OOF.items():
+    per = [war_uar(v[s].argmax(1), y_all, 7) for s in range(len(v))]
+    print(f"  {k:<18} UAR " + " ".join(f"{u:5.2f}" for _, u in per) + f"  (mean {np.mean([u for _, u in per]):.2f})"
+          + "   WAR " + " ".join(f"{w:5.2f}" for w, _ in per))
+print("\n== seed ensemble (95% bootstrap over episodes) ==")
+for k in ENS:
+    report(k, ENS[k], y_all, src)
+
+CONTRASTS = [("RoleNet", "B1"), ("RoleNet", "LateFusion"), ("LateFusion", "B1"), ("RoleNet", "RoleNet-noRole"),
+             ("RoleNet", "RoleNet-noBalance"), ("RoleNet-facesOnly", "RoleNet-ctxOnly"), ("RoleNet", "RoleNet-ctxOnly")]
+SUBSETS = {'all': np.ones(N, bool), 'listener visible in III': VIS, 'listener not visible': ~VIS}
+for sname, m in SUBSETS.items():
+    print(f"\n== paired contrasts, {sname} (n={m.sum()}) ==")
+    if m.sum() < 30:
+        print("  too few MCIS, skipped")
+        continue
+    for a, b in CONTRASTS:
+        lo, hi = boot_delta(ENS[a][m], ENS[b][m], y_all[m], src[m])
+        wa, ua = war_uar(ENS[a][m], y_all[m], 7); wb, ub = war_uar(ENS[b][m], y_all[m], 7)
+        print(f"  {a:<18} - {b:<18} ΔUAR {ua - ub:+5.2f} [{lo[0]:+5.2f},{hi[0]:+5.2f}]  "
+              f"ΔWAR {wa - wb:+5.2f} [{lo[1]:+5.2f},{hi[1]:+5.2f}]")
+
+print("\n== per-fold ΔUAR, RoleNet − B1 (seed ensemble) ==")
+for f in range(N_OUTER):
+    m = fold_of_row == f
+    print(f"  fold {f}: {war_uar(ENS['RoleNet'][m], y_all[m], 7)[1] - war_uar(ENS['B1'][m], y_all[m], 7)[1]:+.2f}")
+
+lo, hi = boot_delta(ENS['RoleNet'], ENS['B1'], y_all, src)
+d = war_uar(ENS['RoleNet'], y_all, 7)[1] - war_uar(ENS['B1'], y_all, 7)[1]
+print(f"\nPRIMARY: RoleNet − B1 ΔUAR {d:+.2f} [{lo[0]:+.2f},{hi[0]:+.2f}] -> "
+      f"{'CONFIRMED' if lo[0] > 0 else ('DIRECTIONAL (CI includes 0)' if d > 0 else 'NOT SUPPORTED')}")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
                         ("g4_test_preregistered.ipynb", G4), ("g5_episode_cv.ipynb", G5),
                         ("g6a_listener_visibility.ipynb", G6A), ("g6b_listener_expression.ipynb", G6B),
-                        ("g7b_faces_into_b1.ipynb", G7B), ("g8a_role_features.ipynb", G8A)]:
+                        ("g7b_faces_into_b1.ipynb", G7B), ("g8a_role_features.ipynb", G8A),
+                        ("g8b_rolenet_cv.ipynb", G8B)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

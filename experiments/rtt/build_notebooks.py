@@ -3771,12 +3771,481 @@ print(f"\nPRIMARY (LA): RoleNet − B1 ΔUAR {d:+.2f} [{lo[0]:+.2f},{hi[0]:+.2f}
 """),
 ]
 
+# ---------------------------------------------------------------- G9: RoleNet+ (speaker roles + B's previous utterance)
+G9 = [
+    ("markdown", r"""
+# G9 — RoleNet+: who spoke in the context, and B's previous utterance (round 1 of at most 2)
+
+G8b showed three things:
+- RoleNet beats B1 by +4.83 UAR [+2.40, +7.13] (5/5 folds) and beats LateFusion by +3.15.
+- The specific value of **role assignment** is not established: RoleNet − noRole is about +1 and not significant.
+- The diagnostics found that B's *own* previous utterance predicts B's next emotion best. In clip II, the label matches
+  50.6% of the time when B spoke there, 45.2% when a third person did, and about 35% when A did.
+
+RoleNet+ therefore grounds the **speech** in roles, not only the faces. Everything else is identical to RoleNet
+(same features, hyper-parameters, folds, and seeds).
+
+1. **Speaker-role tags.** Each utterance in clips I/II gets soft weights for "spoken by A / B / someone else". The
+   weights are added to its speech token as a mix of learned role embeddings; clip III is tagged "A".
+   * *by A*: the ECAPA voice cosine to clip III.
+   * *by B*: a **B-pointer**, a logistic regression over clip I–III cues only. The cues are voice vs A, which faces
+     are present, the listener's frame share, mouth–audio sync per role, the number of identities, and voice
+     continuity between clips I and II.
+   * The pointer's **training labels** come from clip IV's voice. This is used at training time only: clip IV is never
+     an input.
+   * The pointer is cross-fitted. Eval rows are scored by a model fitted on the training episodes. Training rows are
+     scored out-of-fold, grouped by episode, so train and eval inputs have the same quality.
+2. **B's previous-utterance token.** This is the pointer-weighted average of the clip I/II speech tokens, with a
+   learned "absent" token when no context utterance looks like B's. It has an auxiliary head (weight 0.3) that
+   predicts the gold emotion of the context clip B spoke in. That target is also training-only (clip IV voice).
+
+**Arms:**
+
+| Arm | What it is |
+|---|---|
+| `RoleNet` | Reference: G8b's model, re-run |
+| `RoleNet+spk` | Adds speaker-role tags (component 1) |
+| `RoleNet+` | Adds speaker-role tags and B's previous-utterance token (components 1 and 2) |
+| `RoleNet+ -faceRoles` | `RoleNet+` without face role assignment |
+| `RoleNet+ ORACLE` | Analysis only: uses the clip-IV-derived "B spoke" labels at evaluation, so it measures the headroom of a perfect pointer. **Never a result.** |
+
+**Decision rule, fixed before running.** Adopt `RoleNet+` over `RoleNet` for the single test run only if all three
+hold:
+- its seed-ensemble ΔUAR under LA is > 0;
+- its 6-class macro-recall Δ (without fear) is > 0;
+- the 6-class Δ is positive in ≥ 4 of 5 folds.
+
+Otherwise keep `RoleNet`. At most one more round follows.
+
+5-fold CV over the 45 train+val episodes, with the same folds and seeds as G8b. The test split stays untouched.
+"""),
+    G8B[1],
+    ("code", r"""
+# ======== CONFIG ========
+import os
+
+
+def first_existing(*paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"none of {paths}")
+
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = first_existing("/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv",
+                           "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv")
+G8A_DIR = first_existing("/kaggle/input/datasets/ptrnghieu/g8a-features", "/kaggle/input/g8a-features")
+OUT_DIR = "/kaggle/working"
+
+N_OUTER, N_INNER_DEV = 5, 5
+SEEDS = [42, 123, 456]
+# RoleNet, identical to G8b (set a priori, not tuned)
+RN = dict(D=128, heads=4, layers=2, dropout=0.2, lr=3e-4, wd=1e-2, epochs=80, patience=12, batch=64,
+          aux_w=0.3, a_w=0.3, p_drop_ctx=0.3, p_drop_face=0.15)
+BPREV_W = 0.3                # auxiliary weight of the B-previous-utterance head
+PCA_DIM, MAXF, MAXF_POOL = 128, 24, 32
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
+LA_TAU = 1.0
+VOICE_SAME_COS = 0.35
+DEBUG_PER_EPISODE = None
+
+FULL = dict(role=True, faces=True, ctx=True, aux=True, mdrop=True, spk=False, bprev=False, oracle=False)
+EXPERIMENTS = [
+    ("RoleNet",             FULL),
+    ("RoleNet+spk",         {**FULL, 'spk': True}),
+    ("RoleNet+",            {**FULL, 'spk': True, 'bprev': True}),
+    ("RoleNet+ -faceRoles", {**FULL, 'spk': True, 'bprev': True, 'role': False}),
+    ("RoleNet+ ORACLE",     {**FULL, 'spk': True, 'bprev': True, 'oracle': True}),   # analysis only
+]
+"""),
+    G8B[3], G8B[4], G8B[5], G8B[6], G8B[7],
+    ("markdown", r"""
+## Who spoke in clips I/II: training labels from clip IV voice, inference cues from clips I–III
+"""),
+    ("code", r"""
+import librosa
+try:
+    from speechbrain.inference.speaker import EncoderClassifier
+except ImportError:
+    from speechbrain.pretrained import EncoderClassifier
+spk_model = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb", savedir=f"{OUT_DIR}/ecapa",
+                                           run_opts={"device": DEVICE})
+AUDIO_ROOTS = [os.path.join(r, 'audio') for r in glob.glob(os.path.join(DATASET_DIR, '*', 'Hi-EF'))]
+
+
+def audio_path(c):
+    ep, num = c.split('/')
+    for root in AUDIO_ROOTS:
+        for ext in ('.mp3', '.wav', '.flac', '.m4a'):
+            p = os.path.join(root, ep, num + ext)
+            if os.path.exists(p):
+                return p
+    return None
+
+
+V4 = {}          # clip IV voice: used ONLY to build training labels / targets and the ORACLE analysis arm
+for c in tqdm(sorted(set(DEV.clip4)), desc='clip IV voice (training labels only)'):
+    p = audio_path(c)
+    if p is None:
+        continue
+    try:
+        wav, _ = librosa.load(p, sr=16000, mono=True)
+    except Exception:
+        continue
+    if len(wav) < 8000:
+        continue
+    with torch.no_grad():
+        e = spk_model.encode_batch(torch.tensor(wav, dtype=torch.float32).unsqueeze(0)).reshape(-1).cpu().numpy()
+    V4[c] = (e / (np.linalg.norm(e) + 1e-9)).astype(np.float32)
+del spk_model; torch.cuda.empty_cache()
+
+
+def gold(c):
+    e = ann.at[c, 7] if c in ann.index else None
+    return E2I.get(e, -1) if isinstance(e, str) else -1
+
+
+def ecapa(c):
+    a = G8[c]['audio']
+    return a['ecapa'].astype(np.float32) if a is not None and a.get('ecapa') is not None else None
+
+
+NPF = 16
+ISB = np.zeros((N, 2), np.float32); ISB_OK = np.zeros((N, 2), bool)
+BTGT = np.full(N, -100, np.int64)
+PFEAT = np.zeros((N, 2, NPF), np.float32)
+for n, row in enumerate(DEV.itertuples()):
+    cl = [row.clip1, row.clip2]
+    e4 = V4.get(row.clip4)
+    for k, c in enumerate(cl):
+        ek, eo = ecapa(c), ecapa(cl[1 - k])
+        if e4 is not None and ek is not None:
+            ISB[n, k] = float(ek @ e4 >= VOICE_SAME_COS); ISB_OK[n, k] = True
+        v = VOI[n, k]
+        PFEAT[n, k] = [v[6], v[7], FMASK[n, 1, k].sum() / MAXF, FMASK[n, 0, k].sum() / MAXF, FMASK[n, 2, k].sum() / MAXF,
+                       v[0], v[2], v[4], v[1], v[3], v[5], v[8], float(k), float(FMASK[n, 1, 2].any()),
+                       float(ek @ eo) if ek is not None and eo is not None else 0.0, v[2] - max(v[0], v[4])]
+    for k in (1, 0):                      # prefer clip II
+        if ISB[n, k] and gold(cl[k]) >= 0:
+            BTGT[n] = gold(cl[k]); break
+PA = np.where(VOI[:, :2, 7] > 0, 1 / (1 + np.exp(-(VOI[:, :2, 6] - VOICE_SAME_COS) * 20)), 0.0).astype(np.float32)
+print(f"B spoke in clip I {ISB[ISB_OK[:, 0], 0].mean() * 100:.1f}% | clip II {ISB[ISB_OK[:, 1], 1].mean() * 100:.1f}% "
+      f"(clip IV voice found {len(V4)}/{DEV.clip4.nunique()}) | rows with a B-previous-utterance target {(BTGT >= 0).sum()}")
+"""),
+    ("markdown", r"""
+## Models
+"""),
+    ("code", r"""
+T = lambda a, dt=None: torch.tensor(a, device=DEVICE) if dt is None else torch.tensor(a, dtype=dt, device=DEVICE)
+FMASK, PMASK, VOI = T(FMASK), T(PMASK), T(VOI)
+FACE = POOL = PBT = None             # set per fold
+CLIPIDX = T([[CIDX[c] for c in r] for r in DEV[['clip1', 'clip2', 'clip3']].values])
+TXT, AUD, AFD = FEAT['text'][CLIPIDX], F.normalize(FEAT['audio'][CLIPIDX], dim=-1), FEAT['afound'][CLIPIDX].float()
+fm = FEAT['fmask'][CLIPIDX].unsqueeze(-1).float()
+SCN = torch.cat([FEAT['ori'][CLIPIDX].mean(2), (FEAT['face'][CLIPIDX] * fm).sum(2) / fm.sum(2).clamp(min=1)], -1)
+YB, YA, BT = T(DEV.yB.values), T(DEV.yA.values), T(BTGT)
+PAT, ISBT = T(PA), T(ISB)
+
+
+class FramePool(nn.Module):
+    def __init__(self, fin, d):
+        super().__init__()
+        self.proj = nn.Sequential(nn.LayerNorm(fin), nn.Linear(fin, d), nn.GELU(), nn.Linear(d, d))
+        self.score = nn.Linear(d, 1)
+
+    def forward(self, x, m):
+        h = self.proj(x.float())
+        a = self.score(h).squeeze(-1).masked_fill(~m, -1e4)
+        w = torch.softmax(a, -1) * m.float()
+        return (w.unsqueeze(-1) * h).sum(-2), m.any(-1)
+
+
+class RoleNetPlus(nn.Module):
+    # RoleNet (G8b) + optional speaker-role tags on speech tokens and a B-previous-utterance token
+    def __init__(self, cfg, d=RN['D']):
+        super().__init__()
+        self.cfg, self.R = cfg, (3 if cfg['role'] else 1)
+        self.pool = FramePool(FDIM, d)
+        self.absent = nn.Parameter(torch.randn(self.R, 3, d) * 0.02)
+        self.face_role = nn.Parameter(torch.randn(self.R, d) * 0.02)
+        self.text = nn.Sequential(nn.LayerNorm(512), nn.Linear(512, d))
+        self.audio = nn.Sequential(nn.LayerNorm(527), nn.Linear(527, d))
+        self.voice = nn.Linear(NVOICE, d)
+        self.scene = nn.Sequential(nn.LayerNorm(1024), nn.Linear(1024, d))
+        self.ctx_role = nn.Parameter(torch.randn(2, d) * 0.02)
+        self.clip_emb = nn.Parameter(torch.randn(3, d) * 0.02)
+        self.query = nn.Parameter(torch.randn(1, 1, d) * 0.02)
+        if cfg['spk']:
+            self.spk_role = nn.Parameter(torch.randn(3, d) * 0.02)            # spoken by A / B / other
+        if cfg['bprev']:
+            self.bprev_absent = nn.Parameter(torch.randn(1, d) * 0.02)
+            self.bprev_emb = nn.Parameter(torch.randn(1, d) * 0.02)
+        layer = nn.TransformerEncoderLayer(d, RN['heads'], 4 * d, RN['dropout'], batch_first=True, norm_first=True)
+        self.enc = nn.TransformerEncoder(layer, RN['layers'], enable_nested_tensor=False)
+        mk = lambda: nn.Sequential(nn.LayerNorm(d), nn.Dropout(0.3), nn.Linear(d, 7))
+        self.head, self.head_face, self.head_ctx = mk(), mk(), mk()
+        self.head_A = mk() if cfg['role'] else None
+        self.head_bprev = mk() if cfg['bprev'] else None
+
+    def forward(self, ix, train=False):
+        B, aux = len(ix), {}
+        x, m = (FACE[ix], FMASK[ix]) if self.R == 3 else (POOL[ix], PMASK[ix])
+        h, present = self.pool(x, m)
+        h = torch.where(present.unsqueeze(-1), h, self.absent.unsqueeze(0).expand(B, -1, -1, -1))
+        h = h + self.face_role[None, :, None] + self.clip_emb[None, None]
+        ft = h.reshape(B, self.R * 3, -1)
+        aux['face'] = (self.head_face(ft.mean(1)), YB[ix], RN['aux_w'])
+        if self.head_A is not None:
+            tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+            aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
+        spk_ = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
+        ctx = []
+        if self.cfg['spk'] or self.cfg['bprev']:
+            pA = PAT[ix]
+            pB = (ISBT[ix] if self.cfg['oracle'] else PBT[ix]) * (1 - pA)
+            pO = (1 - pA - pB).clamp(min=0)
+        if self.cfg['spk']:
+            w = torch.stack([pA, pB, pO], -1)                                     # [B, 2, 3]
+            w3 = torch.cat([w, torch.tensor([1.0, 0, 0], device=w.device).expand(B, 1, 3)], 1)
+            spk_ = spk_ + w3 @ self.spk_role
+        scn = self.scene(SCN[ix]) + self.ctx_role[1]
+        ctx += [spk_ + self.clip_emb, scn + self.clip_emb]
+        if self.cfg['bprev']:
+            s = pB.sum(1, keepdim=True)
+            hb = (pB.unsqueeze(-1) * spk_[:, :2]).sum(1) / s.clamp(min=1e-3)
+            hb = torch.where(s > 0.05, hb, self.bprev_absent.expand(B, -1)) + self.bprev_emb
+            ctx.append(hb.unsqueeze(1))
+            aux['bprev'] = (self.head_bprev(hb), BT[ix], BPREV_W)
+        ct = torch.cat(ctx, 1)
+        aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
+        toks = torch.cat([self.query.expand(B, -1, -1), ft, ct], 1)
+        valid = torch.ones(toks.shape[:2], dtype=torch.bool, device=toks.device)
+        if train and self.cfg['mdrop']:
+            u = torch.rand(B, device=toks.device)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+            nf = ft.shape[1]
+            valid[:, 1:1 + nf] &= ~drop_face.unsqueeze(1)
+            valid[:, 1 + nf:] &= ~drop_ctx.unsqueeze(1)
+        out = self.enc(toks, src_key_padding_mask=~valid)
+        return self.head(out[:, 0]), aux
+
+
+print("parameters:", {n: f"{sum(p.numel() for p in RoleNetPlus(c).parameters()) / 1e6:.2f}M" for n, c in EXPERIMENTS})
+
+
+def predict(model, ix, bs=256):
+    model.eval()
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(ix), bs):
+            out.append(F.softmax(model(ix[i:i + bs])[0], -1).cpu())
+    return torch.cat(out).numpy()
+
+
+def train_eval(cfg, tr, dev, te, seed):
+    seed_all(seed)
+    model = RoleNetPlus(cfg).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=RN['lr'], weight_decay=RN['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    best, best_state, bad = -1, None, 0
+    for ep in range(RN['epochs']):
+        model.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm), RN['batch']):
+            j = perm[i:i + RN['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, w in aux.values():
+                if (t >= 0).any():
+                    loss = loss + w * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(predict(model, dev).argmax(1), y_dev, 7)[1]
+        if u > best:
+            best, bad = u, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= RN['patience']:
+                break
+    model.load_state_dict(best_state)
+    return predict(model, te), best
+"""),
+    ("markdown", r"""
+## 5-fold episode cross-validation (same folds and seeds as G8b)
+"""),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_, "(must match G8b)")
+
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+X2, Y2, OK2, G2 = PFEAT.reshape(N * 2, -1), ISB.reshape(-1), ISB_OK.reshape(-1), np.repeat(src, 2)
+
+
+def pointer_probs(tr_rows, te_rows):
+    # B-pointer: eval rows scored by a model fitted on training episodes; training rows scored out-of-fold
+    rows2 = lambda r: np.sort(np.concatenate([r * 2, r * 2 + 1]))
+    out = np.zeros(N * 2, np.float32)
+    tr2 = rows2(tr_rows)
+    fit2 = tr2[OK2[tr2]]
+    sc = StandardScaler().fit(X2[fit2])
+    lr_ = lambda idx: LogisticRegression(max_iter=3000, C=1.0).fit(sc.transform(X2[idx]), Y2[idx])
+    te2 = rows2(te_rows)
+    out[te2] = lr_(fit2).predict_proba(sc.transform(X2[te2]))[:, 1]
+    for a, b in GroupKFold(5).split(tr2, groups=G2[tr2]):
+        fa = tr2[a][OK2[tr2[a]]]
+        out[tr2[b]] = lr_(fa).predict_proba(sc.transform(X2[tr2[b]]))[:, 1]
+    return out.reshape(N, 2)
+
+
+OOF = {name: np.full((len(SEEDS), N, 7), np.nan, np.float32) for name, _ in EXPERIMENTS}
+PB_OOF = np.zeros((N, 2), np.float32)
+LOGPI = np.zeros((N, 7), np.float32)
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    pb = pointer_probs(trr, te_rows)
+    PB_OOF[te_rows] = pb[te_rows]
+    PBT = T(pb)
+    LOGPI[te_rows] = np.log((np.bincount(y_all[trr], minlength=7) + 1) / (len(trr) + 7))
+    ok = ISB_OK[te_rows]
+    auc = roc_auc_score(ISB[te_rows][ok], pb[te_rows][ok]) if len(set(ISB[te_rows][ok])) == 2 else float('nan')
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)} | B-pointer AUC {auc:.3f}",
+          flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for name, cfg in EXPERIMENTS:
+        for si, seed in enumerate(SEEDS):
+            p, sel = train_eval(cfg, tr, dev, te, seed + 1000 * f)
+            OOF[name][si, te_rows] = p
+            w, u = war_uar(p.argmax(1), y_all[te_rows], 7)
+            log.append({'fold': f, 'exp': name, 'seed': seed, 'sel_UAR': sel, 'UAR': u, 'WAR': w})
+            print(f"fold {f} {name:<20} seed {seed}: sel {sel:5.2f} | UAR {u:5.2f} WAR {w:5.2f} | "
+                  f"{(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+
+assert all(not np.isnan(v).any() for v in OOF.values())
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g9_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g9_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, logpi=LOGPI, pb=PB_OOF,
+         isb=ISB, isb_ok=ISB_OK, **{k.replace('-', '_').replace('+', 'plus').replace(' ', '_'): v for k, v in OOF.items()})
+"""),
+    ("markdown", r"""
+## Results and the preregistered decision
+"""),
+    ("code", r"""
+FEAR = E2I['fear']
+
+
+def recalls(p, y):
+    return np.array([(p[y == c] == c).mean() * 100 if (y == c).any() else np.nan for c in range(7)])
+
+
+def uar7(p, y):
+    return np.nanmean(recalls(p, y))
+
+
+def uar6(p, y):
+    return np.nanmean(np.delete(recalls(p, y), FEAR))
+
+
+rng_ = np.random.default_rng(0)
+GRP = [np.where(src == e)[0] for e in np.unique(src)]
+BOOT = [np.concatenate([GRP[j] for j in rng_.integers(0, len(GRP), len(GRP))]) for _ in range(2000)]
+
+
+def delta(pa, pb, m, metric):
+    idx_m = np.where(m)[0]
+    d0 = metric(pa[m], y_all[m]) - metric(pb[m], y_all[m])
+    ds = []
+    for b in BOOT:
+        i = b[m[b]]
+        ds.append(metric(pa[i], y_all[i]) - metric(pb[i], y_all[i]))
+    lo, hi = np.nanpercentile(ds, [2.5, 97.5])
+    return d0, lo, hi
+
+
+def safe_auc(y, p):
+    return roc_auc_score(y, p) if len(set(y)) == 2 else float('nan')
+
+
+ok = ISB_OK.reshape(-1)
+print(f"B-pointer AUC (out-of-fold): all {safe_auc(ISB.reshape(-1)[ok], PB_OOF.reshape(-1)[ok]):.3f} | "
+      f"clip I {safe_auc(ISB[ISB_OK[:, 0], 0], PB_OOF[ISB_OK[:, 0], 0]):.3f} | "
+      f"clip II {safe_auc(ISB[ISB_OK[:, 1], 1], PB_OOF[ISB_OK[:, 1], 1]):.3f}")
+
+LOGP = {k: np.log(v.mean(0) + 1e-9) for k, v in OOF.items()}
+PRED = {'plain': {k: v.argmax(1) for k, v in LOGP.items()}, 'LA': {k: (v - LA_TAU * LOGPI).argmax(1) for k, v in LOGP.items()}}
+print(f"\n== per-seed pooled UAR, plain ==")
+for k, v in OOF.items():
+    per = [uar7(v[s].argmax(1), y_all) for s in range(len(v))]
+    print(f"  {k:<20} " + " ".join(f"{u:5.2f}" for u in per) + f"  (mean {np.mean(per):.2f})")
+print("\n== seed ensemble: UAR LA | 6-class LA | UAR plain | WAR LA ==")
+for k in PRED['LA']:
+    print(f"  {k:<20} {uar7(PRED['LA'][k], y_all):6.2f} | {uar6(PRED['LA'][k], y_all):6.2f} | "
+          f"{uar7(PRED['plain'][k], y_all):6.2f} | {(PRED['LA'][k] == y_all).mean() * 100:6.2f}")
+print("\n== per-class recall, LA ==")
+print(f"  {'':<20}" + "".join(f"{e[:7]:>8}" for e in EMO))
+for k, p in PRED['LA'].items():
+    print(f"  {k:<20}" + "".join(f"{x:8.1f}" for x in recalls(p, y_all)))
+
+CONTRASTS = [("RoleNet+", "RoleNet"), ("RoleNet+spk", "RoleNet"), ("RoleNet+", "RoleNet+spk"),
+             ("RoleNet+", "RoleNet+ -faceRoles"), ("RoleNet+ ORACLE", "RoleNet+")]
+bspoke = (ISB * ISB_OK).max(1) > 0
+SUBSETS = {'all': np.ones(N, bool), 'listener visible in III': VIS.copy() if isinstance(VIS, np.ndarray) else VIS,
+           'B spoke in I/II (analysis)': bspoke, 'B did not speak in I/II (analysis)': ~bspoke}
+for sname, m in SUBSETS.items():
+    m = np.asarray(m, bool)
+    print(f"\n== paired contrasts, {sname} (n={m.sum()}) — LA 7-class | LA 6-class | plain 7-class ==")
+    if m.sum() < 30:
+        print("  too few MCIS, skipped")
+        continue
+    for a, b in CONTRASTS:
+        r = [delta(PRED[mode][a], PRED[mode][b], m, met) for mode, met in (('LA', uar7), ('LA', uar6), ('plain', uar7))]
+        print(f"  {a:<20} - {b:<20} " + " | ".join(f"{d:+5.2f} [{lo:+5.2f},{hi:+5.2f}]" for d, lo, hi in r))
+
+print("\n== per-fold 6-class Δ (LA), RoleNet+ − RoleNet ==")
+fold_d = []
+for f in range(N_OUTER):
+    m = fold_of_row == f
+    fold_d.append(uar6(PRED['LA']['RoleNet+'][m], y_all[m]) - uar6(PRED['LA']['RoleNet'][m], y_all[m]))
+    print(f"  fold {f}: {fold_d[-1]:+.2f}")
+d7 = uar7(PRED['LA']['RoleNet+'], y_all) - uar7(PRED['LA']['RoleNet'], y_all)
+d6 = uar6(PRED['LA']['RoleNet+'], y_all) - uar6(PRED['LA']['RoleNet'], y_all)
+adopt = d7 > 0 and d6 > 0 and sum(x > 0 for x in fold_d) >= 4
+print(f"\nDECISION (preregistered): ΔUAR LA {d7:+.2f}, Δ6-class {d6:+.2f}, positive folds {sum(x > 0 for x in fold_d)}/5 -> "
+      f"{'ADOPT RoleNet+ for the test run' if adopt else 'KEEP RoleNet'}")
+"""),
+]
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
                         ("g4_test_preregistered.ipynb", G4), ("g5_episode_cv.ipynb", G5),
                         ("g6a_listener_visibility.ipynb", G6A), ("g6b_listener_expression.ipynb", G6B),
                         ("g7b_faces_into_b1.ipynb", G7B), ("g8a_role_features.ipynb", G8A),
-                        ("g8b_rolenet_cv.ipynb", G8B)]:
+                        ("g8b_rolenet_cv.ipynb", G8B),
+                        ("g9_rolenet_plus_cv.ipynb", G9)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

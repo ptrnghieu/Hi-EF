@@ -21,6 +21,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g7_late_fusion.py` | Late fusion of B1 (G3b val probabilities) with a face-only balanced LR, equal weight, presence-only control |
 | `g8a_role_features.ipynb` | G8a: role-agnostic extraction for every clip used as I–III (train/val/test inputs, no labels read): per-face box, pose, ArcFace, HSEmotion logits + 1280-d embedding, mouth opening, landmarks; per-clip ECAPA (whole + 1.5 s windows) and a 10 Hz energy envelope; resumable shards |
 | `g8b_rolenet_cv.ipynb` | G8b: RoleNet (role-tagged face tokens, speech/scene tokens, balance aids) vs B1, B1+faces-joint (the G7b design), LateFusion with an unbalanced face LR, and four ablations; 5-fold CV over the 45 train+val episodes, PCA fitted per fold, scores plain and with one post-hoc logit adjustment; diagnostics for the design-debate hypotheses (split identities, mouth–audio sync AUC, person-specific inertia via clip-IV voice used for analysis only) |
+| `g9_rolenet_plus_cv.ipynb` | G9 (round 1 of at most 2): RoleNet+ adds speaker-role tags on the speech tokens (A by voice vs clip III; B by a cross-fitted B-pointer whose training labels come from clip-IV voice) and a B-previous-utterance token with an auxiliary head. Arms: RoleNet, +spk, RoleNet+, RoleNet+ without face roles, and an ORACLE-pointer analysis arm; same folds/seeds as G8b; preregistered adoption rule |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -161,3 +162,13 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 - Faces carry more signal than the compact context.
 - The specific contribution of role assignment (about +1) and of the balance aids (about +1) is not established; per-fold 6-class Δ for role is −2.0 / +1.2 / +5.3 / −3.0 / +3.2.
 - CV results are exploratory, because the design was informed by analyses on the same episodes. The hyper-parameters and the primary contrast were fixed before the run.
+
+## G9 plan (round 1 of at most 2, fixed before running)
+
+* **Adoption rule.** Adopt RoleNet+ over RoleNet for the single test run only if all three hold:
+  - the seed-ensemble ΔUAR (LA) > 0;
+  - the 6-class Δ (without fear) > 0;
+  - the 6-class Δ is positive in ≥ 4/5 folds.
+* **Clip IV.** Its voice gives the B-pointer's training labels and the B-previous-utterance targets. It is never an
+  input; the ORACLE arm is analysis only.
+* **After round 2** (if any), no further architecture changes. Then one preregistered test run.

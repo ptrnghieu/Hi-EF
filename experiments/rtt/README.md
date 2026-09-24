@@ -11,6 +11,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g1_llm_recognition.ipynb` | G1: an OpenAI LLM reads subtitle lines I–III, predicts A's emotion/polarity and B directly; A posterior → `P(B \| E_A)` |
 | `g2_recognizer_all_labels.ipynb` | G2: multimodal A recognizer trained on clip III only vs. all labeled clips (III ∪ IV), 5 seeds; A posterior → `P(B \| E_A)` |
 | `g3_trajectory_forecaster.ipynb` | G3: cross-fitted recognizer gives soft emotion/polarity/confidence for clips I–III; forecaster arms B1, B1+certw, traj_only, B1+traj, B1+traj+certw with paired bootstrap vs B1 |
+| `g3b_robustness.ipynb` | G3b: robustness of `traj_only` — per-fold eval trajectories (no train/eval feature mismatch), 3 recognizer seeds, both selection protocols (inner-dev / val), clip ablation III · II–III · I–III, logistic-regression forecaster, gate summary |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -32,3 +33,6 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 * G3: `B1+traj` (or `B1+traj+certw`) beats `B1` with a paired source-bootstrap CI on ΔUAR that excludes zero
   and wins on most seeds. Early stopping uses inner-dev training episodes, so G3's B1 is not numerically
   identical to the report's B1 (selected on val); compare arms within G3.
+* G3b: (1) `traj_I-III` beats `B1` under inner-dev selection with a paired CI on ΔUAR above zero,
+  (2) `traj_I-III@val` is at least as good as `B1@val` (report protocol), (3) recognizer-seed spread of
+  `traj_I-III` UAR ≤ 1.5 points. Only after this gate is the test split opened, once, for a preregistered set of models.

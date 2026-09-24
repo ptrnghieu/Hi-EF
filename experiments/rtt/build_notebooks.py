@@ -2772,11 +2772,318 @@ print("4. listener-visible subset and early-frame arm: see tables above (descrip
 ]
 
 
+
+# ---------------------------------------------------------------- G8a: role-agnostic face / voice extraction
+G8A = [
+    ("markdown", r"""
+# G8a — Rich per-face and per-voice features for role-grounded forecasting
+
+One extraction pass that every later role-grounded model reads. It stores **what is seen and heard**, not who is who;
+roles (A, listener, others, speaker of I/II) are assigned later from these features, so the role rules can change
+without re-extracting.
+
+* Clips: every clip used as clip **I, II or III** by any MCIS in train / val / **test**. Clip IV is never read.
+  No label is read (the split file is used only for clip ids), so extracting test inputs does not unlock the test.
+* Per sampled frame (4 fps, ≤ 32 frames) and per detected face: box, detection score, head pose, ArcFace identity
+  (512, fp16), HSEmotion 8 emotion logits + valence/arousal, the HSEmotion **penultimate embedding** (fp16),
+  mouth opening from the 68 3-D landmarks, and 68 landmarks (fp16).
+* Per clip audio: ECAPA speaker embedding of the whole clip and of 1.5 s windows (hop 0.75 s), plus an RMS energy
+  envelope at 10 Hz (used later to match mouth movement to speech → who is speaking).
+
+Output: `/kaggle/working/g8a/shard_*.pkl` (resumable). Expected run time ≈ 3–4 h on one T4 — use *Save & Run All*,
+then turn the notebook output into a dataset (e.g. `g8a-features`).
+"""),
+    ("code", r"""
+!pip install -q insightface speechbrain onnx
+!pip uninstall -y -q onnxruntime onnxruntime-gpu
+!pip install -q "onnxruntime-gpu==1.22.0"
+"""),
+    ("code", r"""
+# ======== CONFIG ========
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+SPLIT_CSV = "/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv"
+OUT_DIR = "/kaggle/working"
+SHARD_DIR = f"{OUT_DIR}/g8a"
+SHARD_SIZE = 250
+
+SAMPLE_FPS, MAX_FRAMES = 4, 32
+DET_SIZE = (640, 640)
+MIN_DET_SCORE, MIN_FACE_PX = 0.5, 24
+AUDIO_SR = 16000
+WIN_S, HOP_S = 1.5, 0.75           # windowed ECAPA
+ENV_HZ = 10                        # RMS energy envelope rate
+N_DECODE_THREADS = 4
+FER_URL = ("https://github.com/HSE-asavchenko/face-emotion-recognition/raw/main/models/affectnet_emotions/onnx/"
+           "enet_b0_8_va_mtl.onnx")
+"""),
+    ("code", r"""
+import os, glob, pickle, time, urllib.request
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np, pandas as pd, cv2
+import torch
+import onnxruntime as ort
+if hasattr(ort, 'preload_dlls'):
+    try:
+        ort.preload_dlls()
+    except Exception as e:
+        print("preload_dlls:", e)
+PROV = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+
+roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
+VIDEO_ROOTS = [os.path.join(r, "video") for r in roots if os.path.isdir(os.path.join(r, "video"))]
+AUDIO_ROOTS = [os.path.join(r, "audio") for r in roots if os.path.isdir(os.path.join(r, "audio"))]
+
+
+def find_media(roots_, clip, exts):
+    ep, num = clip.split('/')
+    for root in roots_:
+        for ext in exts:
+            p = os.path.join(root, ep, num + ext)
+            if os.path.exists(p):
+                return p
+    return None
+
+
+sp = pd.read_csv(SPLIT_CSV, dtype=str, usecols=['sample_id', 'split', 'clip1', 'clip2', 'clip3'])   # no label columns
+clips = sorted(set(sp[['clip1', 'clip2', 'clip3']].values.ravel()))
+print(f"MCIS {len(sp)} {sp.split.value_counts().to_dict()} | clips I-III {len(clips)} | "
+      f"missing video {sum(find_media(VIDEO_ROOTS, c, ('.mp4',)) is None for c in clips)} | "
+      f"missing audio {sum(find_media(AUDIO_ROOTS, c, ('.mp3', '.wav')) is None for c in clips)}")
+"""),
+    ("code", r"""
+from insightface.app import FaceAnalysis
+app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition', 'landmark_3d_68'], providers=PROV)
+app.prepare(ctx_id=0, det_size=DET_SIZE)
+print("insightface providers:", {k: m.session.get_providers() for k, m in app.models.items()})
+
+fer_path = f"{OUT_DIR}/enet_b0_8_va_mtl.onnx"
+if not os.path.exists(fer_path) or os.path.getsize(fer_path) < 1_000_000:   # re-fetch missing / truncated files
+    urllib.request.urlretrieve(FER_URL, fer_path)
+assert os.path.getsize(fer_path) > 1_000_000, f"FER model download looks broken ({os.path.getsize(fer_path)} bytes)"
+# expose the penultimate (pooled) features as a second output: input of the last Gemm/MatMul
+fer_emb_path = f"{OUT_DIR}/enet_b0_8_va_mtl_emb.onnx"
+try:
+    import onnx
+    m = onnx.load(fer_path)
+    last = [n for n in m.graph.node if n.op_type in ('Gemm', 'MatMul')][-1]
+    m.graph.output.append(onnx.helper.make_tensor_value_info(last.input[0], onnx.TensorProto.FLOAT, None))
+    onnx.save(m, fer_emb_path)
+    fer = ort.InferenceSession(fer_emb_path, providers=PROV)
+except Exception as e:
+    print("could not expose the FER embedding, logits only:", repr(e))
+    fer = ort.InferenceSession(fer_path, providers=PROV)
+FER_IN = fer.get_inputs()[0].name
+print("FER providers:", fer.get_providers(), "| outputs", [(o.name, o.shape) for o in fer.get_outputs()])
+MEAN, STD = np.array([0.485, 0.456, 0.406], np.float32), np.array([0.229, 0.224, 0.225], np.float32)
+
+
+def fer_batch(crops):
+    if not crops:
+        return np.zeros((0, 10), np.float32), None
+    x = np.stack([(cv2.cvtColor(cv2.resize(c, (224, 224)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255 - MEAN) / STD
+                  for c in crops]).transpose(0, 3, 1, 2).astype(np.float32)
+    outs = fer.run(None, {FER_IN: x})
+    head = outs[0][:, :10] if outs[0].shape[1] >= 10 else np.pad(outs[0], ((0, 0), (0, 10 - outs[0].shape[1])))
+    emb = outs[1].reshape(len(x), -1).astype(np.float16) if len(outs) > 1 else None
+    return head.astype(np.float32), emb
+
+
+def read_frames(path):
+    # sequential decode, keep ~SAMPLE_FPS frames per second (<= MAX_FRAMES, evenly spread)
+    cap = cv2.VideoCapture(path)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    want = max(1, min(MAX_FRAMES, int(round(n / fps * SAMPLE_FPS)))) if n else MAX_FRAMES
+    keep = set(np.linspace(0, max(n - 1, 0), want).astype(int).tolist())
+    frames, times, i = [], [], 0
+    while True:
+        ok = cap.grab()
+        if not ok:
+            break
+        if i in keep:
+            ok, fr = cap.retrieve()
+            if ok:
+                frames.append(fr); times.append(i / fps)
+        i += 1
+        if i > max(keep, default=0):
+            break
+    cap.release()
+    return frames, times, {'n_video_frames': n, 'fps': fps, 'duration': n / fps if fps else 0.0}
+
+
+def analyse_frames(frames, times):
+    dets, crops = [], []
+    for fi, fr in enumerate(frames):
+        H, W = fr.shape[:2]
+        for f in app.get(fr):
+            x1, y1, x2, y2 = [float(v) for v in f.bbox]
+            if f.det_score < MIN_DET_SCORE or min(x2 - x1, y2 - y1) < MIN_FACE_PX:
+                continue
+            m = 0.1 * max(x2 - x1, y2 - y1)
+            crops.append(fr[int(max(0, y1 - m)):int(min(H, y2 + m)), int(max(0, x1 - m)):int(min(W, x2 + m))])
+            lm = getattr(f, 'landmark_3d_68', None)
+            pose = getattr(f, 'pose', None)
+            d = {'frame': fi, 't': times[fi], 'box': np.array([x1 / W, y1 / H, x2 / W, y2 / H], np.float32),
+                 'score': float(f.det_score), 'pose': np.asarray(pose if pose is not None else [0, 0, 0], np.float32),
+                 'arc': f.normed_embedding.astype(np.float16)}
+            if lm is not None:
+                bh = max(y2 - y1, 1.0)
+                d['mouth'] = float(np.linalg.norm(lm[66, :2] - lm[62, :2]) / bh)
+                d['lm'] = np.stack([(lm[:, 0] - x1) / max(x2 - x1, 1.0), (lm[:, 1] - y1) / bh], 1).astype(np.float16)
+            else:
+                d['mouth'] = np.nan
+            dets.append(d)
+    head, emb = fer_batch(crops)
+    for k, d in enumerate(dets):
+        d['fer'] = head[k]
+        if emb is not None:
+            d['fer_emb'] = emb[k]
+    return dets
+"""),
+    ("code", r"""
+import librosa
+try:
+    from speechbrain.inference.speaker import EncoderClassifier
+except ImportError:
+    from speechbrain.pretrained import EncoderClassifier
+spk = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb", savedir=f"{OUT_DIR}/ecapa",
+                                     run_opts={"device": "cuda" if torch.cuda.is_available() else "cpu"})
+
+
+def ecapa(wav):
+    with torch.no_grad():
+        e = spk.encode_batch(torch.tensor(wav, dtype=torch.float32).unsqueeze(0)).reshape(-1).cpu().numpy()
+    return (e / (np.linalg.norm(e) + 1e-9)).astype(np.float16)
+
+
+def analyse_audio(path):
+    if path is None:
+        return None
+    try:
+        wav, _ = librosa.load(path, sr=AUDIO_SR, mono=True)
+    except Exception:
+        return None
+    out = {'duration': len(wav) / AUDIO_SR}
+    hop = AUDIO_SR // ENV_HZ
+    out['env'] = np.array([np.sqrt(np.mean(wav[i:i + hop] ** 2)) if len(wav[i:i + hop]) else 0.0
+                           for i in range(0, len(wav), hop)], np.float32)
+    out['ecapa'] = ecapa(wav) if len(wav) >= AUDIO_SR // 2 else None
+    win, step = int(WIN_S * AUDIO_SR), int(HOP_S * AUDIO_SR)
+    starts = list(range(0, max(len(wav) - win, 0) + 1, step)) if len(wav) >= win else []
+    out['win_t'] = np.array([s / AUDIO_SR for s in starts], np.float32)
+    out['win_ecapa'] = np.stack([ecapa(wav[s:s + win]) for s in starts]) if starts else np.zeros((0, 192), np.float16)
+    return out
+"""),
+    ("code", r"""
+os.makedirs(SHARD_DIR, exist_ok=True)
+done = set()
+for f in sorted(glob.glob(f"{SHARD_DIR}/shard_*.pkl")):
+    done |= set(pickle.load(open(f, 'rb')))
+todo = [c for c in clips if c not in done]
+n_shard = len(glob.glob(f"{SHARD_DIR}/shard_*.pkl"))
+print(f"already extracted {len(done)} | to do {len(todo)}")
+
+
+def load(c):
+    p = find_media(VIDEO_ROOTS, c, ('.mp4', '.avi', '.mkv', '.mov'))
+    return c, (read_frames(p) if p else ([], [], {'n_video_frames': 0, 'fps': 0.0, 'duration': 0.0}))
+
+
+from collections import deque
+from itertools import islice
+PREFETCH = 8                        # decoded clips held in memory at most
+t0, buf, n_done = time.time(), {}, 0
+
+
+def flush():
+    global n_shard, buf
+    if buf:
+        pickle.dump(buf, open(f"{SHARD_DIR}/shard_{n_shard:03d}.pkl", 'wb'))
+        n_shard += 1
+        buf = {}
+    el = (time.time() - t0) / 60
+    print(f"clips {n_done}/{len(todo)} | {el:.1f} min | ETA {el / max(n_done, 1) * (len(todo) - n_done):.0f} min", flush=True)
+
+
+with ThreadPoolExecutor(N_DECODE_THREADS) as pool:
+    it = iter(todo)
+    q = deque(pool.submit(load, c) for c in islice(it, PREFETCH))
+    while q:
+        c, (frames, times, meta) = q.popleft().result()
+        nxt = next(it, None)
+        if nxt is not None:
+            q.append(pool.submit(load, nxt))
+        buf[c] = {'meta': {**meta, 'n_sampled': len(frames)}, 'faces': analyse_frames(frames, times),
+                  'audio': analyse_audio(find_media(AUDIO_ROOTS, c, ('.mp3', '.wav', '.flac', '.m4a')))}
+        n_done += 1
+        if len(buf) >= SHARD_SIZE:
+            flush()
+flush()
+assert n_done == len(todo), (n_done, len(todo))
+print("extraction done")
+"""),
+    ("markdown", r"""
+## Sanity checks (no labels)
+"""),
+    ("code", r"""
+DATA = {}
+for f in sorted(glob.glob(f"{SHARD_DIR}/shard_*.pkl")):
+    DATA.update(pickle.load(open(f, 'rb')))
+assert set(clips) <= set(DATA), f"{len(set(clips) - set(DATA))} clips missing"
+nf = np.array([len(DATA[c]['faces']) for c in clips])
+ns = np.array([DATA[c]['meta']['n_sampled'] for c in clips])
+print(f"clips {len(clips)} | sampled frames mean {ns.mean():.1f} | faces per clip mean {nf.mean():.1f} | "
+      f"clips with no face {(nf == 0).mean() * 100:.1f}% | audio found "
+      f"{np.mean([DATA[c]['audio'] is not None for c in clips]) * 100:.1f}%")
+ex = next((d for c in clips for d in DATA[c]['faces']), None)
+if ex is not None:
+    print("face record:", {k: (v.shape, v.dtype) if hasattr(v, 'shape') else type(v).__name__ for k, v in ex.items()})
+
+
+def tracks(faces, thr=0.45):
+    # greedy identity grouping inside one clip by ArcFace cosine
+    reps, lab = [], []
+    for d in faces:
+        e = d['arc'].astype(np.float32)
+        sims = [float(e @ r) for r in reps]
+        if sims and max(sims) >= thr:
+            lab.append(int(np.argmax(sims)))
+        else:
+            reps.append(e); lab.append(len(reps) - 1)
+    return np.array(lab)
+
+
+# active-speaker sanity on clip III (A speaks there): mouth movement of the most frequent face should follow the
+# audio energy more closely than other faces do
+c3 = sorted(set(sp.clip3))
+cors = {'dominant': [], 'other': []}
+for c in c3:
+    D = DATA[c]
+    if D['audio'] is None or len(D['faces']) < 4:
+        continue
+    lab = tracks(D['faces'])
+    env = D['audio']['env']
+    counts = np.bincount(lab)
+    for k in np.unique(lab):
+        fs = [d for d, l in zip(D['faces'], lab) if l == k and np.isfinite(d['mouth'])]
+        if len(fs) < 4:
+            continue
+        m = np.array([d['mouth'] for d in fs])
+        e = np.array([env[min(int(d['t'] * ENV_HZ), len(env) - 1)] for d in fs])
+        if m.std() < 1e-6 or e.std() < 1e-9:
+            continue
+        cors['dominant' if k == counts.argmax() else 'other'].append(np.corrcoef(m, e)[0, 1])
+print({k: (len(v), round(float(np.mean(v)), 3) if v else None) for k, v in cors.items()},
+      "<- mean corr(mouth opening, audio energy); expect dominant > other")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
                         ("g4_test_preregistered.ipynb", G4), ("g5_episode_cv.ipynb", G5),
                         ("g6a_listener_visibility.ipynb", G6A), ("g6b_listener_expression.ipynb", G6B),
-                        ("g7b_faces_into_b1.ipynb", G7B)]:
+                        ("g7b_faces_into_b1.ipynb", G7B), ("g8a_role_features.ipynb", G8A)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

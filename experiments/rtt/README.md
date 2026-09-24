@@ -18,6 +18,8 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g6b_listener_expression.ipynb` | G6b: does the listener's face in clip III (HSEmotion expression + valence/arousal, clips I–III only) forecast B's emotion beyond A's face? Logistic regressions train → val, overall and on listener-visible MCIS, with an early-frames-only boundary check and the listener identity tracked into clips I/II |
 | `g6c_listener_cv.py` | G6c: re-analysis of the G6b features — zero-shot listener vs A face, balanced logistic regression out-of-fold over all 45 train+val episodes, presence-only control, boundary split |
 | `g7b_faces_into_b1.ipynb` | G7b: B1 + role-grounded face features (A, listener, listener in I/II, dominant faces of I/II) through a zero-initialised branch; early-frame and presence-only arms; both selection protocols, 5 seeds (needs the `role-features` dataset) |
+| `g7_late_fusion.py` | Late fusion of B1 (G3b val probabilities) with a face-only balanced LR, equal weight, presence-only control |
+| `g8a_role_features.ipynb` | G8a: role-agnostic extraction for every clip used as I–III (train/val/test inputs, no labels read): per-face box, pose, ArcFace, HSEmotion logits + 1280-d embedding, mouth opening, landmarks; per-clip ECAPA (whole + 1.5 s windows) and a 10 Hz energy envelope; resumable shards |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -94,3 +96,13 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 * Adding the listener on top of context faces gains little overall (+0.3) because in 74% of listener-visible MCIS the
   same person is already in clips I/II; where it is not, +2.3 / +7.7 / +3.8 UAR. The signal is B's own face anywhere
   in the input, which motivates G7b.
+
+## G7 late fusion (val, test untouched)
+
+* Joint training inside B1 (G7b, zero-initialised face branch) started below B1 on the first seed.
+* Late fusion, equal weight, B1 (inner-dev, 5 seeds) with a face-only balanced LR: seed-ensemble UAR 21.88 → 26.38,
+  ΔUAR +4.50 [+0.33, +7.30]; per seed +1.30 / +4.89 / +2.33 / +2.58 / +5.38; presence-only control +0.43 [−1.18, +1.79].
+  Larger on listener-visible MCIS (+5.06) than on the rest (+2.37).
+* Reading: the face information is useful but a large jointly trained encoder crowds it out (modality imbalance).
+  The weight 0.5 was not tuned but was not preregistered either; the next evaluation fixes it in advance and uses
+  cross-validation over all 45 train+val episodes.

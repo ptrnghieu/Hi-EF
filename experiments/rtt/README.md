@@ -15,6 +15,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g4_test_preregistered.ipynb` | G4: the single preregistered test run — selection on val, evaluation on test (see below) |
 | `g5_episode_cv.ipynb` | G5: preregistered secondary — the primary contrast under 5-fold cross-validation over all 53 episodes (run after G4) |
 | `g6a_listener_visibility.ipynb` | G6a: gate for the listener-aware formulation — face detection + identity clustering on clips I–IV (train+val only) to measure how often B is visible while listening in clip III or spoke in clip I/II, plus annotated montages |
+| `g6b_listener_expression.ipynb` | G6b: does the listener's face in clip III (HSEmotion expression + valence/arousal, clips I–III only) forecast B's emotion beyond A's face? Logistic regressions train → val, overall and on listener-visible MCIS, with an early-frames-only boundary check and the listener identity tracked into clips I/II |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -69,3 +70,12 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 * **Fix:** the cache key now records whether a trajectory is attached, and an assertion checks the tensor. No method,
   hyper-parameter, seed or selection change. G4 is re-run once with the fix; the fixed `traj_I-III@val` must reproduce
   G3b's validation UAR (26.23 seed mean) before its test number is read. Both runs are reported.
+
+## G6a results (train+val, 600 MCIS)
+
+* Faces: B visible in clip III with a usable face 47.9%; B and A in the same frame only 0.7% (reaction shots);
+  B frames cover ~12% of clip III; the no-clip-IV listener rule is 81.4% precise.
+* Voices: clip III and IV sound like the same speaker in 1.3%; B spoke in clip II 33.4%, in clip I 27.4%;
+  B observable (usable face in III or a voice turn in I/II) 72.1%.
+* The clip I/II speaker is a third person (neither A nor B) in 36.7% / 40.5% of MCIS, so the rule
+  "context speaker ≠ A ⇒ B" is only 47% / 40% precise. B must be anchored on the clip-III listener, not on turn-taking.

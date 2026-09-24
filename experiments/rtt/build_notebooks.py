@@ -2166,10 +2166,336 @@ print(len(os.listdir(f"{OUT_DIR}/g6a_montages")), "montages written")
 ]
 
 
+# ---------------------------------------------------------------- G6b: does the listener's face forecast B?
+G6B = [
+    ("markdown", r'''
+# G6b — Does the listener's face in clip III forecast B's emotion in clip IV?
+
+G6a showed B is on screen while A speaks (cut-away reaction shots) in about half of the MCIS. This notebook asks
+whether that reaction carries information about B's *next* emotion, beyond what A's face carries.
+
+* Faces are detected on clips **I–III only**; clip IV is used only for its label.
+* Roles per MCIS: **A** = dominant person of clip III; **listener** = the most frequent *other* person in clip III
+  (the deployable rule from G6a, ~81% correct); **listener_ctx** = that same listener identity found in clips I/II
+  (faces are clustered jointly over I–III); **ctx_II / ctx_I** = dominant person of clips II / I. G6a's voice pass
+  found the clip I/II speaker is a third person 37–41% of the time, so "dominant context person" is not B.
+* Each face gets an expression vector from **HSEmotion** (EfficientNet-B0 trained on AffectNet: 8 emotion
+  probabilities + valence + arousal). Role features = mean over that role's frames + presence + frame share.
+* Boundary check: listener frames in the last 20% of clip III might already show B starting to speak, so a
+  second listener feature uses only frames in the first 80% of the clip.
+
+Logistic regressions (C by episode-grouped CV on train) are scored on val with episode-bootstrap CIs, overall and on
+MCIS where a listener is visible. **Test is untouched.**
+
+Gate: `A + listener` beats `A only` on the listener-visible subset by ≥ 2–3 UAR with a paired CI above 0, and the
+early-frames-only listener keeps most of that gain.
+'''),
+    ("code", r'''
+!pip install -q insightface
+!pip uninstall -y -q onnxruntime onnxruntime-gpu
+!pip install -q "onnxruntime-gpu==1.22.0"
+'''),
+    ("code", r'''
+# ======== CONFIG ========
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+SPLIT_CSV = "/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv"
+OUT_DIR = "/kaggle/working"
+CACHE = f"{OUT_DIR}/g6b_face_cache.pkl"   # per-clip detections + expressions, reused on re-runs
+
+SPLITS = ["train", "val"]    # test stays untouched
+N_MCIS = None                # None = all train+val MCIS
+SAMPLE_FPS, MAX_FRAMES = 3, 24
+DET_SIZE = (640, 640)
+MIN_DET_SCORE, MIN_FACE_PX = 0.6, 32
+SAME_PERSON_COS = 0.45
+DOMINANT_MIN_FRAC = 0.25
+MAX_YAW = 45
+EARLY_FRAC = 0.8             # "early" listener frames: relative position < EARLY_FRAC within clip III
+FER_URL = ("https://github.com/HSE-asavchenko/face-emotion-recognition/raw/main/models/affectnet_emotions/onnx/"
+           "enet_b0_8_va_mtl.onnx")
+SEED = 0
+'''),
+    ("code", r'''
+import os, glob, random, pickle, time, urllib.request
+import numpy as np, pandas as pd, cv2
+from sklearn.cluster import AgglomerativeClustering
+import torch
+import onnxruntime as ort
+if hasattr(ort, 'preload_dlls'):
+    try:
+        ort.preload_dlls()
+    except Exception as e:
+        print("preload_dlls:", e)
+PROV = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+
+roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
+VIDEO_ROOTS = [os.path.join(r, "video") for r in roots if os.path.isdir(os.path.join(r, "video"))]
+ANNOT_CSV = [os.path.join(r, "annotation.csv") for r in roots if os.path.exists(os.path.join(r, "annotation.csv"))][0]
+
+
+def video_path(clip):
+    ep, num = clip.split('/')
+    for root in VIDEO_ROOTS:
+        p = os.path.join(root, ep, num + '.mp4')
+        if os.path.exists(p):
+            return p
+    return None
+
+
+EMO = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+E2I = {e: i for i, e in enumerate(EMO)}
+ann = pd.read_csv(ANNOT_CSV, header=None, dtype=str).set_index(0)
+sp = pd.read_csv(SPLIT_CSV, dtype=str)
+sp = sp[sp.split.isin(SPLITS)].reset_index(drop=True)
+assert 'test' not in set(sp.split)
+if N_MCIS is not None and N_MCIS < len(sp):
+    sp = sp.sample(n=N_MCIS, random_state=SEED).reset_index(drop=True)
+sp['yA'] = sp.clip3_emotion.map(E2I)
+sp['yB'] = sp.clip4_emotion.map(E2I)
+clips = sorted(set(sp[['clip1', 'clip2', 'clip3']].values.ravel()))   # no clip IV frames are read
+print(f"MCIS {len(sp)} | context/A clips {len(clips)} | missing video {sum(video_path(c) is None for c in clips)}")
+'''),
+    ("code", r'''
+from insightface.app import FaceAnalysis
+app = FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition', 'landmark_3d_68'], providers=PROV)
+app.prepare(ctx_id=0, det_size=DET_SIZE)
+print("insightface providers:", {k: m.session.get_providers() for k, m in app.models.items()})
+
+fer_path = f"{OUT_DIR}/enet_b0_8_va_mtl.onnx"
+if not os.path.exists(fer_path):
+    urllib.request.urlretrieve(FER_URL, fer_path)
+fer = ort.InferenceSession(fer_path, providers=PROV)
+FER_IN = fer.get_inputs()[0].name
+print("FER providers:", fer.get_providers(), "| input", fer.get_inputs()[0].shape, "| output", fer.get_outputs()[0].shape)
+MEAN, STD = np.array([0.485, 0.456, 0.406], np.float32), np.array([0.229, 0.224, 0.225], np.float32)
+FER8 = ['anger', 'contempt', 'disgust', 'fear', 'happiness', 'neutral', 'sadness', 'surprise']   # HSEmotion 8-class order
+
+
+def fer_batch(crops_bgr):
+    if not crops_bgr:
+        return np.zeros((0, 10), np.float32)
+    x = np.stack([(cv2.cvtColor(cv2.resize(c, (224, 224)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255 - MEAN) / STD
+                  for c in crops_bgr]).transpose(0, 3, 1, 2)
+    out = fer.run(None, {FER_IN: x.astype(np.float32)})[0]
+    logits = out[:, :8]
+    p = np.exp(logits - logits.max(1, keepdims=True)); p /= p.sum(1, keepdims=True)
+    va = out[:, 8:10] if out.shape[1] >= 10 else np.zeros((len(out), 2), np.float32)
+    return np.concatenate([p, va], 1).astype(np.float32)
+
+
+def read_frames(path):
+    cap = cv2.VideoCapture(path)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    want = max(1, min(MAX_FRAMES, int(round(n / fps * SAMPLE_FPS)))) if n else MAX_FRAMES
+    frames = []
+    for i in sorted(set(np.linspace(0, max(n - 1, 0), want).astype(int).tolist())):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+        ok, fr = cap.read()
+        if ok:
+            frames.append(fr)
+    cap.release()
+    return frames
+
+
+FACES = pickle.load(open(CACHE, 'rb')) if os.path.exists(CACHE) else {}
+todo = [c for c in clips if c not in FACES]
+print(f"cached clips {len(FACES)} | to process {len(todo)}")
+t0 = time.time()
+for ci, c in enumerate(todo):
+    if ci % 200 == 0:
+        print(f"clips {ci}/{len(todo)}, {(time.time() - t0) / 60:.1f} min", flush=True)
+        if ci:
+            pickle.dump(FACES, open(CACHE, 'wb'))
+    p = video_path(c)
+    frames = read_frames(p) if p else []
+    dets, crops = [], []
+    for fi, fr in enumerate(frames):
+        H, W = fr.shape[:2]
+        for f in app.get(fr):
+            x1, y1, x2, y2 = f.bbox
+            if f.det_score < MIN_DET_SCORE or min(x2 - x1, y2 - y1) < MIN_FACE_PX:
+                continue
+            m = 0.1 * max(x2 - x1, y2 - y1)
+            cx1, cy1, cx2, cy2 = int(max(0, x1 - m)), int(max(0, y1 - m)), int(min(W, x2 + m)), int(min(H, y2 + m))
+            pose = getattr(f, 'pose', None)
+            dets.append({'frame': fi, 'emb': f.normed_embedding.astype(np.float32),
+                         'yaw': float(pose[1]) if pose is not None else 0.0, 'area': float((x2 - x1) * (y2 - y1))})
+            crops.append(fr[cy1:cy2, cx1:cx2])
+    ex = fer_batch(crops)
+    for d, e in zip(dets, ex):
+        d['fer'] = e
+    FACES[c] = {'n': len(frames), 'faces': dets}
+pickle.dump(FACES, open(CACHE, 'wb'))
+print(f"done in {(time.time() - t0) / 60:.1f} min")
+'''),
+    ("markdown", r'''
+## Sanity check: does HSEmotion read Hi-EF faces at all? (A's face vs A's gold label)
+'''),
+    ("code", r'''
+AFF2HI = {'anger': 'angry', 'contempt': 'disgust', 'disgust': 'disgust', 'fear': 'fear', 'happiness': 'happy',
+          'neutral': 'neutral', 'sadness': 'sad', 'surprise': 'surprise'}
+M = np.zeros((8, 7), np.float32)
+for i, a in enumerate(FER8):
+    M[i, E2I[AFF2HI[a]]] = 1
+
+
+def war_uar(pred, y, k=7):
+    pred, y = np.asarray(pred), np.asarray(y)
+    return (pred == y).mean() * 100, np.mean([(pred[y == c] == c).mean() * 100 for c in range(k) if (y == c).any()])
+
+
+def roles(row):
+    cl = [row['clip1'], row['clip2'], row['clip3']]
+    faces = [(k, f) for k, c in enumerate(cl) for f in FACES.get(c, {'faces': []})['faces']]
+    out = {}
+    if not faces:
+        return out
+    E = np.stack([f['emb'] for _, f in faces])
+    lab_ = (np.zeros(1, int) if len(E) == 1 else
+            AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
+                                    distance_threshold=1 - SAME_PERSON_COS).fit_predict(E))
+    by = {}
+    for (k, f), p in zip(faces, lab_):
+        by.setdefault((k, int(p)), []).append(f)
+
+    def dominant(k):
+        n = FACES.get(cl[k], {'n': 0})['n']
+        cand = [(len({f['frame'] for f in v}), p) for (kk, p), v in by.items() if kk == k]
+        if not cand or n == 0:
+            return None
+        cnt, p = max(cand)
+        return p if cnt / n >= DOMINANT_MIN_FRAC else None
+
+    A = dominant(2)
+    n3 = max(FACES.get(cl[2], {'n': 1})['n'], 1)
+    others = sorted({p for (k, p) in by if k == 2} - {A}, key=lambda p: -len(by[(2, p)]))
+    L = others[0] if others else None
+    out['A'] = by.get((2, A), []) if A is not None else []
+    out['listener'] = [f for f in by.get((2, L), []) if abs(f['yaw']) <= MAX_YAW] if L is not None else []
+    out['listener_early'] = [f for f in out['listener'] if f['frame'] / max(n3 - 1, 1) < EARLY_FRAC]
+    out['listener_pos'] = [f['frame'] / max(n3 - 1, 1) for f in by.get((2, L), [])] if L is not None else []
+    # the same listener identity (clustered jointly over I-III) seen in the context clips; no clip IV needed
+    out['listener_ctx'] = ([f for k in (0, 1) for f in by.get((k, L), []) if abs(f['yaw']) <= MAX_YAW]
+                           if L is not None else [])
+    for k, name in [(1, 'ctx_II'), (0, 'ctx_I')]:
+        d = dominant(k)
+        out[name] = by.get((k, d), []) if d is not None else []
+    out['n3'] = n3
+    return out
+
+
+ROLE_NAMES = ['A', 'listener', 'listener_early', 'listener_ctx', 'ctx_II', 'ctx_I']
+R = {r['sample_id']: roles(r) for r in sp.to_dict('records')}
+
+
+def feat(fs, n):
+    if not fs:
+        return np.zeros(12, np.float32)
+    v = np.stack([f['fer'] for f in fs]).mean(0)
+    return np.concatenate([v, [1.0, len({f['frame'] for f in fs}) / max(n, 1)]]).astype(np.float32)
+
+
+F = {name: np.stack([feat(R[s].get(name, []), R[s].get('n3', 1)) for s in sp.sample_id]) for name in ROLE_NAMES}
+sp['has_A'] = F['A'][:, 10] > 0
+sp['has_listener'] = F['listener'][:, 10] > 0
+sp['has_listener_early'] = F['listener_early'][:, 10] > 0
+print(f"A found {sp.has_A.mean() * 100:.1f}% | usable listener {sp.has_listener.mean() * 100:.1f}% | "
+      f"usable listener in first {int(EARLY_FRAC * 100)}% of clip III {sp.has_listener_early.mean() * 100:.1f}% | "
+      f"listener also seen in clip I/II {(F['listener_ctx'][:, 10] > 0).mean() * 100:.1f}%")
+pos = np.concatenate([R[s].get('listener_pos', []) for s in sp.sample_id]) if len(sp) else np.array([])
+if len(pos):
+    print("listener frame position in clip III (0=start, 1=end), quantiles 10/25/50/75/90%:",
+          np.percentile(pos, [10, 25, 50, 75, 90]).round(2), f"| share in last 20%: {(pos >= 0.8).mean() * 100:.1f}%")
+
+for role, target, desc in [('A', 'yA', "A's face vs A's gold label"), ('listener', 'yB', "LISTENER's face vs B's NEXT label")]:
+    m = F[role][:, 10] > 0
+    if m.sum() == 0:
+        print(f"Zero-shot HSEmotion on {desc}: no faces")
+        continue
+    w, u = war_uar((F[role][m, :8] @ M).argmax(1), sp[target].values[m])
+    print(f"Zero-shot HSEmotion on {desc} (n={m.sum()}): WAR {w:.1f}  UAR {u:.1f}  (chance UAR 14.3)")
+pd.DataFrame({'sample_id': sp.sample_id, **{f"{n}_{i}": F[n][:, i] for n in ROLE_NAMES for i in range(12)}}).to_csv(
+    f"{OUT_DIR}/g6b_role_features.csv", index=False)
+'''),
+    ("markdown", r'''
+## Forecasting B from role features (train → val)
+'''),
+    ("code", r'''
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+
+tr, va = (sp.split == 'train').values, (sp.split == 'val').values
+src_va = sp.source_folder.values[va]
+yB = sp.yB.values
+SETS = {
+    'A': ['A'],
+    'listener': ['listener'],
+    'A+listener': ['A', 'listener'],
+    'A+listener_early': ['A', 'listener_early'],
+    'A+ctx': ['A', 'ctx_II', 'ctx_I'],
+    'A+listener+ctx': ['A', 'listener', 'ctx_II', 'ctx_I'],
+    'A+listener+listener_ctx': ['A', 'listener', 'listener_ctx'],
+}
+
+
+def fit_predict(names, cw=None):
+    X = np.hstack([F[n] for n in names])
+    sc = StandardScaler().fit(X[tr])
+    Xs = sc.transform(X)
+    best = None
+    for C in [0.01, 0.03, 0.1, 0.3, 1]:
+        s = []
+        for a, b in GroupKFold(5).split(Xs[tr], yB[tr], sp.source_folder.values[tr]):
+            p = LogisticRegression(max_iter=3000, C=C, class_weight=cw).fit(Xs[tr][a], yB[tr][a]).predict(Xs[tr][b])
+            s.append(war_uar(p, yB[tr][b])[1])
+        if best is None or np.mean(s) > best[0]:
+            best = (np.mean(s), C)
+    return LogisticRegression(max_iter=3000, C=best[1], class_weight=cw).fit(Xs[tr], yB[tr]).predict(Xs[va])
+
+
+rng = np.random.default_rng(0)
+
+
+def boot(fn, mask):
+    src = src_va[mask]
+    groups = [np.where(src == s)[0] for s in np.unique(src)]
+    out = []
+    for _ in range(2000):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        out.append(fn(idx))
+    return np.percentile(np.array(out), [2.5, 97.5], axis=0)
+
+
+PRED = {k: fit_predict(v) for k, v in SETS.items()}
+subsets = {'all val': np.ones(va.sum(), bool), 'listener visible': sp.has_listener.values[va],
+           'listener not visible': ~sp.has_listener.values[va]}
+for sname, msk in subsets.items():
+    y = yB[va][msk]
+    print(f"\n== {sname}: n={msk.sum()} ==")
+    if msk.sum() < 20:
+        print("  too few MCIS, skipped")
+        continue
+    for k, p in PRED.items():
+        w, u = war_uar(p[msk], y)
+        lo, hi = boot(lambda idx, p=p[msk]: war_uar(p[idx], y[idx]), msk)
+        print(f"  {k:<18} UAR {u:5.2f} [{lo[1]:5.1f},{hi[1]:5.1f}]  WAR {w:5.2f} [{lo[0]:5.1f},{hi[0]:5.1f}]")
+    for a, b in [('A+listener', 'A'), ('A+listener_early', 'A'), ('A+listener+ctx', 'A+ctx'),
+                 ('A+listener+listener_ctx', 'A+listener')]:
+        pa, pb = PRED[a][msk], PRED[b][msk]
+        d = boot(lambda idx: np.subtract(war_uar(pa[idx], y[idx]), war_uar(pb[idx], y[idx])), msk)
+        wa, ua = war_uar(pa, y); wb, ub = war_uar(pb, y)
+        print(f"  Δ {a} − {b}: UAR {ua - ub:+.2f} [{d[0][1]:+.2f},{d[1][1]:+.2f}]  WAR {wa - wb:+.2f} [{d[0][0]:+.2f},{d[1][0]:+.2f}]")
+print("\nGATE: on 'listener visible', A+listener − A ≥ +2–3 UAR with CI above 0, and A+listener_early keeps most of it.")
+'''),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
                         ("g4_test_preregistered.ipynb", G4), ("g5_episode_cv.ipynb", G5),
-                        ("g6a_listener_visibility.ipynb", G6A)]:
+                        ("g6a_listener_visibility.ipynb", G6A), ("g6b_listener_expression.ipynb", G6B)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

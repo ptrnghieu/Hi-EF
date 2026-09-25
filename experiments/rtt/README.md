@@ -198,3 +198,37 @@ The test split raises an error unless `UNLOCK_TEST = True`.
   - G8b, RoleNet − noRole: plain +1.17 [−0.01, +2.29];
   - G9, RoleNet+ vs −faceRoles: 6-class +1.75 [−0.05, +3.69];
   - G9, same contrast on listener-visible MCIS: plain +1.66 [+0.19, +3.11].
+
+## G10: the single preregistered test run (409 MCIS, 8 episodes). Run once, as registered in `PREREG_G10_TEST.md`.
+
+**Preregistered fixed-sequence result** (ΔUAR, LA, 7-class, seed ensemble, 95% bootstrap over the 8 test episodes):
+
+| # | Contrast | ΔUAR [95% CI] | Outcome |
+|---|---|---|---|
+| 1 | RoleNet − PaperBest (primary) | +3.77 [−7.49, +10.12] | **NOT CONFIRMED**; the sequence stops here |
+| 2 | RoleNet − B1 | +2.45 [−0.44, +5.39] | descriptive only |
+| 3 | RoleNet − LateFusion | +2.29 [−0.38, +5.52] | descriptive only |
+| 4 | RoleNet − RoleNet-noRole | −1.93 [−7.31, +4.77] | descriptive only |
+
+**Seed-ensemble test scores:**
+
+| Model | UAR, LA | UAR, plain | WAR, plain |
+|---|---|---|---|
+| B1 | 20.86 | 23.82 | 34.23 |
+| RoleNet | 23.31 | **25.24** | **36.43** |
+| RoleNet-noRole | 25.24 | 23.61 | 34.23 |
+| PaperBest | 19.55 | 21.40 | 32.52 |
+| LateFusion | 21.02 | 21.82 | 32.03 |
+
+**Descriptive analyses, specified in the preregistration:**
+- RoleNet − PaperBest: plain +3.84 [+1.2, +6.8]; 6-class LA +9.95 [+6.6, +13.6]; RoleNet wins 6/8 episodes.
+- RoleNet − LateFusion: plain +3.42 [+1.6, +5.9].
+- RoleNet − B1: plain +1.42 [−0.8, +4.9].
+- PaperBest − B1: plain −2.42 [−3.5, −0.6].
+
+**Post-hoc diagnosis** (labelled as such, not a confirmatory result):
+- The test set has only 6 fear examples, so one fear hit is worth 2.38 UAR points.
+- Under LA, PaperBest predicts fear for 27.6% of test MCIS (true rate 1.5%) and angry for 1.2% (true rate 18.8%). It gets 2/6 fear hits (+4.76 UAR) while its angry recall drops to 1.3%. RoleNet gets 0/6; RoleNet-noRole gets 1/6.
+- The width of the primary CI and the sign flip of contrast 4 are therefore driven by the rare fear class under the preregistered LA scoring.
+- Without adjustment (plain), no model predicts fear. On that common footing RoleNet is the best model, and its gaps to PaperBest and to LateFusion have CIs above 0.
+- The choice of LA-scored 7-class UAR as the primary test metric was a design error for a test set with 6 fear examples. It is reported, not replaced.

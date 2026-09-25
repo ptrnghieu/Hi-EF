@@ -232,3 +232,37 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 - The width of the primary CI and the sign flip of contrast 4 are therefore driven by the rare fear class under the preregistered LA scoring.
 - Without adjustment (plain), no model predicts fear. On that common footing RoleNet is the best model, and its gaps to PaperBest and to LateFusion have CIs above 0.
 - The choice of LA-scored 7-class UAR as the primary test metric was a design error for a test set with 6 fear examples. It is reported, not replaced.
+
+### Reporting decision after G10: plain (benchmark-standard) scoring as the main metric
+
+- Plain argmax scoring is the metric used by the Hi-EF paper and prior work, and it was listed in the preregistration
+  as a descriptive analysis.
+- The paper will state that the preregistered primary metric was LA-scored UAR and that it was not confirmed
+  (+3.77 [−7.49, +10.12]), with the fear-class diagnosis above.
+
+**Test, plain, seed ensemble** (95% bootstrap over the 8 test episodes):
+
+| Model | UAR [95% CI] | WAR |
+|---|---|---|
+| PaperBest | 21.40 [16.2, 24.7] | 32.52 |
+| B1 | 23.82 [18.1, 27.3] | 34.23 |
+| LateFusion | 21.82 [16.8, 24.8] | 32.03 |
+| RoleNet-noRole | 23.61 [18.4, 27.5] | 34.23 |
+| **RoleNet** | **25.24 [20.8, 28.2]** | **36.43** |
+
+| Contrast | ΔUAR [95% CI] | ΔWAR [95% CI] | Episodes won |
+|---|---|---|---|
+| RoleNet − PaperBest | **+3.84 [+1.24, +6.76]** | +3.91 [+0.40, +7.79] | 7/8 |
+| RoleNet − B1 | +1.42 [−0.78, +4.94] | +2.20 [−1.32, +6.65] | 6/8 |
+| RoleNet − LateFusion | **+3.42 [+1.64, +5.88]** | +4.40 [+1.61, +7.29] | 6/8 |
+| RoleNet − RoleNet-noRole | +1.64 [−1.67, +4.53] | +2.20 [−1.33, +5.29] | 4/8 |
+
+**CV, plain** (45 train+val episodes, from G8b):
+
+| Contrast | ΔUAR [95% CI] |
+|---|---|
+| RoleNet − B1 | +4.44 [+2.64, +6.08] |
+| RoleNet − LateFusion | +2.13 [+0.78, +3.35] |
+| RoleNet − noRole | +1.17 [−0.01, +2.29] |
+
+PaperBest was not part of the CV.

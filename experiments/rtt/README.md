@@ -323,3 +323,31 @@ training, so the ablation deltas contain a generic part. It shows up where the r
    the clip-III reaction; part of the raw effect is a generic ablation cost.
 3. The event and observation channels are **complementary**: each alone is ~23 UAR and together 26 (both +2.8–2.9).
 4. A's face adds nothing beyond the speech/scene tokens.
+
+## G12 results: CS-RoleNet (additive, clip-ordered role paths) — decision KEEP RoleNet
+
+5-fold CV, 2,421 MCIS, 45 episodes, 3 seeds, plain scoring; test untouched. `RoleNet` reproduces G8b exactly (25.92).
+
+| Arm (seed ensemble) | UAR [95% CI] | WAR |
+|---|---|---|
+| RoleNet | 25.92 [23.9, 27.6] | 37.79 |
+| CS-int (additive + penalised interaction) | 24.60 [22.7, 26.4] | 35.48 |
+| CS-add -Event | 24.50 | 35.65 |
+| CS-add -B | 24.32 | 35.36 |
+| CS-add (additive) | 23.78 [21.5, 26.1] | 33.87 |
+| CS-add -Scene | 22.76 | 32.88 |
+
+- CS-add − RoleNet: **−2.14 [−3.79, −0.29]** (1/5 folds > 0); CS-int − RoleNet: −1.32 [−2.80, +0.34] (2/5);
+  CS-int − CS-add: +0.82 [−0.38, +2.08] (4/5). Interaction share in CS-int: 13.6%.
+- **Decision (fixed rule): KEEP RoleNet.** Neither CS arm reaches RoleNet's UAR.
+- Path ablations of CS-add (retrained): removing B −0.54 and removing Event −0.73 *raise* UAR slightly; removing Scene
+  lowers it by 1.02 [−0.22, +2.26] (4/5 folds).
+- Contribution shares in CS-add: B 25.1%, Event 32.9%, Scene 42.0%. The B share falls from 35.6% (listener in III) to
+  9.4% when no listener is visible, so the decomposition behaves sensibly.
+- Faithfulness is weak: rank agreement between shares and retrain drops is +0.50 over 3 paths. B and Event receive
+  sizeable shares but are not *necessary* (the other paths compensate when they are retrained without them).
+
+**Reading.** Forcing the evidence into separate, additive, clip-ordered paths costs about 2 UAR. RoleNet's joint
+attention across roles and modalities carries information that the additive structure removes; the penalised
+interaction term recovers only part of it. Path contributions of the additive model are exact but describe a weaker
+model, and they are not faithful to what each path is needed for (redundancy between paths).

@@ -4961,7 +4961,7 @@ DEBUG_PER_EPISODE = None     # e.g. 6 for a quick smoke test
 
 FULL = dict(role=True, faces=True, ctx=True, aux=True, mdrop=True)
 PATHS = ('B', 'Event', 'Scene')
-EXPERIMENTS = [
+ARMS = [
     ("RoleNet",        'role', FULL),
     ("CS-add",         'cs',   dict(paths=PATHS, inter=False)),
     ("CS-int",         'cs',   dict(paths=PATHS, inter=True)),
@@ -4969,6 +4969,7 @@ EXPERIMENTS = [
     ("CS-add -Event",  'cs',   dict(paths=('B', 'Scene'), inter=False)),
     ("CS-add -Scene",  'cs',   dict(paths=('B', 'Event'), inter=False)),
 ]
+EXPERIMENTS = [a for a in ARMS if a[1] == 'role']   # the shared model cell only knows 'role'; CS arms join after it
 """),
     G8B[3], G3[3], G3[4], G8B[6], G8B[7], G8B[11], G8B[12],
     ("markdown", r"""
@@ -5096,6 +5097,7 @@ def train_eval_cs(kind, cfg, tr, dev, te, seed):
     return predict(model, te), best, {p: torch.cat(v).numpy() for p, v in contrib.items()}
 
 
+EXPERIMENTS = ARMS
 print("parameters:", {n: f"{sum(p.numel() for p in MAKE[k](c).parameters()) / 1e6:.2f}M" for n, k, c in EXPERIMENTS})
 FM = FMASK.cpu().numpy()
 HAS = {'listener in III': FM[:, 1, 2].any(-1), 'listener in I/II': FM[:, 1, :2].any((-1, -2)),

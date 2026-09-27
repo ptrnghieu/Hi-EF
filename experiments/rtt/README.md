@@ -25,6 +25,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `PREREG_G10_TEST.md` | Preregistration of the single locked-test run, committed before G10 was run |
 | `g10_test_preregistered.ipynb` | G10: trains PaperBest (the Hi-EF paper's best configuration, from the replication notebook), B1, LateFusion, RoleNet and RoleNet-noRole on the 45 train+val episodes (5 seeds) and evaluates once on test with the preregistered fixed-sequence contrasts |
 | `g11_channel_ablations_cv.ipynb` | G11: channel ablations of RoleNet in the G8b CV protocol (same folds and seeds). Face tokens are grouped into simulation (A + speech/scene), strict surrogation (bystanders O) and target observation (listener L); each group is removed from attention one at a time and in combination (9 arms). Hypotheses H1–H4 and the reading rule for the paper framing are fixed in the notebook header; plain scoring; test untouched |
+| `g12_cs_rolenet_cv.ipynb` | G12: CS-RoleNet — role-specific states (B-self, Event, Scene) updated in clip order by separate GRU cells, with an additive per-path logit decomposition (optional penalised interaction term). Arms: RoleNet, CS-add, CS-int, and retrained path ablations; decision rule and faithfulness check (contribution share vs retrain drop) fixed in the header; G8b folds/seeds; plain scoring; test untouched |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).

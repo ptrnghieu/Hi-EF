@@ -4875,6 +4875,382 @@ print("\nFraming: " + ("strict surrogation is a central channel -> keep the thre
 ]
 
 
+# ---------------------------------------------------------------- G12: causally structured, additive RoleNet (CS-RoleNet)
+G12 = [
+    ("markdown", r"""
+# G12 — CS-RoleNet: temporally structured, additive paths (boost + explainability), episode-level CV
+
+**Motivation (from G11).**
+* Observing B across the context helps (+2.52 UAR), mostly through B's appearances in clips I/II.
+* The event channel (speech + scene) and the observation channel are **complementary**: each alone ≈ 23 UAR,
+  together 26.
+* A's face and bystander faces add no measurable information.
+
+RoleNet mixes all tokens in one bidirectional Transformer, so it cannot say *which* evidence drove a forecast.
+
+**CS-RoleNet.** Three role-specific states are updated **in time order** (clip I → II → III), each by its own GRU cell
+that only sees its own evidence:
+
+| Path | Evidence per clip | Reading |
+|---|---|---|
+| **B-self** | the listener's face token (B in ~81% of MCIS), or a learned *absent* token | B's own affective trajectory (inertia / observation) |
+| **Event** | the speech token (text + audio + who-speaks cues) and A's face token | what is said and by whom (includes A's clip-III turn) |
+| **Scene** | the scene token (whole-frame + face CLIP means) and the bystanders' face token | the emotional climate of the scene |
+
+The forecast is **additive in logit space**:
+
+  logit(y_B) = b + h_B(z_B) + h_E(z_E) + h_S(z_S) [+ h_int(z_B, z_E, z_S) in the interaction arm]
+
+so every prediction splits **exactly** into per-path contributions. The optional interaction term carries an L2
+penalty on its logits (weight 0.1, set a priori) and its share is reported.
+
+**Training aids** (kept from RoleNet in spirit):
+* each path has an auxiliary head that predicts y_B on its own (weight 0.3);
+* A's emotion is predicted from the clip-III event evidence (weight 0.3);
+* **path dropout**: each path's contribution is zeroed with p = 0.1 during training.
+
+This is a *structural prior* (time order + separated mechanisms); its contributions explain the **model**, not causal
+effects in the data.
+
+**Arms (same folds, seeds and early stopping as G8b/G11; 3 seeds × 5 folds):** `RoleNet` (reference), `CS-add`,
+`CS-int`, and retrained path ablations of `CS-add`: `CS-add -B`, `CS-add -Event`, `CS-add -Scene`.
+
+**Decision rule (fixed before running).** Metric: pooled out-of-fold UAR of the seed ensemble, plain argmax.
+* Adopt `CS-add` if UAR(CS-add) ≥ UAR(RoleNet).
+* Otherwise adopt `CS-int` if UAR(CS-int) ≥ UAR(RoleNet) **and** its interaction share ≤ 25%.
+* Otherwise keep RoleNet.
+
+A gain is called significant only if the 95% episode-bootstrap CI of ΔUAR is above 0.
+
+**Faithfulness check.** Two views of path importance should agree:
+* the mean centred contribution share of each path;
+* the UAR lost when the path is removed and the model retrained.
+
+Report their rank agreement over the three paths. The test split stays untouched.
+"""),
+    ("code", r"""
+# ======== CONFIG ========
+import os
+
+
+def first_existing(*paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"none of {paths}")
+
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = first_existing("/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv",
+                           "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv")
+G8A_DIR = first_existing("/kaggle/input/datasets/ptrnghieu/g8a-features", "/kaggle/input/g8a-features")
+OUT_DIR = "/kaggle/working"
+
+N_OUTER, N_INNER_DEV = 5, 5
+SEEDS = [42, 123, 456]                       # as G8b / G11
+LR, WEIGHT_DECAY = 1e-4, 1e-5                # B1 settings (only needed by the shared model cell)
+FC_EPOCHS, PATIENCE, FC_BATCH = 50, 8, 32
+RN = dict(D=128, heads=4, layers=2, dropout=0.2, lr=3e-4, wd=1e-2, epochs=80, patience=12, batch=64,
+          aux_w=0.3, a_w=0.3, p_drop_ctx=0.3, p_drop_face=0.15)     # G8b, unchanged (RoleNet and CS optimiser)
+CS = dict(p_path_drop=0.1, int_l2=0.1, dropout=0.2)                  # CS-RoleNet, set a priori (not tuned)
+PCA_DIM, MAXF, MAXF_POOL = 128, 24, 32
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
+VOICE_SAME_COS = 0.35
+DEBUG_PER_EPISODE = None     # e.g. 6 for a quick smoke test
+
+FULL = dict(role=True, faces=True, ctx=True, aux=True, mdrop=True)
+PATHS = ('B', 'Event', 'Scene')
+EXPERIMENTS = [
+    ("RoleNet",        'role', FULL),
+    ("CS-add",         'cs',   dict(paths=PATHS, inter=False)),
+    ("CS-int",         'cs',   dict(paths=PATHS, inter=True)),
+    ("CS-add -B",      'cs',   dict(paths=('Event', 'Scene'), inter=False)),
+    ("CS-add -Event",  'cs',   dict(paths=('B', 'Scene'), inter=False)),
+    ("CS-add -Scene",  'cs',   dict(paths=('B', 'Event'), inter=False)),
+]
+"""),
+    G8B[3], G3[3], G3[4], G8B[6], G8B[7], G8B[11], G8B[12],
+    ("markdown", r"""
+## CS-RoleNet
+"""),
+    ("code", r"""
+class CSRoleNet(nn.Module):
+    # Role-specific states updated clip by clip (I -> II -> III); additive per-path logits.
+    def __init__(self, cfg, d=RN['D']):
+        super().__init__()
+        self.paths, self.inter = tuple(cfg['paths']), cfg['inter']
+        self.pool = FramePool(FDIM, d)
+        self.absent = nn.Parameter(torch.randn(3, 3, d) * 0.02)          # [role, clip]
+        self.face_role = nn.Parameter(torch.randn(3, d) * 0.02)
+        self.text = nn.Sequential(nn.LayerNorm(512), nn.Linear(512, d))
+        self.audio = nn.Sequential(nn.LayerNorm(527), nn.Linear(527, d))
+        self.voice = nn.Linear(NVOICE, d)
+        self.scene = nn.Sequential(nn.LayerNorm(1024), nn.Linear(1024, d))
+        self.clip_emb = nn.Parameter(torch.randn(3, d) * 0.02)
+        # per-path input projection (2 evidence tokens -> d) and recurrent cell
+        self.inp = nn.ModuleDict({p: nn.Sequential(nn.LayerNorm(2 * d), nn.Linear(2 * d, d), nn.GELU(),
+                                                   nn.Dropout(CS['dropout'])) for p in PATHS})
+        self.cell = nn.ModuleDict({p: nn.GRUCell(d, d) for p in PATHS})
+        self.h0 = nn.ParameterDict({p: nn.Parameter(torch.zeros(1, d)) for p in PATHS})
+        mk = lambda: nn.Sequential(nn.LayerNorm(d), nn.Dropout(0.3), nn.Linear(d, 7))
+        self.head = nn.ModuleDict({p: mk() for p in PATHS})           # contribution heads (summed)
+        self.aux = nn.ModuleDict({p: mk() for p in PATHS})            # each path alone -> y_B (training aid)
+        self.bias = nn.Parameter(torch.zeros(7))
+        self.head_A = mk()                                             # A's emotion from clip-III event evidence
+        if self.inter:
+            self.h_int = nn.Sequential(nn.LayerNorm(3 * d), nn.Linear(3 * d, d), nn.GELU(), nn.Dropout(0.3),
+                                       nn.Linear(d, 7))
+
+    def evidence(self, ix):
+        B = len(ix)
+        h, present = self.pool(FACE[ix], FMASK[ix])                        # [B, 3 roles, 3 clips, d]
+        h = torch.where(present.unsqueeze(-1), h, self.absent.unsqueeze(0).expand(B, -1, -1, -1))
+        h = h + self.face_role[None, :, None] + self.clip_emb[None, None]
+        spk = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.clip_emb
+        scn = self.scene(SCN[ix]) + self.clip_emb
+        pres = present[:, 1].float().unsqueeze(-1)                          # listener present per clip
+        return {'B': torch.stack([h[:, 1], pres.expand_as(h[:, 1]) * self.clip_emb.unsqueeze(0)], 2),
+                'Event': torch.stack([spk, h[:, 0]], 2),
+                'Scene': torch.stack([scn, h[:, 2]], 2)}                    # each [B, 3 clips, 2, d]
+
+    def states(self, ix):
+        ev, Z = self.evidence(ix), {}
+        for p in self.paths:
+            z = self.h0[p].expand(len(ix), -1)
+            for k in range(3):                                              # clip I -> II -> III
+                z = self.cell[p](self.inp[p](ev[p][:, k].flatten(1)), z)
+            Z[p] = z
+        return Z, ev
+
+    def contributions(self, ix):
+        Z, ev = self.states(ix)
+        C = {p: self.head[p](Z[p]) for p in self.paths}
+        if self.inter:
+            zz = torch.cat([Z[p] if p in Z else torch.zeros_like(next(iter(Z.values()))) for p in PATHS], 1)
+            C['int'] = self.h_int(zz)
+        return C, Z, ev
+
+    def forward(self, ix, train=False):
+        C, Z, ev = self.contributions(ix)
+        aux = {}
+        logits = self.bias.expand(len(ix), -1)
+        for p, c in C.items():
+            if train and p != 'int':
+                keep = (torch.rand(len(ix), 1, device=c.device) >= CS['p_path_drop']).float()
+                c = c * keep
+            logits = logits + c
+        if train:
+            for p in self.paths:
+                aux['path_' + p] = (self.aux[p](Z[p]), YB[ix], RN['aux_w'])
+            if 'Event' in self.paths:
+                tA = torch.where(FMASK[ix][:, 0, 2].any(-1), YA[ix], torch.full_like(YA[ix], -100))
+                aux['A'] = (self.head_A(ev['Event'][:, 2].mean(1)), tA, RN['a_w'])
+            if self.inter:
+                self._int_pen = CS['int_l2'] * C['int'].pow(2).mean()
+        return logits, aux
+
+
+MAKE['cs'] = lambda cfg: CSRoleNet(cfg)
+HP['cs'] = HP['role']
+
+
+def train_eval_cs(kind, cfg, tr, dev, te, seed):
+    # same loop as train_eval, plus the interaction penalty; returns eval probs and per-path contributions
+    seed_all(seed)
+    hp = HP[kind]
+    model = MAKE[kind](cfg).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    best, best_state, bad = -1, None, 0
+    for ep in range(hp['epochs']):
+        model.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm), hp['batch']):
+            j = perm[i:i + hp['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, w in aux.values():
+                if (t >= 0).any():
+                    loss = loss + w * F.cross_entropy(l, t, ignore_index=-100)
+            if getattr(model, 'inter', False):
+                loss = loss + model._int_pen
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(predict(model, dev).argmax(1), y_dev, 7)[1]
+        if u > best:
+            best, bad = u, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    model.eval()
+    contrib = {}
+    with torch.no_grad():
+        for i in range(0, len(te), 256):
+            C = model.contributions(te[i:i + 256])[0]
+            for p, c in C.items():
+                contrib.setdefault(p, []).append(c.cpu())
+    return predict(model, te), best, {p: torch.cat(v).numpy() for p, v in contrib.items()}
+
+
+print("parameters:", {n: f"{sum(p.numel() for p in MAKE[k](c).parameters()) / 1e6:.2f}M" for n, k, c in EXPERIMENTS})
+FM = FMASK.cpu().numpy()
+HAS = {'listener in III': FM[:, 1, 2].any(-1), 'listener in I/II': FM[:, 1, :2].any((-1, -2)),
+       'no listener': ~FM[:, 1].any((-1, -2))}
+for k, v in HAS.items():
+    print(f"  {k:<18} {v.mean() * 100:5.1f}%  (n={v.sum()})")
+"""),
+    ("markdown", r"""
+## 5-fold episode cross-validation (same folds and seeds as G8b / G11)
+"""),
+    ("code", r"""
+import re
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_)
+
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+OOF = {name: np.full((len(SEEDS), N, 7), np.nan, np.float32) for name, _, _ in EXPERIMENTS}
+CONTRIB = {name: {} for name, kind, _ in EXPERIMENTS if kind == 'cs'}
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for name, kind, cfg in EXPERIMENTS:
+        for si, seed in enumerate(SEEDS):
+            if kind == 'cs':
+                p, sel, C = train_eval_cs(kind, cfg, tr, dev, te, seed + 1000 * f)
+                for path, c in C.items():
+                    CONTRIB[name].setdefault(path, np.full((len(SEEDS), N, 7), np.nan, np.float32))[si, te_rows] = c
+            else:
+                p, sel = train_eval(kind, cfg, tr, dev, te, seed + 1000 * f)
+            OOF[name][si, te_rows] = p
+            w, u = war_uar(p.argmax(1), y_all[te_rows], 7)
+            log.append({'fold': f, 'exp': name, 'seed': seed, 'sel_UAR': sel, 'UAR': u, 'WAR': w})
+            print(f"fold {f} {name:<14} seed {seed}: sel {sel:5.2f} | UAR {u:5.2f} WAR {w:5.2f} | "
+                  f"{(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+
+assert all(not np.isnan(v).any() for v in OOF.values())
+safe = lambda s: re.sub(r'[^0-9A-Za-z]+', '_', s).strip('_')
+keys = ['has_' + safe(k) for k in HAS] + [safe(k) for k in OOF] + \
+       ['contrib_' + safe(n) + '_' + p for n, C in CONTRIB.items() for p in C]
+assert len(keys) == len(set(keys)), "colliding npz keys"
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g12_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g12_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
+         **{'has_' + safe(k): v for k, v in HAS.items()}, **{safe(k): v for k, v in OOF.items()},
+         **{'contrib_' + safe(n) + '_' + p: v for n, C in CONTRIB.items() for p, v in C.items()})
+print("saved g12_oof_probs.npz and g12_fold_seed_log.csv")
+"""),
+    ("markdown", r"""
+## Results: scores, decision, path contributions and faithfulness (plain argmax, seed ensemble)
+"""),
+    ("code", r"""
+def boot_delta(pa, pb, y, s, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    groups = [np.where(s == e)[0] for e in np.unique(s)]
+    d = []
+    for _ in range(n_boot):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        wa, ua = war_uar(pa[idx], y[idx], 7); wb, ub = war_uar(pb[idx], y[idx], 7)
+        d.append((ua - ub, wa - wb))
+    return np.percentile(np.array(d), [2.5, 97.5], axis=0)
+
+
+PRED = {k: np.log(v.mean(0) + 1e-9).argmax(1) for k, v in OOF.items()}
+UAR = {k: war_uar(p, y_all, 7)[1] for k, p in PRED.items()}
+print(f"== per-seed pooled out-of-fold UAR ({N} MCIS, {len(EPS)} episodes) ==")
+for k, v in OOF.items():
+    per = [war_uar(v[s].argmax(1), y_all, 7)[1] for s in range(len(v))]
+    print(f"  {k:<14} " + " ".join(f"{u:5.2f}" for u in per) + f"  (mean {np.mean(per):.2f})")
+print("\n== seed ensemble ==")
+for k in PRED:
+    report(k, PRED[k], y_all, src)
+
+
+def contrast(a, b, m=None):
+    m = np.ones(N, bool) if m is None else m
+    lo, hi = boot_delta(PRED[a][m], PRED[b][m], y_all[m], src[m])
+    wa, ua = war_uar(PRED[a][m], y_all[m], 7); wb, ub = war_uar(PRED[b][m], y_all[m], 7)
+    folds = [war_uar(PRED[a][m & (fold_of_row == f)], y_all[m & (fold_of_row == f)], 7)[1]
+             - war_uar(PRED[b][m & (fold_of_row == f)], y_all[m & (fold_of_row == f)], 7)[1] for f in range(N_OUTER)]
+    print(f"  {a:<14} - {b:<14} ΔUAR {ua - ub:+5.2f} [{lo[0]:+5.2f},{hi[0]:+5.2f}]  ΔWAR {wa - wb:+5.2f}  "
+          f"folds>0 {sum(x > 0 for x in folds)}/5")
+    return ua - ub
+
+
+print("\n== contrasts ==")
+contrast('CS-add', 'RoleNet'); contrast('CS-int', 'RoleNet'); contrast('CS-int', 'CS-add')
+DROP = {}
+for p in PATHS:
+    DROP[p] = contrast('CS-add', f'CS-add -{p}')
+
+
+def shares(name):
+    # mean |centred contribution| to the predicted class, per path (centring removes each path's constant offset)
+    C = {p: v.mean(0) for p, v in CONTRIB[name].items()}
+    yhat = PRED[name]
+    s = {p: np.abs(c[np.arange(N), yhat] - c.mean(0)[yhat]) for p, c in C.items()}
+    tot = sum(s.values())
+    return {p: float((v / np.maximum(tot, 1e-9)).mean()) for p, v in s.items()}, s
+
+
+print("\n== path contribution shares (mean over MCIS) ==")
+SH = {}
+for name in ('CS-add', 'CS-int'):
+    SH[name], raw = shares(name)
+    print(f"  {name}: " + ", ".join(f"{p} {v * 100:.1f}%" for p, v in SH[name].items()))
+    for sname, m in HAS.items():
+        tot = sum(raw.values())[m]
+        print(f"      {sname:<18} " + ", ".join(f"{p} {(raw[p][m] / np.maximum(tot, 1e-9)).mean() * 100:.1f}%"
+                                              for p in raw))
+int_share = SH['CS-int'].get('int', 0.0)
+
+from scipy.stats import spearmanr
+rk = spearmanr([SH['CS-add'][p] for p in PATHS], [DROP[p] for p in PATHS]).correlation
+print(f"\n== faithfulness: rank agreement (Spearman, 3 paths) between contribution share and retrain drop: {rk:+.2f}")
+print("   shares:", {p: round(SH['CS-add'][p] * 100, 1) for p in PATHS}, "| retrain drops:", {p: round(DROP[p], 2) for p in PATHS})
+
+print("\n== examples (CS-add, seed ensemble; contribution of each path to the predicted class, centred) ==")
+C = {p: v.mean(0) for p, v in CONTRIB['CS-add'].items()}
+rng_ = np.random.default_rng(0)
+for i in rng_.choice(N, 5, replace=False):
+    yh = PRED['CS-add'][i]
+    print(f"  {DEV.sample_id.values[i]}: true {EMO[y_all[i]]:<8} pred {EMO[yh]:<8} | " +
+          ", ".join(f"{p} {C[p][i, yh] - C[p][:, yh].mean():+.2f}" for p in PATHS))
+
+print("\n== decision (fixed before running) ==")
+if UAR['CS-add'] >= UAR['RoleNet']:
+    print(f"ADOPT CS-add: UAR {UAR['CS-add']:.2f} >= RoleNet {UAR['RoleNet']:.2f}")
+elif UAR['CS-int'] >= UAR['RoleNet'] and int_share <= 0.25:
+    print(f"ADOPT CS-int: UAR {UAR['CS-int']:.2f} >= RoleNet {UAR['RoleNet']:.2f}, interaction share {int_share * 100:.1f}%")
+else:
+    print(f"KEEP RoleNet ({UAR['RoleNet']:.2f}); CS-add {UAR['CS-add']:.2f}, CS-int {UAR['CS-int']:.2f} "
+          f"(interaction share {int_share * 100:.1f}%)")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -4884,6 +5260,7 @@ if __name__ == "__main__":
                         ("g8b_rolenet_cv.ipynb", G8B),
                         ("g9_rolenet_plus_cv.ipynb", G9),
                         ("g10_test_preregistered.ipynb", G10),
-                        ("g11_channel_ablations_cv.ipynb", G11)]:
+                        ("g11_channel_ablations_cv.ipynb", G11),
+                        ("g12_cs_rolenet_cv.ipynb", G12)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

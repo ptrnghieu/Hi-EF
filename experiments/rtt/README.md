@@ -267,3 +267,58 @@ The test split raises an error unless `UNLOCK_TEST = True`.
 | RoleNet − noRole | +1.17 [−0.01, +2.29] |
 
 PaperBest was not part of the CV.
+
+## G11 results: channel ablations of RoleNet (5-fold CV, 2,421 MCIS, 45 episodes, 3 seeds, plain; test untouched)
+
+Question: which evidence does RoleNet use? Face tokens are grouped as **simulation** (A's face + speech/scene
+tokens: the event), **strict surrogation** (bystanders O: other people's reactions, Gilbert et al. 2009) and **target
+observation** (the listener L, i.e. B in ~81% of MCIS). Removed groups are masked out of attention at training and
+evaluation. `Full` re-runs G8b's RoleNet: 26.00 UAR (G8b 25.92).
+
+Evidence available: listener in III 59.9%, listener in I/II 44.2%, O anywhere 69.1%, O in III 16.2%,
+O present with no listener in III 35.7%.
+
+| Arm (seed ensemble) | UAR [95% CI] | WAR |
+|---|---|---|
+| Full | 26.00 [23.8, 28.1] | 37.30 |
+| minus-A (A's face removed) | 25.66 | 35.89 |
+| minus-L3 (listener in clip III removed) | 25.00 | 36.31 |
+| minus-O (bystanders removed) | 24.64 | 35.85 |
+| minus-L (listener removed everywhere) | 23.48 | 33.75 |
+| Sim-only (A + speech/scene) | 23.22 | 32.96 |
+| Obs-only (L + O faces) | 23.10 | 31.89 |
+| Self-only (L faces) | 20.60 | 30.86 |
+| Surr-only (O faces) | 17.39 | 24.95 |
+
+Preregistered hypotheses (ΔUAR, 95% episode bootstrap):
+- **H1 strict surrogation**, Full − minus-O on O-present MCIS: +1.38 [−0.46, +3.38] → directional only.
+  H1b, Surr-only − Sim-only where only bystanders are seen: **−3.91 [−6.83, −0.37]** → the opposite of surrogation > simulation.
+- **H2 target observation**, Full − minus-L: **+2.52 [+1.35, +3.63]**, positive in 5/5 folds → holds
+  (+3.13 [+1.46, +4.70] where the listener is visible in III).
+- **H3 current reaction**, Full − minus-L3 where the listener is in III: +0.61 [−0.84, +2.07] → directional only.
+  The listener's clip I/II appearances carry most of it: minus-L3 − minus-L on listener-in-I/II MCIS +2.76 [+0.54, +5.10].
+- **H4 observation beats simulation**, Obs-only − Sim-only: −0.12 [−1.93, +1.68] → not supported.
+
+Other contrasts: Full − Sim-only +2.78 [+1.41, +4.06] (5/5 folds); Full − Obs-only +2.90 [+0.74, +4.89];
+Full − minus-A +0.34 [−1.32, +1.88]; Self-only − Surr-only +3.22 [+1.17, +5.04].
+
+**Post-hoc controls (analysis of the saved probabilities, not preregistered).** Removing a token group also changes
+training, so the ablation deltas contain a generic part. It shows up where the removed tokens do not even exist:
+- Full − minus-O on MCIS **without** any O face: +1.14 [−1.17, +3.55], about the same as with O (+1.36).
+  Difference-in-differences (O present vs absent): **+0.24 [−2.59, +3.01]** → no O-specific information.
+- Full − minus-L on O-present MCIS **without** a listener: +1.26 [−0.74, +3.30]; with a listener +2.51 [+0.54, +4.39].
+  Difference-in-differences: +1.25 [−1.76, +3.98] → the listener-specific part is about half of the raw H2 effect
+  and not significant on this subset.
+- The notebook's automatic "Framing" line ("observation beats simulation") follows the rule "H2 or H4", but H4 itself
+  failed; the supported reading is complementarity, see below.
+- Note: in the saved npz of this run, `has_listener_in_III` actually holds the "listener in I/II" mask (key
+  collision, fixed in the notebook afterwards). The logged hypothesis results were computed in memory and are unaffected.
+
+**Reading.**
+1. Strict surrogation (bystanders' reactions) carries no detectable information for B's next emotion in Hi-EF, and
+   on its own it is clearly worse than simulation. The Gilbert-style "surrogation beats simulation" claim is **not**
+   supported here.
+2. Observing the target helps (H2, 5/5 folds), mostly through B's appearances across the context, not specifically
+   the clip-III reaction; part of the raw effect is a generic ablation cost.
+3. The event and observation channels are **complementary**: each alone is ~23 UAR and together 26 (both +2.8–2.9).
+4. A's face adds nothing beyond the speech/scene tokens.

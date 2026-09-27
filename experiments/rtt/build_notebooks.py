@@ -4792,10 +4792,13 @@ for f in range(N_OUTER):
                   f"{(time.time() - t0) / 60:.1f} min", flush=True)
             torch.cuda.empty_cache()
 
+import re
 assert all(not np.isnan(v).any() for v in OOF.values())
 pd.DataFrame(log).to_csv(f"{OUT_DIR}/g11_fold_seed_log.csv", index=False)
+HAS_KEYS = {k: 'has_' + re.sub(r'[^0-9A-Za-z]+', '_', k).strip('_') for k in HAS}
+assert len(set(HAS_KEYS.values())) == len(HAS_KEYS), HAS_KEYS          # 'I/II' and 'III' must not collide
 np.savez(f"{OUT_DIR}/g11_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
-         **{'has_' + k.replace(' ', '_').replace('/', '').replace(',', ''): v for k, v in HAS.items()},
+         **{HAS_KEYS[k]: v for k, v in HAS.items()},
          **{k.replace('-', '_'): v for k, v in OOF.items()})
 print("saved g11_oof_probs.npz and g11_fold_seed_log.csv")
 """),

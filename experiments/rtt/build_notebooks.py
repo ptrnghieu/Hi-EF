@@ -4570,6 +4570,308 @@ print(f"  RoleNet beats PaperBest in {wins}/{len(np.unique(st))} episodes")
 """),
 ]
 
+# ---------------------------------------------------------------- G11: channel ablations (simulation / surrogation / target observation)
+G11 = [
+    ("markdown", r"""
+# G11 — Which evidence does RoleNet use? Channel ablations in episode-level CV
+
+**Motivation.** Gilbert et al. (Science 2009) distinguish two ways to forecast an emotional reaction:
+* **simulation** — reason from the *event*;
+* **surrogation** — use the observed reaction of *another person* who went through the same event.
+
+In Hi-EF the forecast target is B, so RoleNet's face tokens mix three kinds of evidence:
+
+| Channel | RoleNet tokens | Theory |
+|---|---|---|
+| **Simulation** (the event) | A's face tokens + speech and scene tokens | simulation |
+| **Surrogation, strict sense** (other people's reactions) | **O** face tokens (bystanders) | surrogation |
+| **Target observation** (B's own current / earlier reaction) | **L** face tokens | not surrogation in the strict sense; closer to reading B's state and its inertia |
+
+This notebook removes channels one at a time and in combination, with everything else fixed. A removed token is
+**excluded from attention** (key-padding mask) and from the auxiliary heads, at training and at evaluation.
+
+**Arms (same folds, seeds and hyper-parameters as G8b; 3 seeds × 5 folds each):**
+
+| Arm | Face tokens kept | Speech + scene | Question |
+|---|---|---|---|
+| `Full` | A, L, O | yes | Reference (re-run of G8b's RoleNet) |
+| `minus-O` | A, L | yes | Does strict surrogation add information? |
+| `minus-L` | A, O | yes | Does observing the target add information? |
+| `minus-L3` | A, O, L in clips I/II only | yes | Is B's *current* listening reaction what matters? |
+| `minus-A` | L, O | yes | Does A's face (part of the event) add information? |
+| `Obs-only` | L, O | no | Observation channels alone |
+| `Sim-only` | A | yes | Event (simulation) channel alone |
+| `Surr-only` | O | no | Strict surrogation alone |
+| `Self-only` | L | no | Target observation alone |
+
+**Caveat.** L is the second most frequent identity in clip III, which is B in about 81% of MCIS (G6a). When the rule
+misses, B can sit inside O, so "O" is strict surrogation only up to that error rate. Clip IV is not used to clean this.
+
+**Hypotheses and reading rules (fixed before running).** Metric: pooled out-of-fold UAR of the seed ensemble, plain
+argmax (the reporting standard chosen after G10), 95% bootstrap over the 45 episodes. CV here is exploratory; a
+contrast "holds" if its CI lower bound is > 0.
+
+* **H1 (strict surrogation):** `Full − minus-O` > 0 on MCIS where an O face is present.
+  Secondary: `Surr-only − Sim-only` on MCIS with an O face and **no** listener face in clip III (only bystanders
+  observed — Gilbert's comparison in its purest form here).
+* **H2 (target observation):** `Full − minus-L` > 0, overall and where the listener is visible in clip III.
+* **H3 (current reaction):** `Full − minus-L3` > 0 where the listener is visible in clip III.
+* **H4 (observation beats simulation):** `Obs-only − Sim-only` > 0.
+
+**How the result steers the paper's framing:**
+* H1 holds → surrogation (strict) is a central channel; the three-channel framework stands.
+* H1 fails, H2/H4 hold → the message is "observation beats simulation"; surrogation becomes a supporting idea.
+* Neither → the theory framing is dropped.
+
+The test split stays untouched.
+"""),
+    ("code", r"""
+# ======== CONFIG ========
+import os
+
+
+def first_existing(*paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"none of {paths}")
+
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = first_existing("/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv",
+                           "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv")
+G8A_DIR = first_existing("/kaggle/input/datasets/ptrnghieu/g8a-features", "/kaggle/input/g8a-features")
+OUT_DIR = "/kaggle/working"
+
+N_OUTER, N_INNER_DEV = 5, 5
+SEEDS = [42, 123, 456]                       # as G8b
+LR, WEIGHT_DECAY = 1e-4, 1e-5                # B1 settings (only needed by the shared model cell)
+FC_EPOCHS, PATIENCE, FC_BATCH = 50, 8, 32
+RN = dict(D=128, heads=4, layers=2, dropout=0.2, lr=3e-4, wd=1e-2, epochs=80, patience=12, batch=64,
+          aux_w=0.3, a_w=0.3, p_drop_ctx=0.3, p_drop_face=0.15)     # G8b, unchanged
+PCA_DIM, MAXF, MAXF_POOL = 128, 24, 32
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
+VOICE_SAME_COS = 0.35
+DEBUG_PER_EPISODE = None     # e.g. 6 for a quick smoke test
+
+FULL = dict(role=True, faces=True, ctx=True, aux=True, mdrop=True, drop=())
+NOCTX = dict(ctx=False, mdrop=False)
+EXPERIMENTS = [
+    ("Full",      'role', FULL),
+    ("minus-O",   'role', {**FULL, 'drop': ('O',)}),
+    ("minus-L",   'role', {**FULL, 'drop': ('L',)}),
+    ("minus-L3",  'role', {**FULL, 'drop': ('L3',)}),
+    ("minus-A",   'role', {**FULL, 'drop': ('A',)}),
+    ("Obs-only",  'role', {**FULL, **NOCTX, 'drop': ('A',)}),
+    ("Sim-only",  'role', {**FULL, 'drop': ('L', 'O')}),
+    ("Surr-only", 'role', {**FULL, **NOCTX, 'drop': ('A', 'L')}),
+    ("Self-only", 'role', {**FULL, **NOCTX, 'drop': ('A', 'O')}),
+]
+"""),
+    G8B[3], G3[3], G3[4], G8B[6], G8B[7], G8B[11], G8B[12],
+    ("markdown", r"""
+## Channel masking
+"""),
+    ("code", r"""
+ROLE_IDX = {'A': 0, 'L': 1, 'O': 2}
+
+
+def keep_mask(drop):
+    # [role, clip] -> is this face token visible to the model?
+    K = torch.ones(3, 3, dtype=torch.bool, device=DEVICE)
+    for g in drop:
+        if g in ROLE_IDX:
+            K[ROLE_IDX[g]] = False
+        elif g == 'L3':
+            K[1, 2] = False
+        elif g == 'L12':
+            K[1, :2] = False
+        else:
+            raise ValueError(g)
+    return K
+
+
+class RoleNetAbl(RoleNet):
+    # RoleNet with some face tokens removed. Removed tokens are excluded from attention (key-padding mask),
+    # from the face auxiliary head, and (if A's clip-III token is removed) the A-emotion head is switched off.
+    def __init__(self, cfg, d=RN['D']):
+        assert cfg['role'], "ablations need role-tagged face tokens"
+        super().__init__(cfg, d)
+        self.K = keep_mask(cfg.get('drop', ()))
+        if self.head_A is not None and not bool(self.K[0, 2]):
+            self.head_A = None
+
+    def forward(self, ix, train=False):
+        B, groups, keep, aux = len(ix), [], [], {}
+        if self.cfg['faces']:
+            h, present = self.pool(FACE[ix], FMASK[ix])                      # [B, 3, 3, d]
+            h = torch.where(present.unsqueeze(-1), h, self.absent.unsqueeze(0).expand(B, -1, -1, -1))
+            h = h + self.face_role[None, :, None] + self.clip_emb[None, None]
+            ft = h.reshape(B, 9, -1)
+            kf = self.K.reshape(9)
+            groups.append(ft); keep.append(kf.unsqueeze(0).expand(B, -1))
+            if self.head_face is not None:
+                w = kf.float()[None, :, None]
+                aux['face'] = (self.head_face((ft * w).sum(1) / w.sum(1)), YB[ix], RN['aux_w'])
+            if self.head_A is not None:
+                tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+                aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
+        if self.cfg['ctx']:
+            spk_ = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
+            scn = self.scene(SCN[ix]) + self.ctx_role[1]
+            ct = torch.cat([spk_ + self.clip_emb, scn + self.clip_emb], 1)     # [B, 6, d]
+            groups.append(ct); keep.append(torch.ones(B, 6, dtype=torch.bool, device=ct.device))
+            if self.head_ctx is not None:
+                aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
+        toks = torch.cat([self.query.expand(B, -1, -1)] + groups, 1)
+        valid = torch.cat([torch.ones(B, 1, dtype=torch.bool, device=toks.device)] + keep, 1)
+        if train and self.cfg['mdrop'] and len(groups) == 2:
+            u = torch.rand(B, device=toks.device)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+            valid[:, 1:10] &= ~drop_face.unsqueeze(1)
+            valid[:, 10:] &= ~drop_ctx.unsqueeze(1)
+        out = self.enc(toks, src_key_padding_mask=~valid)
+        return self.head(out[:, 0]), aux
+
+
+MAKE['role'] = lambda cfg: RoleNetAbl(cfg)
+print("parameters:", {n: f"{sum(p.numel() for p in MAKE[k](c).parameters()) / 1e6:.2f}M" for n, k, c in EXPERIMENTS})
+
+# which evidence exists in each MCIS (computed from role slots only; no labels)
+FM = FMASK.cpu().numpy()
+HAS = {
+    'A in III': FM[:, 0, 2].any(-1),
+    'listener in III': FM[:, 1, 2].any(-1),
+    'listener in I/II': FM[:, 1, :2].any((-1, -2)),
+    'O anywhere': FM[:, 2].any((-1, -2)),
+    'O in III': FM[:, 2, 2].any(-1),
+}
+HAS['O, no listener in III'] = HAS['O anywhere'] & ~HAS['listener in III']
+for k, v in HAS.items():
+    print(f"  {k:<24} {v.mean() * 100:5.1f}%  (n={v.sum()})")
+"""),
+    ("markdown", r"""
+## 5-fold episode cross-validation (same folds and seeds as G8b)
+"""),
+    ("code", r"""
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_)
+
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+OOF = {name: np.full((len(SEEDS), N, 7), np.nan, np.float32) for name, _, _ in EXPERIMENTS}
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for name, kind, cfg in EXPERIMENTS:
+        for si, seed in enumerate(SEEDS):
+            p, sel = train_eval(kind, cfg, tr, dev, te, seed + 1000 * f)
+            OOF[name][si, te_rows] = p
+            w, u = war_uar(p.argmax(1), y_all[te_rows], 7)
+            log.append({'fold': f, 'exp': name, 'seed': seed, 'sel_UAR': sel, 'UAR': u, 'WAR': w})
+            print(f"fold {f} {name:<10} seed {seed}: sel {sel:5.2f} | UAR {u:5.2f} WAR {w:5.2f} | "
+                  f"{(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+
+assert all(not np.isnan(v).any() for v in OOF.values())
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g11_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g11_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
+         **{'has_' + k.replace(' ', '_').replace('/', '').replace(',', ''): v for k, v in HAS.items()},
+         **{k.replace('-', '_'): v for k, v in OOF.items()})
+print("saved g11_oof_probs.npz and g11_fold_seed_log.csv")
+"""),
+    ("markdown", r"""
+## Results (plain argmax, seed ensemble, 95% bootstrap over episodes)
+"""),
+    ("code", r"""
+def boot_delta(pa, pb, y, s, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    groups = [np.where(s == e)[0] for e in np.unique(s)]
+    d = []
+    for _ in range(n_boot):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        wa, ua = war_uar(pa[idx], y[idx], 7); wb, ub = war_uar(pb[idx], y[idx], 7)
+        d.append((ua - ub, wa - wb))
+    return np.percentile(np.array(d), [2.5, 97.5], axis=0)
+
+
+PRED = {k: np.log(v.mean(0) + 1e-9).argmax(1) for k, v in OOF.items()}
+
+print(f"== per-seed pooled out-of-fold UAR ({N} MCIS, {len(EPS)} episodes) ==")
+for k, v in OOF.items():
+    per = [war_uar(v[s].argmax(1), y_all, 7)[1] for s in range(len(v))]
+    print(f"  {k:<10} " + " ".join(f"{u:5.2f}" for u in per) + f"  (mean {np.mean(per):.2f})")
+print("\n== seed ensemble, all MCIS ==")
+for k in PRED:
+    report(k, PRED[k], y_all, src)
+
+
+def contrast(a, b, mask, label):
+    m = mask
+    if m.sum() < 30 or len(np.unique(src[m])) < 5:
+        print(f"  {a:<10} - {b:<10} [{label}] too few MCIS (n={m.sum()})"); return None
+    pa, pb = PRED[a][m], PRED[b][m]
+    (lo, hi) = boot_delta(pa, pb, y_all[m], src[m])
+    wa, ua = war_uar(pa, y_all[m], 7); wb, ub = war_uar(pb, y_all[m], 7)
+    print(f"  {a:<10} - {b:<10} [{label}, n={m.sum()}] ΔUAR {ua - ub:+5.2f} [{lo[0]:+5.2f},{hi[0]:+5.2f}]  "
+          f"ΔWAR {wa - wb:+5.2f} [{lo[1]:+5.2f},{hi[1]:+5.2f}]")
+    return ua - ub, lo[0]
+
+
+ALL = np.ones(N, bool)
+print("\n== hypotheses (fixed before running) ==")
+R = {}
+R['H1'] = contrast('Full', 'minus-O', HAS['O anywhere'], 'O present')
+R['H1b'] = contrast('Surr-only', 'Sim-only', HAS['O, no listener in III'], 'O present, no listener in III')
+R['H2'] = contrast('Full', 'minus-L', ALL, 'all')
+contrast('Full', 'minus-L', HAS['listener in III'], 'listener in III')
+R['H3'] = contrast('Full', 'minus-L3', HAS['listener in III'], 'listener in III')
+R['H4'] = contrast('Obs-only', 'Sim-only', ALL, 'all')
+
+print("\n== descriptive contrasts ==")
+contrast('Full', 'minus-O', ALL, 'all')
+contrast('Full', 'minus-A', ALL, 'all')
+contrast('Full', 'Obs-only', ALL, 'all')
+contrast('Full', 'Sim-only', ALL, 'all')
+contrast('Self-only', 'Surr-only', ALL, 'all')
+contrast('Self-only', 'Sim-only', ALL, 'all')
+contrast('Surr-only', 'Sim-only', HAS['O anywhere'], 'O present')
+contrast('minus-L3', 'minus-L', HAS['listener in I/II'], 'listener in I/II')
+
+print("\n== verdicts ==")
+for h, v in R.items():
+    if v is None:
+        print(f"  {h}: not evaluable"); continue
+    d, lo = v
+    print(f"  {h}: Δ {d:+.2f}, CI low {lo:+.2f} -> {'HOLDS' if lo > 0 else ('directional only' if d > 0 else 'not supported')}")
+h1 = R['H1'] is not None and R['H1'][1] > 0
+obs = any(R[k] is not None and R[k][1] > 0 for k in ('H2', 'H4'))
+print("\nFraming: " + ("strict surrogation is a central channel -> keep the three-channel framework" if h1 else
+                       "observation beats simulation; surrogation is a supporting idea" if obs else
+                       "no channel claim is supported -> drop the theory framing"))
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -4578,6 +4880,7 @@ if __name__ == "__main__":
                         ("g7b_faces_into_b1.ipynb", G7B), ("g8a_role_features.ipynb", G8A),
                         ("g8b_rolenet_cv.ipynb", G8B),
                         ("g9_rolenet_plus_cv.ipynb", G9),
-                        ("g10_test_preregistered.ipynb", G10)]:
+                        ("g10_test_preregistered.ipynb", G10),
+                        ("g11_channel_ablations_cv.ipynb", G11)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

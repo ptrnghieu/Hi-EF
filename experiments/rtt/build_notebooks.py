@@ -6108,6 +6108,92 @@ print(f"saved {OUT_DIR}/g16_per_mcis.csv and g16_results.json")
 ]
 
 
+G17 = [
+    ("markdown", r"""
+# G17 — Listening vs speaking observations of the same person (paired; analysis only; test untouched)
+
+G16 suggested that the value of observing the target depends on *what the target is doing*: faces of B while B
+speaks carried ≈ 0 bits about B's next emotion, faces while B is silent carried +0.046 bits. That comparison was
+between different MCIS. G17 makes it **paired**: the same MCIS, the same person (the listener L of clip III), one
+context clip in which B speaks and one in which B is silent. G15/G16 cells run first; features, predictor, folds,
+information gain and episode bootstrap are unchanged. B's speaking is decided by the clip-IV voice (analysis only).
+
+* **P1 (primary).** MCIS where L is seen in clips I and II, both voices are known, and B spoke in exactly one of the
+  two clips. *Silent* = L's frames in the clip where B did not speak; *speaking* = L's frames in the clip where B
+  spoke; equal frame counts. Δ = mean IG(silent) − mean IG(speaking), separate logistic regressions as in G15/G16.
+  Reported also by order (silent clip later / earlier), since G16 found no time effect but the order is not balanced.
+* **P2 (secondary).** One logistic regression fitted on *all* context observations of L (both types pooled; all
+  frames), out of fold. IG of each observation; paired difference silent − speaking within the P1 MCIS, and the
+  mean IG of each type over all observations.
+
+**Decision rules (fixed before running).**
+* P1 CI above 0 → constraint (iii) stays in the main problem statement.
+* P1 > 0 with the CI including 0 → (iii) becomes a reported finding with this caveat, not part of the statement.
+* P1 ≤ 0 → (iii) is dropped.
+"""),
+] + G16[1:] + [
+    ("markdown", r"""
+## G17 contrasts
+"""),
+    ("code", r"""
+RES17 = {}
+# P1: same MCIS, one silent and one speaking context clip
+rP, xs, xk, order = [], [], [], []
+for n in range(N):
+    if SLOT[(n, 1, 0)][1] and SLOT[(n, 1, 1)][1] and VOK[n].all() and BSP[n].sum() == 1:
+        ks, kk = int(np.where(~BSP[n])[0][0]), int(np.where(BSP[n])[0][0])
+        a, b = pair(n, ks, kk)
+        rP.append(n); xs.append(a); xk.append(b); order.append('silent later' if ks > kk else 'silent earlier')
+p1 = contrast('P1 silent vs speaking (same MCIS)', rP, xs, xk, 'silent', 'speaking')
+RES17['P1'] = RES16.get('P1 silent vs speaking (same MCIS)')
+order = np.array(order)
+for o in ('silent later', 'silent earlier'):
+    m = order == o
+    contrast(f'P1 [{o}]', np.array(rP)[m], [x for x, t in zip(xs, m) if t], [x for x, t in zip(xk, m) if t],
+             'silent', 'speaking')
+    RES17[f'P1 {o}'] = RES16.get(f'P1 [{o}]')
+
+# P2: one model over all context observations of L
+orow, oX, otype = [], [], []
+for n in range(N):
+    for k in (0, 1):
+        c, idx = SLOT[(n, 1, k)]
+        if idx and VOK[n, k]:
+            orow.append(n); oX.append(expr(c, idx)); otype.append('speaking' if BSP[n, k] else 'silent')
+orow, otype = np.array(orow, int), np.array(otype)
+if len(orow) >= 50:
+    ig, _ = oof_ig(np.array(oX), orow)
+    ig = ig / LN2
+    for t in ('silent', 'speaking'):
+        m = (otype == t) & np.isfinite(ig)
+        lo, hi = ep_boot(lambda i: ig[m][i].mean(), src[orow][m])
+        print(f"P2 all context observations, {t}: n={m.sum()} | IG {ig[m].mean():+.4f} bits [{lo:+.4f},{hi:+.4f}]")
+        RES17[f'P2 all {t}'] = dict(n=int(m.sum()), IG=float(ig[m].mean()), lo=lo, hi=hi)
+    pairs = [(np.where((orow == n) & (otype == 'silent'))[0], np.where((orow == n) & (otype == 'speaking'))[0]) for n in rP]
+    d2 = np.array([ig[a[0]] - ig[b[0]] for a, b in pairs if len(a) and len(b)])
+    ok = np.isfinite(d2)
+    s2 = np.array([n for (a, b), n in zip(pairs, rP) if len(a) and len(b)])
+    if ok.sum() >= 30:
+        lo, hi = ep_boot(lambda i: d2[ok][i].mean(), src[s2][ok])
+        print(f"P2 paired (P1 MCIS, one model): n={ok.sum()} | silent − speaking {d2[ok].mean():+.4f} bits [{lo:+.4f},{hi:+.4f}]")
+        RES17['P2 paired'] = dict(n=int(ok.sum()), delta=float(d2[ok].mean()), lo=lo, hi=hi)
+
+if p1 is None:
+    dec = 'P1 UNINFORMATIVE (too few MCIS)'
+elif p1[1] > 0:
+    dec = 'constraint (iii) stays in the problem statement'
+elif p1[0] > 0:
+    dec = 'DIRECTIONAL -> (iii) becomes a reported finding with a caveat'
+else:
+    dec = 'constraint (iii) dropped'
+print(f"\n== G17 decision (fixed rule): {dec} ==")
+json.dump({k: ({a: (float(b) if isinstance(b, (np.floating, float)) else b) for a, b in v.items()} if v else v)
+           for k, v in RES17.items()} | {'decision': dec}, open(f"{OUT_DIR}/g17_results.json", 'w'), indent=1, default=str)
+print(f"saved {OUT_DIR}/g17_results.json")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -6122,6 +6208,7 @@ if __name__ == "__main__":
                         ("g13_token_ablations_cv.ipynb", G13),
                         ("g14_ten_seed_confirmation_cv.ipynb", G14),
                         ("g15_dynamics_gates.ipynb", G15),
-                        ("g16_time_vs_type.ipynb", G16)]:
+                        ("g16_time_vs_type.ipynb", G16),
+                        ("g17_listening_vs_speaking.ipynb", G17)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

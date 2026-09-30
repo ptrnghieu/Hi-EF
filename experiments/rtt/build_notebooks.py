@@ -5366,6 +5366,8 @@ class RoleNetTok(RoleNet):
         keep_clip = torch.zeros(3, dtype=torch.bool, device=DEVICE)
         keep_clip[list(cfg['clips'])] = True
         kf = keep_clip.repeat(3)                                              # face token 3r+k -> clip k
+        if 'L' in cfg['drop']:
+            kf[3:6] = False                                                   # listener tokens, all clips (G11 minus-L)
         ks, kc = keep_clip.clone(), keep_clip.clone()
         if 'speech' in cfg['drop']:
             ks[:] = False
@@ -5552,6 +5554,119 @@ for sname, m in (('listener in III', vis), ('no listener in III', ~vis)):
 ]
 
 
+G14 = [
+    ("markdown", r"""
+# G14 — Ten-seed confirmation of the effects that matter (5-fold episode CV, test untouched)
+
+G13 showed that two 3-seed runs of the *same* RoleNet differ by about 1 UAR (25.00 vs 26.17), and that 220 three-seed
+ensembles drawn from 12 same-model runs span 24.6–26.4. Contrasts of about 1 UAR are therefore not established by
+3 seeds. G14 re-runs the key arms with **10 seeds** and puts the seed variation into the confidence interval.
+
+| Arm | Change against `Full` (RoleNet) | Earlier result |
+|---|---|---|
+| `Full` | RoleNet (as `Full` in G13) | 25.00–26.17 over four 3-seed runs |
+| `Q-meanpool` | No query token; mean of the valid output tokens | G13: within noise |
+| `minus-L` | Listener face tokens (all clips) removed | G11: Full − arm +2.52 |
+| `T-clipIIIonly` | Only clip-III tokens kept | G13: +1.92, below all 220 same-model ensembles |
+| `noRole` | One pooled face token per clip, no A/L/O roles (G8b `RoleNet-noRole`) | G8b: +1.17, within noise |
+
+Same folds, early-stop episodes, hyper-parameters and plain scoring as G8b / G11–G13. Seeds: the three earlier
+seeds plus seven new ones (seed + 1000·fold, as before).
+
+**Analysis (fixed before running).**
+* Metric: pooled out-of-fold UAR of the 10-seed ensemble (mean of probabilities, plain argmax).
+* Main interval: **two-level bootstrap** (2,000 draws). Each draw resamples the 10 seeds of each arm with replacement
+  *and* the 45 episodes, then computes ΔUAR = Full − arm. The interval therefore covers both seed and episode noise.
+* `minus-L`, `T-clipIIIonly`, `noRole`: the element is **confirmed** if the lower bound of Full − arm is above 0,
+  otherwise **not confirmed**.
+* `Q-meanpool` (simplification, non-inferiority margin 1 UAR): **simpler is adequate** if the upper bound of
+  Full − Q-meanpool is below +1.0; **query needed** if the lower bound is above 0; otherwise **inconclusive**, and
+  RoleNet keeps the query token for continuity.
+* Also reported: per-seed UAR mean ± SD per arm, the episode-only bootstrap of the 10-seed ensembles, and fold counts.
+"""),
+    ("code", G13[1][1]
+        .replace("SEEDS = [42, 123, 456]                       # as G8b / G11 / G12",
+                 "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # the three earlier seeds + seven new ones")
+        .split("ARMS = [")[0] + """ARMS = [
+    ("Full",          'tok',  BASE),
+    ("Q-meanpool",    'tok',  {**BASE, 'readout': 'mean'}),
+    ("minus-L",       'tok',  {**BASE, 'drop': ('L',)}),
+    ("T-clipIIIonly", 'tok',  {**BASE, 'clips': (2,)}),
+    ("noRole",        'role', {**FULL, 'role': False}),
+]
+CONFIRM = ['minus-L', 'T-clipIIIonly', 'noRole']
+EXPERIMENTS = [a for a in ARMS if a[1] == 'role']   # the shared model cell only knows 'role'; the token arms join after it
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8], G13[9], G13[10],
+    ("markdown", r"""
+## 5-fold episode cross-validation (same folds as G8b / G11–G13, 10 seeds)
+"""),
+    ("code", G13[12][1].replace("g13_", "g14_")),
+    ("markdown", r"""
+## Results (plain argmax, 10-seed ensemble; two-level bootstrap over seeds and episodes)
+"""),
+    ("code", r"""
+def uar_of(pred, idx=None):
+    return war_uar(pred if idx is None else pred[idx], y_all if idx is None else y_all[idx], 7)[1]
+
+
+def two_level_boot(pa, pb, n_boot=2000, seed=0):
+    # pa, pb: [n_seeds, N, 7]; resample seeds of each arm and episodes, return the 95% interval of UAR(a) − UAR(b)
+    rng = np.random.default_rng(seed)
+    groups = [np.where(src == e)[0] for e in np.unique(src)]
+    d = []
+    for _ in range(n_boot):
+        ea = pa[rng.integers(0, len(pa), len(pa))].mean(0).argmax(1)
+        eb = pb[rng.integers(0, len(pb), len(pb))].mean(0).argmax(1)
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        d.append(uar_of(ea, idx) - uar_of(eb, idx))
+    return np.percentile(d, [2.5, 97.5])
+
+
+def episode_boot(pa, pb, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    groups = [np.where(src == e)[0] for e in np.unique(src)]
+    d = []
+    for _ in range(n_boot):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        d.append(uar_of(pa, idx) - uar_of(pb, idx))
+    return np.percentile(d, [2.5, 97.5])
+
+
+PRED = {k: v.mean(0).argmax(1) for k, v in OOF.items()}
+print(f"== 10-seed ensemble and per-seed UAR ({N} MCIS, {len(EPS)} episodes) ==")
+for k, v in OOF.items():
+    per = np.array([uar_of(v[s].argmax(1)) for s in range(len(v))])
+    print(f"  {k:<14} ensemble {uar_of(PRED[k]):5.2f} | per seed {per.mean():5.2f} ± {per.std(ddof=1):.2f}")
+
+# how much a 3-seed ensemble of the same model varies (the G13 problem), from the 10 Full seeds
+from itertools import combinations
+c3 = np.array([uar_of(OOF['Full'][list(c)].mean(0).argmax(1)) for c in combinations(range(len(SEEDS)), 3)])
+print(f"\n  Full, all {len(c3)} three-seed sub-ensembles: {c3.mean():.2f} ± {c3.std():.2f} "
+      f"(range {c3.min():.2f}–{c3.max():.2f})")
+
+uF = uar_of(PRED['Full'])
+ROWS = []
+print("\n== Full − arm (ΔUAR > 0: the removed element helps) ==")
+for a in [n for n, _, _ in EXPERIMENTS if n != 'Full']:
+    d = uF - uar_of(PRED[a])
+    lo, hi = two_level_boot(OOF['Full'], OOF[a])
+    elo, ehi = episode_boot(PRED['Full'], PRED[a])
+    folds = sum(uar_of(PRED['Full'], fold_of_row == f) > uar_of(PRED[a], fold_of_row == f) for f in range(N_OUTER))
+    if a in CONFIRM:
+        verdict = 'CONFIRMED' if lo > 0 else 'not confirmed'
+    else:
+        verdict = ('simpler is adequate' if hi < 1.0 else 'query needed' if lo > 0 else 'inconclusive (keep query)')
+    ROWS.append({'arm': a, 'UAR': uar_of(PRED[a]), 'dUAR': d, 'lo_2level': lo, 'hi_2level': hi,
+                 'lo_episode': elo, 'hi_episode': ehi, 'folds_full_better': folds, 'verdict': verdict})
+    print(f"  {a:<14} Δ {d:+5.2f} | seeds+episodes [{lo:+5.2f},{hi:+5.2f}] | episodes only [{elo:+5.2f},{ehi:+5.2f}] | "
+          f"Full better in {folds}/5 folds | {verdict}")
+pd.DataFrame(ROWS).to_csv(f"{OUT_DIR}/g14_summary.csv", index=False)
+print(f"\nsaved {OUT_DIR}/g14_summary.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -5563,6 +5678,7 @@ if __name__ == "__main__":
                         ("g10_test_preregistered.ipynb", G10),
                         ("g11_channel_ablations_cv.ipynb", G11),
                         ("g12_cs_rolenet_cv.ipynb", G12),
-                        ("g13_token_ablations_cv.ipynb", G13)]:
+                        ("g13_token_ablations_cv.ipynb", G13),
+                        ("g14_ten_seed_confirmation_cv.ipynb", G14)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

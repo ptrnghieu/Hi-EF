@@ -451,3 +451,28 @@ Decision under the fixed rule: gate 1 PASS and gate 2 DIRECTIONAL, so the result
 3. Label-level persistence also weakens with the gap, in the predicted direction (in both the between- and the
    within-MCIS contrast), but the CI touches 0. The decay is toward the population prior; an episode-specific home
    base is not supported.
+
+## G16 results: elapsed time vs type of observation (train+val, analysis only; test untouched)
+
+| Contrast | n | IG a / b (bits) | a − b [95%] |
+|---|---|---|---|
+| **T1** L in II vs L in I, B silent in both (primary) | 262 | −0.090 / −0.073 | **−0.017 [−0.115, +0.078]** |
+| T1-all, L in II vs L in I | 616 | +0.026 / +0.055 | −0.029 [−0.083, +0.023] |
+| T2, L in III vs far clip where B was silent | 623 | +0.030 / +0.010 | +0.020 [−0.052, +0.098] |
+| T3, G1a far observation when B spoke in that clip | 447 | far −0.002, near +0.125 | descriptive |
+| T3, G1a far observation when B was silent in that clip | 623 | far +0.046, near +0.090 | descriptive |
+
+**Decision (fixed rule): no decay beyond the clip-III reaction → discrete-step state, not an OU process.**
+
+Post hoc, model-based (G14 10-seed probabilities, same MCIS): the per-MCIS gain from the listener tokens
+(log p Full − log p minus-L) does not depend on the time between L's last clip-III frame and clip IV
+(Spearman ρ +0.005, partial for clip-III duration and L frame count +0.003; 1,451 MCIS).
+
+**Reading.**
+1. With the type of observation held (non-speaking), a clip-II face is not more informative than a clip-I face,
+   and clip III is not clearly better than a non-speaking far clip. The G15 near > far gap is mostly driven by
+   far observations in which B was *speaking* (information ≈ 0), not by elapsed time.
+2. Continuous-time decay (OU / DynAffect in real time) is not supported at the time scales of Hi-EF.
+3. What matters is *what kind* of observation of the target is available: a listening/non-speaking face carries
+   information about the next emotion, a speaking face much less. Label-level persistence (G15 gate 2) remains
+   directional.

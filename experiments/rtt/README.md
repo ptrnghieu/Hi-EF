@@ -352,3 +352,50 @@ training, so the ablation deltas contain a generic part. It shows up where the r
 attention across roles and modalities carries information that the additive structure removes; the penalised
 interaction term recovers only part of it. Path contributions of the additive model are exact but describe a weaker
 model, and they are not faithful to what each path is needed for (redundancy between paths).
+
+## G13 results: token ablations of RoleNet, including the query token (5-fold CV, 2,421 MCIS, 3 seeds, plain; test untouched)
+
+Every arm is retrained from scratch. `Full` is the same architecture as RoleNet, rebuilt in `RoleNetTok`.
+`Full-reseed` is the same model with other seeds; it gives the noise floor.
+
+| Family | Arm | UAR | Full − arm [95% CI] | folds Full better |
+|---|---|---|---|---|
+| Noise | Full / Full-reseed | 25.00 / 26.17 | −1.17 [−2.69, +0.57] | 2/5 |
+| Query / readout | Q-meanpool (no query, mean of tokens) | 25.57 | −0.57 [−2.21, +1.21] | 3/5 |
+| | Q-readL3 (read the listener-III token) | 25.10 | −0.10 [−1.63, +1.67] | 3/5 |
+| | Q-readonly (tokens cannot attend to the query) | 25.67 | −0.66 [−1.71, +0.41] | 1/5 |
+| | Q-3queries | 25.86 | −0.85 [−2.27, +0.56] | 1/5 |
+| Embeddings | E-noRoleEmb | 25.80 | −0.79 [−1.71, +0.16] | 2/5 |
+| | E-noClipEmb | 25.28 | −0.28 [−1.51, +0.90] | 2/5 |
+| | E-absentMask (mask absent roles instead of an "absent" token) | 25.56 | −0.56 [−2.02, +0.89] | 2/5 |
+| Speech / scene | C-noSpeech | 25.52 | −0.52 [−1.96, +0.93] | 3/5 |
+| | C-noScene | 25.20 | −0.20 [−1.79, +1.42] | 3/5 |
+| | C-noSpeechIII | 26.17 | −1.17 [−2.80, +0.46] | 1/5 |
+| | C-noText | 26.25 | −1.25 [−2.86, +0.34] | 1/5 |
+| | C-noAudio | 25.07 | −0.06 [−1.12, +1.12] | 2/5 |
+| | C-noVoice | 26.00 | −1.00 [−2.18, +0.11] | 1/5 |
+| Time horizon | T-clipIIIonly | 23.08 | **+1.92 [−0.26, +4.08]** | 3/5 |
+| | T-noClipI | 24.70 | +0.30 [−1.21, +1.77] | 4/5 |
+
+**Run-to-run noise (post hoc).** Four runs of the same model exist with 3 seeds each: G11 Full 26.00, G12 RoleNet
+25.92, G13 Full 25.00, G13 Full-reseed 26.17. They disagree on 15–30% of argmax predictions. Summation order changes
+between implementations, so even identical seeds give different training runs. All 220 three-seed ensembles drawn from
+these 12 runs give UAR 25.55 ± 0.40 (range 24.59–26.42; 95% of combinations in [24.75, 26.23]). A 12-seed
+super-ensemble gives 26.35. Against this distribution:
+
+- **T-clipIIIonly (23.08) is below every one of the 220 same-model ensembles**, 2.47 under their mean. Dropping clips
+  I and II hurts; this is the only token ablation clearly outside noise. T-noClipI (24.70, 1.8th percentile) points
+  the same way but is weaker, so clip II carries most of the extra context.
+- Every other arm sits inside the same-model range (14th–98th percentile). C-noText (97.7th) and C-noSpeechIII (95.9th)
+  are at the high edge, but with 15 arms one such value is expected by chance.
+
+**Reading.**
+1. The query token is not needed. Mean-pooling, reading the listener's clip-III token, a read-only query and three
+   queries all score within noise of Full.
+2. Role and clip embeddings and the explicit "absent" token are replaceable. The token *slots* (fixed positions per
+   role × clip) already tell the model which role and clip a token belongs to.
+3. No single speech or scene sub-channel is needed on its own; the model compensates with the others.
+4. Context from earlier clips (I, II) matters; together with the G11 listener effect (+2.52) these are the effects
+   that survive the noise floor.
+5. Contrasts of about 1 UAR between 3-seed runs are within noise. That includes RoleNet − noRole in G8b (+1.17) and
+   minus-O in G11. Final claims should use more seeds (≥10) or report against the same-model noise distribution.

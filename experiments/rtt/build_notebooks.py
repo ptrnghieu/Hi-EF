@@ -5994,6 +5994,120 @@ print(f"saved {OUT_DIR}/g15_per_mcis.csv and g15_gates.json")
 ]
 
 
+G16 = [
+    ("markdown", r"""
+# G16 — Separating elapsed time from the type of observation (analysis only; test untouched)
+
+G15 gate 1 passed: the listener's face in clip III says about 4× more about B's next emotion than the same person's
+face in clip II/I. But the near observation is a *listening reaction*, while the far one may be the person
+*speaking*. G15's within-clip time contrast (late vs early half of clip III) was flat. G16 asks whether elapsed
+time matters when the type of observation is held fixed. Everything (features, predictor, folds, information gain,
+episode bootstrap) is as in G15, whose cells run first.
+
+B spoke in clip k is decided by the clip-IV voice (analysis only), as in G15. Only clips where both voices exist
+are used for the "B did not speak" conditions.
+
+| Contrast | MCIS | a vs b | What it isolates |
+|---|---|---|---|
+| **T1 (primary)** | L seen in clips I and II; B spoke in neither | L in II vs L in I (equal frames) | Time, with the type held (both non-speaking) |
+| T1-all | L seen in clips I and II | L in II vs L in I | Time, more MCIS, type not controlled |
+| **T2** | L seen in III and in the latest of II/I, and B did not speak in that clip | L in III vs L far | G15 gate 1 with a non-speaking far observation |
+| T3 (descriptive) | far observations of G15 G1a | IG when B spoke in the far clip vs not | Type of observation, time roughly held |
+
+**Decision rules (fixed before running).**
+* T1 CI above 0 → elapsed time matters with the type held → a continuous-time (OU-type) latent state is justified.
+* T1 > 0 with the CI including 0 → directional; authors decide.
+* T1 ≤ 0 → no evidence of decay beyond the clip-III reaction. The model then treats the clip-III reaction and the
+  context as separate evidence (a discrete-step state), not an OU process.
+* T2 is read with T1: T2 CI above 0 means near > far survives when both are non-speaking observations.
+"""),
+] + G15[1:] + [
+    ("markdown", r"""
+## G16 contrasts
+"""),
+    ("code", r"""
+VOK = np.zeros((N, 2), bool)
+for n, row in enumerate(DEV.itertuples()):
+    for k, c in enumerate((row.clip1, row.clip2)):
+        a = G8[c]['audio']
+        VOK[n, k] = row.clip4 in V4 and a is not None and a.get('ecapa') is not None
+SILENT = VOK & ~BSP                                     # voice known, and B did not speak in clip k
+RES16 = {}
+
+
+def contrast(name, rows, Xa, Xb, la, lb):
+    rows = np.array(rows, int)
+    if len(rows) < 50:
+        print(f"{name}: too few MCIS ({len(rows)})"); RES16[name] = dict(n=int(len(rows))); return None
+    ia, _ = oof_ig(np.array(Xa), rows); ib, _ = oof_ig(np.array(Xb), rows)
+    ok = np.isfinite(ia) & np.isfinite(ib)
+    d, s_ = (ia - ib)[ok], src[rows][ok]
+    lo, hi = ep_boot(lambda i: d[i].mean(), s_) / LN2
+    print(f"{name}: n={ok.sum()} | IG {la} {ia[ok].mean() / LN2:+.4f}, {lb} {ib[ok].mean() / LN2:+.4f} bits | "
+          f"{la} − {lb} {d.mean() / LN2:+.4f} [{lo:+.4f},{hi:+.4f}]")
+    RES16[name] = dict(n=int(ok.sum()), IG_a=ia[ok].mean() / LN2, IG_b=ib[ok].mean() / LN2, delta=d.mean() / LN2,
+                       lo=lo, hi=hi)
+    return d.mean() / LN2, lo
+
+
+def pair(n, ka, kb):
+    (ca, ia_), (cb, ib_) = SLOT[(n, 1, ka)], SLOT[(n, 1, kb)]
+    m = min(len(ia_), len(ib_))
+    return expr(ca, pick_frames(ia_, m)), expr(cb, pick_frames(ib_, m))
+
+
+# T1 / T1-all: clip II vs clip I
+r1, a1, b1, r1a, a1a, b1a = [], [], [], [], [], []
+for n in range(N):
+    if SLOT[(n, 1, 0)][1] and SLOT[(n, 1, 1)][1]:
+        xa, xb = pair(n, 1, 0)
+        r1a.append(n); a1a.append(xa); b1a.append(xb)
+        if SILENT[n].all():
+            r1.append(n); a1.append(xa); b1.append(xb)
+t1 = contrast('T1 (B silent in I and II)', r1, a1, b1, 'II', 'I')
+contrast('T1-all', r1a, a1a, b1a, 'II', 'I')
+
+# T2: clip III vs the latest far clip, where B did not speak in that far clip
+r2, a2, b2 = [], [], []
+for n in range(N):
+    kf = next((k for k in (1, 0) if SLOT[(n, 1, k)][1]), None)
+    if SLOT[(n, 1, 2)][1] and kf is not None and SILENT[n, kf]:
+        xa, xb = pair(n, 2, kf)
+        r2.append(n); a2.append(xa); b2.append(xb)
+t2 = contrast('T2 (far clip non-speaking)', r2, a2, b2, 'III', 'far')
+
+# T3: G15's far observations, split by whether B spoke in that far clip
+if 'IG1_far' in PER:
+    far_k = np.array([next((k for k in (1, 0) if SLOT[(n, 1, k)][1]), -1) for n in range(N)])
+    has = PER['IG1_far'].notna().values & (far_k >= 0)
+    kk = np.where(has, far_k, 0)
+    known = has & VOK[np.arange(N), kk]
+    spoke = known & BSP[np.arange(N), kk]
+    quiet = known & ~BSP[np.arange(N), kk]
+    for nm, m in (('far clip, B spoke', spoke), ('far clip, B silent', quiet)):
+        print(f"T3 {nm}: n={m.sum()} | IG far {PER.loc[m, 'IG1_far'].mean():+.4f} bits | "
+              f"IG near {PER.loc[m, 'IG1_near'].mean():+.4f} bits")
+        RES16[f'T3 {nm}'] = dict(n=int(m.sum()), IG_far=float(PER.loc[m, 'IG1_far'].mean()),
+                                 IG_near=float(PER.loc[m, 'IG1_near'].mean()))
+
+if t1 is None:
+    dec = 'T1 UNINFORMATIVE (too few MCIS)'
+elif t1[1] > 0:
+    dec = 'time matters with the type held -> continuous-time latent state justified'
+elif t1[0] > 0:
+    dec = 'DIRECTIONAL -> authors decide'
+else:
+    dec = 'no decay beyond the clip-III reaction -> discrete-step state, not OU'
+print(f"\n== G16 decision (fixed rule): {dec} ==")
+PER['B_voice_known_I'], PER['B_voice_known_II'] = VOK[:, 0], VOK[:, 1]
+PER.to_csv(f"{OUT_DIR}/g16_per_mcis.csv", index=False)
+json.dump({k: {a: (float(b) if isinstance(b, (np.floating, float)) else b) for a, b in v.items()} for k, v in RES16.items()}
+          | {'decision': dec}, open(f"{OUT_DIR}/g16_results.json", 'w'), indent=1, default=str)
+print(f"saved {OUT_DIR}/g16_per_mcis.csv and g16_results.json")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -6007,6 +6121,7 @@ if __name__ == "__main__":
                         ("g12_cs_rolenet_cv.ipynb", G12),
                         ("g13_token_ablations_cv.ipynb", G13),
                         ("g14_ten_seed_confirmation_cv.ipynb", G14),
-                        ("g15_dynamics_gates.ipynb", G15)]:
+                        ("g15_dynamics_gates.ipynb", G15),
+                        ("g16_time_vs_type.ipynb", G16)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

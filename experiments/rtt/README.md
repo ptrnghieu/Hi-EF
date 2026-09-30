@@ -428,3 +428,25 @@ The first three `Full` seeds reproduce G13 `Full` bit for bit (25.00), so the ru
    listener's face* in the input, not from labelling it as a separate role.
 3. Dropping the query token neither helps nor hurts clearly. Non-inferiority within 1 UAR is not shown, so RoleNet
    keeps the query token.
+
+## G15 results: gates for the latent affect-dynamics formulation (train+val, analysis only; test untouched)
+
+| Gate | Result | Fixed-rule verdict |
+|---|---|---|
+| G1a, listener face near (clip III) vs far (clip II/I), same 1,070 MCIS, equal frames | IG near 0.104 bits, far 0.026 bits; Δ **+0.079 [+0.025, +0.135]** bits (all frames +0.069); median time to clip IV 0.32 s vs 3.98 s | **PASS** |
+| G1b, late vs early half of L's frames in clip III (331 MCIS) | +0.007 [−0.068, +0.080] bits | no within-clip effect |
+| G2a, persistence of B's last labelled emotion, near (480) vs far (156) | β 1.51 vs 1.19; Δβ +0.32 [−0.04, +0.70]; within the same 33 MCIS β(y_II) − β(y_I) +0.30 [−0.16, +0.98] | **DIRECTIONAL** |
+| G2b, return to the episode baseline | D +0.068 [−0.112, +0.253] bits | home base: **global** |
+
+Decision under the fixed rule: gate 1 PASS and gate 2 DIRECTIONAL, so the result is reported and the authors decide.
+
+**Reading.**
+1. A recent observation of the listener carries about four times more information about B's next emotion than
+   an observation of the same person one or two clips earlier. This is the core prediction of the formulation.
+2. The gate does not separate *elapsed time* from *type of observation*: the near observation is the listener
+   reacting in clip III, the far one is the same person in clips I/II (possibly speaking). G1b, the only
+   within-clip time contrast (a few seconds), shows nothing. So the evidence supports recency at the clip level,
+   not yet a continuous-time decay law.
+3. Label-level persistence also weakens with the gap, in the predicted direction (in both the between- and the
+   within-MCIS contrast), but the CI touches 0. The decay is toward the population prior; an episode-specific home
+   base is not supported.

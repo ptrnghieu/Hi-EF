@@ -5667,6 +5667,333 @@ print(f"\nsaved {OUT_DIR}/g14_summary.csv")
 ]
 
 
+G15 = [
+    ("markdown", r"""
+# G15 — Gates for the latent affect-dynamics formulation (analysis only, no model training; test untouched)
+
+**Formulation under test.** B's emotion is a latent state with inertia (DynAffect: a home base, an attractor
+strength, perturbations; Kuppens, Oravecz & Tuerlinckx, 2010). B is observed only now and then (the listener's face),
+and B's next emotion is forecast by propagating the last observations to clip IV. Two predictions must hold on the
+45 train+val episodes before a model is built on it.
+
+**Gate 1: information from observing B decays with time before clip IV.**
+Observation of B = the listener L's face (L = B in about 81% of MCIS). Features of one observation = mean over L's
+frames of HSEmotion's 8 emotion probabilities plus valence and arousal (10 numbers; no presence or count features).
+Predictor = multinomial logistic regression (standardised features, C = 1), out-of-fold over the G8b episode folds.
+Information gain per MCIS = log p(y_B) − log π(y_B), where π is the training-fold class prior (add-one).
+* **G1a (primary), same MCIS, near vs far.** MCIS where L is seen in clip III and in clip I or II. *Near* = L's frames
+  in clip III; *far* = L's frames in the latest of clips II / I where L is seen. Both use the same number of frames
+  (the smaller count, evenly spaced). Δ1 = mean IG(near) − mean IG(far), 95% bootstrap over episodes.
+* G1b (supporting), within clip III: MCIS with ≥ 4 L frames in clip III; *late* half vs *early* half of L's frames
+  (equal counts). Prediction: late > early.
+* Secondary: G1a with all frames instead of equal counts; UAR of the logit-adjusted predictions.
+
+**Gate 2: after a longer gap, B's next emotion returns to a baseline.**
+Clip IV audio is read **only** for this analysis (ECAPA voice, as in G8b): B spoke in clip k if the voice of clip k
+matches clip IV (cosine ≥ 0.35). Then the gold label of clip k is B's last known emotion y_last.
+* *Near* group: B spoke in clip II (gap = clip III). *Far* group: B spoke in clip I but not in clip II
+  (gap = clips II + III).
+* Persistence model: log p(y) = log π(y) + β·[y = y_last] − log Z. β (persistence strength) is fitted by maximum
+  likelihood per group.
+* **G2a (primary): decay toward the population baseline.** Δβ = β_near − β_far with a 95% episode bootstrap
+  (β refitted in every draw). Also reported: β for y_II vs y_I on the same MCIS when B spoke in both.
+* **G2b: return to a context-specific baseline (the episode).** Episode baseline π_ep = label distribution of the
+  episode's other labelled clips, excluding clips within ±5 of clip IV (smoothed with 5 pseudo-counts of the overall
+  distribution). Uses labels of other clips of the same episode, so it is an analysis device, not a model input.
+  Out-of-fold IG of the persistence model (IG_last) and of the baseline model log p = log π + γ(log π_ep − log π)
+  (IG_ep). D = [IG_ep − IG_last]_far − [IG_ep − IG_last]_near, 95% episode bootstrap.
+
+**Decision rules (fixed before running).**
+* Gate 1: **PASS** if the CI of Δ1 is above 0; **DIRECTIONAL** if Δ1 > 0 but the CI includes 0; **FAIL** if Δ1 ≤ 0.
+  If IG(near) itself has a CI including 0, the gate is **UNINFORMATIVE** (the face carries too little to test decay).
+* Gate 2: **PASS** if the CI of Δβ is above 0; **DIRECTIONAL** if Δβ > 0 with the CI including 0; **FAIL** if Δβ ≤ 0.
+  G2b decides the home base of the model: CI of D above 0 → context-dependent home base; otherwise a global one.
+* Both gates PASS → build the latent-dynamics model (next notebook). Either FAIL → stop this formulation; the
+  problem statement stays, the solution changes. DIRECTIONAL → reported, and the decision goes to the authors.
+
+**Known limitations (stated in advance).** L is B in about 81% of MCIS. In clips I/II, L may be speaking, while in
+clip III L listens; speaking faces may be more expressive, which works *against* the near > far prediction. Clip
+durations measure elapsed time; gaps between clips are unknown. The episode baseline mixes all speakers.
+"""),
+    G8B[1],
+    ("code", G8B[2][1].split("N_OUTER, N_INNER_DEV")[0] + """N_OUTER = 5
+PCA_DIM, MAXF, MAXF_POOL = 128, 24, 32
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
+VOICE_SAME_COS = 0.35        # ECAPA cosine taken as "same speaker" (as in G6a / G8b)
+RUN_PERSISTENCE_DIAG = True  # reads clip-IV audio for an analysis only (never a model input)
+DEBUG_PER_EPISODE = None     # e.g. 6 for a quick smoke test
+LR_C, N_BOOT, EP_EXCL, EP_ALPHA = 1.0, 2000, 5, 5.0
+"""),
+    G8B[3], G8B[6], G8B[7],
+    ("markdown", r"""
+## Clip IV voice (analysis only) and the G8b persistence diagnostic, re-run
+"""),
+    G8B[10],
+    ("markdown", r"""
+## Gates
+"""),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from scipy.optimize import minimize_scalar
+
+# folds exactly as G8b-G14
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold = DEV.source_folder.map(FOLD).values
+src = DEV.source_folder.values
+y = DEV.yB.values.astype(int)
+DUR = np.array([[max(G8[c]['meta'].get('duration') or 0.0, 1e-3) for c in r]
+                for r in DEV[['clip1', 'clip2', 'clip3']].values])
+LN2 = np.log(2)
+
+
+def expr(c, idx):
+    # one observation: mean over frames of the 8 HSEmotion probabilities, valence, arousal
+    fer = np.stack([G8[c]['faces'][j]['fer'] for j in idx]).astype(np.float32)
+    return np.concatenate([softmax(fer[:, :8]), fer[:, 8:10]], 1).mean(0)
+
+
+def dist_to_iv(n, k, c, idx):
+    # mean time (s) from the chosen frames to the end of clip III, i.e. to the start of clip IV
+    t = np.array([G8[c]['faces'][j]['t'] for j in idx], np.float32)
+    return float(np.mean(DUR[n, k] - t) + DUR[n, k + 1:3].sum())
+
+
+def oof_ig(X, rows):
+    # out-of-fold information gain (nats) of a logistic regression, and logit-adjusted predictions
+    ig, pred = np.full(len(rows), np.nan), np.full(len(rows), -1)
+    yr, fr = y[rows], fold[rows]
+    for f in range(N_OUTER):
+        tr, te = fr != f, fr == f
+        if te.sum() == 0 or len(np.unique(yr[tr])) < 2:
+            continue
+        pri = np.bincount(yr[tr], minlength=7) + 1.0; pri /= pri.sum()
+        sc = StandardScaler().fit(X[tr])
+        m = LogisticRegression(C=LR_C, max_iter=3000).fit(sc.transform(X[tr]), yr[tr])
+        P = np.full((te.sum(), 7), 1e-6); P[:, m.classes_] = m.predict_proba(sc.transform(X[te]))
+        P /= P.sum(1, keepdims=True)
+        ig[te] = np.log(P[np.arange(te.sum()), yr[te]]) - np.log(pri[yr[te]])
+        pred[te] = (np.log(P) - np.log(pri)).argmax(1)
+    return ig, pred
+
+
+def ep_boot(stat, s, n_boot=N_BOOT, seed=0):
+    # stat(idx) -> number; 95% interval over episodes resampled with replacement
+    rng = np.random.default_rng(seed)
+    groups = [np.where(s == e)[0] for e in np.unique(s)]
+    v = [stat(np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])) for _ in range(n_boot)]
+    v = np.array(v, float); v = v[np.isfinite(v)]
+    return np.percentile(v, [2.5, 97.5]) if len(v) else np.array([np.nan, np.nan])
+
+
+def verdict(d, lo):
+    return 'PASS' if lo > 0 else ('DIRECTIONAL' if d > 0 else 'FAIL')
+
+
+PER = pd.DataFrame({'sample_id': DEV.sample_id.values, 'src': src, 'fold': fold, 'y': y,
+                    'dur1': DUR[:, 0], 'dur2': DUR[:, 1], 'dur3': DUR[:, 2]})
+for k in range(3):
+    PER[f'nL{k + 1}'] = [len(SLOT[(n, 1, k)][1]) for n in range(N)]
+PER['L_last_gap3'] = [DUR[n, 2] - max(G8[SLOT[(n, 1, 2)][0]]['faces'][j]['t'] for j in SLOT[(n, 1, 2)][1])
+                      if SLOT[(n, 1, 2)][1] else np.nan for n in range(N)]
+RES = {}
+
+# ---------------- Gate 1a: near (clip III) vs far (latest of II / I), same MCIS ----------------
+rows, Xn, Xf, Xn_all, Xf_all, dn, dfar = [], [], [], [], [], [], []
+for n in range(N):
+    cn, idn = SLOT[(n, 1, 2)]
+    kf = next((k for k in (1, 0) if SLOT[(n, 1, k)][1]), None)
+    if not idn or kf is None:
+        continue
+    cf, idf = SLOT[(n, 1, kf)]
+    m = min(len(idn), len(idf))
+    pn, pf = pick_frames(idn, m), pick_frames(idf, m)
+    rows.append(n); Xn.append(expr(cn, pn)); Xf.append(expr(cf, pf)); Xn_all.append(expr(cn, idn)); Xf_all.append(expr(cf, idf))
+    dn.append(dist_to_iv(n, 2, cn, pn)); dfar.append(dist_to_iv(n, kf, cf, pf))
+rows = np.array(rows, int)
+print(f"G1a: {len(rows)} MCIS with L in clip III and in clip I/II | median time to clip IV: near {np.median(dn):.2f}s, "
+      f"far {np.median(dfar):.2f}s" if len(rows) else "G1a: no MCIS")
+if len(rows) >= 50:
+    ign, pn_ = oof_ig(np.array(Xn), rows); igf, pf_ = oof_ig(np.array(Xf), rows)
+    ign_a, _ = oof_ig(np.array(Xn_all), rows); igf_a, _ = oof_ig(np.array(Xf_all), rows)
+    ok = np.isfinite(ign) & np.isfinite(igf)
+    s1, d1 = src[rows][ok], (ign - igf)[ok]
+    D1 = d1.mean() / LN2
+    lo1, hi1 = ep_boot(lambda i: d1[i].mean(), s1) / LN2
+    lon, hin = ep_boot(lambda i: ign[ok][i].mean(), s1) / LN2
+    lof, hif = ep_boot(lambda i: igf[ok][i].mean(), s1) / LN2
+    da = (ign_a - igf_a)[ok]
+    loa, hia = ep_boot(lambda i: da[i].mean(), s1) / LN2
+    un, uf = war_uar(pn_[ok], y[rows][ok], 7)[1], war_uar(pf_[ok], y[rows][ok], 7)[1]
+    print(f"  IG near {ign[ok].mean() / LN2:+.4f} bits [{lon:+.4f},{hin:+.4f}] | IG far {igf[ok].mean() / LN2:+.4f} bits "
+          f"[{lof:+.4f},{hif:+.4f}]")
+    print(f"  Δ1 = near − far {D1:+.4f} bits [{lo1:+.4f},{hi1:+.4f}] (equal frame counts, primary)")
+    print(f"  all frames: Δ {da.mean() / LN2:+.4f} bits [{loa:+.4f},{hia:+.4f}] | UAR (logit-adjusted) near {un:.2f}, far {uf:.2f}")
+    g1 = 'UNINFORMATIVE' if lon <= 0 else verdict(D1, lo1)
+    RES['G1a'] = dict(n=int(ok.sum()), IG_near=ign[ok].mean() / LN2, IG_far=igf[ok].mean() / LN2, delta=D1, lo=lo1, hi=hi1,
+                      delta_allframes=da.mean() / LN2, med_s_near=float(np.median(dn)), med_s_far=float(np.median(dfar)),
+                      verdict=g1)
+    PER.loc[rows, 'IG1_near'] = ign / LN2; PER.loc[rows, 'IG1_far'] = igf / LN2
+    PER.loc[rows, 's_near'] = dn; PER.loc[rows, 's_far'] = dfar
+else:
+    g1 = 'UNINFORMATIVE'
+    RES['G1a'] = dict(n=int(len(rows)), verdict=g1)
+print(f"  GATE 1 (G1a): {g1}")
+
+# ---------------- Gate 1b: late vs early half of L's frames in clip III ----------------
+rows_b, Xe, Xl = [], [], []
+for n in range(N):
+    c, idx = SLOT[(n, 1, 2)]
+    if len(idx) >= 4:
+        h = len(idx) // 2
+        rows_b.append(n); Xe.append(expr(c, idx[:h])); Xl.append(expr(c, idx[-h:]))
+rows_b = np.array(rows_b, int)
+if len(rows_b) >= 50:
+    ige, _ = oof_ig(np.array(Xe), rows_b); igl, _ = oof_ig(np.array(Xl), rows_b)
+    ok = np.isfinite(ige) & np.isfinite(igl)
+    db = (igl - ige)[ok]
+    lob, hib = ep_boot(lambda i: db[i].mean(), src[rows_b][ok]) / LN2
+    print(f"G1b: {ok.sum()} MCIS | IG late {igl[ok].mean() / LN2:+.4f}, early {ige[ok].mean() / LN2:+.4f} bits | "
+          f"late − early {db.mean() / LN2:+.4f} [{lob:+.4f},{hib:+.4f}]")
+    RES['G1b'] = dict(n=int(ok.sum()), delta=db.mean() / LN2, lo=lob, hi=hib)
+else:
+    print(f"G1b: too few MCIS ({len(rows_b)})")
+
+# ---------------- Gate 2: persistence of B's last labelled emotion ----------------
+BSP = np.zeros((N, 2), bool); YCTX = np.full((N, 2), -1)
+for n, row in enumerate(DEV.itertuples()):
+    v4 = V4.get(row.clip4)
+    for k, c in enumerate((row.clip1, row.clip2)):
+        YCTX[n, k] = gold(c)
+        a = G8[c]['audio']
+        if v4 is not None and a is not None and a.get('ecapa') is not None:
+            BSP[n, k] = float(a['ecapa'].astype(np.float32) @ v4.astype(np.float32)) >= VOICE_SAME_COS
+PER['B_spoke_I'], PER['B_spoke_II'], PER['y_I'], PER['y_II'] = BSP[:, 0], BSP[:, 1], YCTX[:, 0], YCTX[:, 1]
+
+# episode baseline from the episode's other labelled clips (|clip number - clip IV number| > EP_EXCL)
+lab = ann[7].map(E2I)
+lab = lab[lab.notna()].astype(int)
+lab_ep = pd.Series([i.split('/')[0] for i in lab.index], index=lab.index)
+lab_num = pd.Series([int(i.split('/')[1]) for i in lab.index], index=lab.index)
+dev_eps = set(DEV.source_folder)
+glob_p = np.bincount(lab[lab_ep.isin(dev_eps)].values, minlength=7) + 1.0; glob_p /= glob_p.sum()
+PI_EP = np.zeros((N, 7))
+for n, row in enumerate(DEV.itertuples()):
+    ep, num4 = row.clip4.split('/')[0], int(row.clip4.split('/')[1])
+    sel = (lab_ep.values == ep) & (np.abs(lab_num.values - num4) > EP_EXCL)
+    cnt = np.bincount(lab.values[sel], minlength=7)
+    PI_EP[n] = (cnt + EP_ALPHA * glob_p) / (cnt.sum() + EP_ALPHA)
+
+near = BSP[:, 1] & (YCTX[:, 1] >= 0)
+far = BSP[:, 0] & ~BSP[:, 1] & (YCTX[:, 0] >= 0)
+YLAST = np.where(near, YCTX[:, 1], np.where(far, YCTX[:, 0], -1))
+print(f"\nG2: B spoke in clip II (near) {near.sum()} MCIS | in clip I only (far) {far.sum()} MCIS | "
+      f"median gap near {np.median(DUR[near, 2]) if near.any() else float('nan'):.2f}s, "
+      f"far {np.median(DUR[far, 1:].sum(1)) if far.any() else float('nan'):.2f}s")
+
+
+def fit_scalar(nll):
+    return minimize_scalar(nll, bounds=(-5, 5), method='bounded').x
+
+
+def persist_logp(beta, yl, pri):
+    lp = np.log(pri)[None].repeat(len(yl), 0); lp[np.arange(len(yl)), yl] += beta
+    return lp - np.log(np.exp(lp).sum(1, keepdims=True))
+
+
+def base_logp(gam, pe, pri):
+    lp = np.log(pri)[None] + gam * (np.log(pe) - np.log(pri)[None])
+    return lp - np.log(np.exp(lp).sum(1, keepdims=True))
+
+
+def fit_beta(r, yl):
+    pri = np.bincount(y[r], minlength=7) + 1.0; pri /= pri.sum()
+    return fit_scalar(lambda b: -persist_logp(b, yl, pri)[np.arange(len(r)), y[r]].sum())
+
+
+def oof_group(r):
+    # out-of-fold IG (nats) of the persistence model and of the episode-baseline model
+    igl, ige = np.full(len(r), np.nan), np.full(len(r), np.nan)
+    for f in range(N_OUTER):
+        tr, te = fold[r] != f, fold[r] == f
+        if te.sum() == 0 or tr.sum() < 10:
+            continue
+        a, b = r[tr], r[te]
+        pri = np.bincount(y[a], minlength=7) + 1.0; pri /= pri.sum()
+        bet = fit_scalar(lambda v: -persist_logp(v, YLAST[a], pri)[np.arange(len(a)), y[a]].sum())
+        gam = fit_scalar(lambda v: -base_logp(v, PI_EP[a], pri)[np.arange(len(a)), y[a]].sum())
+        igl[te] = persist_logp(bet, YLAST[b], pri)[np.arange(len(b)), y[b]] - np.log(pri[y[b]])
+        ige[te] = base_logp(gam, PI_EP[b], pri)[np.arange(len(b)), y[b]] - np.log(pri[y[b]])
+    return igl, ige
+
+
+rn, rf = np.where(near)[0], np.where(far)[0]
+if len(rn) >= 30 and len(rf) >= 30:
+    bn, bf = fit_beta(rn, YLAST[rn]), fit_beta(rf, YLAST[rf])
+    allr = np.concatenate([rn, rf]); isn = np.r_[np.ones(len(rn), bool), np.zeros(len(rf), bool)]
+
+    def dbeta(i):
+        a, b = allr[i][isn[i]], allr[i][~isn[i]]
+        if len(a) < 10 or len(b) < 10:
+            return np.nan
+        return fit_beta(a, YLAST[a]) - fit_beta(b, YLAST[b])
+
+    lo2, hi2 = ep_boot(dbeta, src[allr], n_boot=1000)
+    g2 = verdict(bn - bf, lo2)
+    print(f"  G2a persistence β: near {bn:+.3f} | far {bf:+.3f} | Δβ {bn - bf:+.3f} [{lo2:+.3f},{hi2:+.3f}]  -> GATE 2: {g2}")
+    print(f"      P(y_IV = y_last): near {np.mean(y[rn] == YLAST[rn]) * 100:.1f}% | far {np.mean(y[rf] == YLAST[rf]) * 100:.1f}%")
+    igl_n, ige_n = oof_group(rn); igl_f, ige_f = oof_group(rf)
+    PER.loc[rn, 'IG2_last'] = igl_n / LN2; PER.loc[rn, 'IG2_ep'] = ige_n / LN2
+    PER.loc[rf, 'IG2_last'] = igl_f / LN2; PER.loc[rf, 'IG2_ep'] = ige_f / LN2
+    PER['G2_group'] = np.where(near, 'near', np.where(far, 'far', ''))
+    vv = np.r_[ige_n - igl_n, ige_f - igl_f]
+    ok = np.isfinite(vv)
+
+    def dd(i):
+        i = i[ok[i]]
+        a, b = vv[i][~isn[i]], vv[i][isn[i]]
+        return a.mean() - b.mean() if len(a) and len(b) else np.nan
+
+    Dv = dd(np.arange(len(allr)))
+    lod, hid = ep_boot(dd, src[allr])
+    print(f"  G2b OOF IG (bits): near last {np.nanmean(igl_n) / LN2:+.4f}, episode {np.nanmean(ige_n) / LN2:+.4f} | "
+          f"far last {np.nanmean(igl_f) / LN2:+.4f}, episode {np.nanmean(ige_f) / LN2:+.4f}")
+    hb = 'context-dependent' if lod > 0 else 'global'
+    print(f"      D = [ep − last]_far − [ep − last]_near {Dv / LN2:+.4f} bits [{lod / LN2:+.4f},{hid / LN2:+.4f}] "
+          f"-> home base: {hb}")
+    RES['G2a'] = dict(n_near=len(rn), n_far=len(rf), beta_near=bn, beta_far=bf, delta=bn - bf, lo=lo2, hi=hi2, verdict=g2)
+    RES['G2b'] = dict(D_bits=Dv / LN2, lo=lod / LN2, hi=hid / LN2, home_base=hb)
+else:
+    g2 = 'UNINFORMATIVE'
+    print(f"  too few MCIS for gate 2 (near {len(rn)}, far {len(rf)})")
+    RES['G2a'] = dict(n_near=len(rn), n_far=len(rf), verdict=g2)
+
+both = BSP.all(1) & (YCTX >= 0).all(1)
+if both.sum() >= 30:
+    r = np.where(both)[0]
+    b2, b1 = fit_beta(r, YCTX[r, 1]), fit_beta(r, YCTX[r, 0])
+    lob2, hib2 = ep_boot(lambda i: fit_beta(r[i], YCTX[r[i], 1]) - fit_beta(r[i], YCTX[r[i], 0]), src[r], n_boot=1000)
+    print(f"  G2a within MCIS (B spoke in I and II, n={both.sum()}): β(y_II) {b2:+.3f} vs β(y_I) {b1:+.3f}, "
+          f"Δ {b2 - b1:+.3f} [{lob2:+.3f},{hib2:+.3f}]")
+    RES['G2a_within'] = dict(n=int(both.sum()), beta_II=b2, beta_I=b1, delta=b2 - b1, lo=lob2, hi=hib2)
+
+decision = ('BUILD the latent-dynamics model' if g1 == 'PASS' and g2 == 'PASS' else
+            'STOP this formulation' if 'FAIL' in (g1, g2) else 'REPORT, authors decide')
+print(f"\n== GATE 1: {g1} | GATE 2: {g2} | decision (fixed rule): {decision} ==")
+PER.to_csv(f"{OUT_DIR}/g15_per_mcis.csv", index=False)
+json.dump({k: {a: (float(b) if isinstance(b, (np.floating, float)) else b) for a, b in v.items()} for k, v in RES.items()}
+          | {'decision': decision}, open(f"{OUT_DIR}/g15_gates.json", 'w'), indent=1, default=str)
+print(f"saved {OUT_DIR}/g15_per_mcis.csv and g15_gates.json")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -5679,6 +6006,7 @@ if __name__ == "__main__":
                         ("g11_channel_ablations_cv.ipynb", G11),
                         ("g12_cs_rolenet_cv.ipynb", G12),
                         ("g13_token_ablations_cv.ipynb", G13),
-                        ("g14_ten_seed_confirmation_cv.ipynb", G14)]:
+                        ("g14_ten_seed_confirmation_cv.ipynb", G14),
+                        ("g15_dynamics_gates.ipynb", G15)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

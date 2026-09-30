@@ -5253,6 +5253,305 @@ else:
 ]
 
 
+# ---------------------------------------------------------------- G13: token-level ablations of RoleNet (incl. the query token)
+G13 = [
+    ("markdown", r"""
+# G13 — Token-level ablations of RoleNet, including the query token (episode-level CV)
+
+G11 removed whole face-token groups (A / L / O) and all speech+scene tokens. G13 asks finer questions about
+**how RoleNet reads its tokens**. Everything else is fixed: same folds, seeds, hyper-parameters and early stopping as
+G8b / G11 / G12; plain scoring; test untouched.
+
+| Family | Arm | Change against `Full` (RoleNet) |
+|---|---|---|
+| Reference | `Full` | RoleNet as in G8b |
+| Noise floor | `Full-reseed` | Identical model, different seeds (seed + 7): run-to-run noise of a seed ensemble |
+| Query / readout | `Q-meanpool` | No query token; forecast from the mean of all valid output tokens |
+| | `Q-readL3` | No query token; forecast from the output of the *listener, clip III* face token |
+| | `Q-readonly` | Query kept, but data tokens cannot attend to it (it only reads) |
+| | `Q-3queries` | Three learned query tokens; forecast from the mean of their outputs |
+| Embeddings | `E-noRoleEmb` | Face tokens keep their slots but lose the A/L/O role embedding |
+| | `E-noClipEmb` | No clip embedding on any token (no clip-order information) |
+| | `E-absentMask` | A missing (role, clip) face is masked out instead of using a learned *absent* token |
+| Speech / scene | `C-noSpeech` | Speech tokens (all clips) removed |
+| | `C-noScene` | Scene tokens (all clips) removed |
+| | `C-noSpeechIII` | Only the clip-III speech token (A's turn) removed |
+| | `C-noText` / `C-noAudio` / `C-noVoice` | One component removed inside every speech token |
+| Time horizon | `T-clipIIIonly` | Only clip-III tokens kept (= removing clips I and II) |
+| | `T-noClipI` | Clip-I tokens removed |
+
+Removed tokens are excluded from attention (key-padding mask) and from the auxiliary heads, at training and at
+evaluation. Component removals (`C-noText`, …) drop one term from the speech-token sum.
+
+**Reading rules (fixed before running).** Metric: pooled out-of-fold UAR of the seed ensemble; ΔUAR = Full − arm
+with a 95% bootstrap over the 45 episodes.
+* An element **matters** if the CI of Full − arm is above 0 **and** |Δ| exceeds |Full − Full-reseed|.
+* It is **replaceable** if the CI includes 0.
+* It **hurts** (a simplification is better) if the CI of arm − Full is above 0.
+* G11 showed that retraining without a token group has a generic cost of about 1 UAR, so single contrasts near that
+  size are read against the noise-floor arm.
+"""),
+    ("code", r"""
+# ======== CONFIG ========
+import os
+
+
+def first_existing(*paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"none of {paths}")
+
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_CSV = first_existing("/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv",
+                           "/kaggle/input/hi-ef-split/source_folder_split_seed42.csv")
+G8A_DIR = first_existing("/kaggle/input/datasets/ptrnghieu/g8a-features", "/kaggle/input/g8a-features")
+OUT_DIR = "/kaggle/working"
+
+N_OUTER, N_INNER_DEV = 5, 5
+SEEDS = [42, 123, 456]                       # as G8b / G11 / G12
+LR, WEIGHT_DECAY = 1e-4, 1e-5                # B1 settings (only needed by the shared model cell)
+FC_EPOCHS, PATIENCE, FC_BATCH = 50, 8, 32
+RN = dict(D=128, heads=4, layers=2, dropout=0.2, lr=3e-4, wd=1e-2, epochs=80, patience=12, batch=64,
+          aux_w=0.3, a_w=0.3, p_drop_ctx=0.3, p_drop_face=0.15)     # G8b, unchanged
+PCA_DIM, MAXF, MAXF_POOL = 128, 24, 32
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
+VOICE_SAME_COS = 0.35
+DEBUG_PER_EPISODE = None     # e.g. 6 for a quick smoke test
+
+FULL = dict(role=True, faces=True, ctx=True, aux=True, mdrop=True)
+BASE = dict(readout='query', nq=1, q_readonly=False, role_emb=True, clip_emb=True, absent='token',
+            drop=(), speech_parts=('text', 'audio', 'voice'), clips=(0, 1, 2), seed_offset=0)
+ARMS = [
+    ("Full",           'tok', BASE),
+    ("Full-reseed",    'tok', {**BASE, 'seed_offset': 7}),
+    ("Q-meanpool",     'tok', {**BASE, 'readout': 'mean'}),
+    ("Q-readL3",       'tok', {**BASE, 'readout': 'L3'}),
+    ("Q-readonly",     'tok', {**BASE, 'q_readonly': True}),
+    ("Q-3queries",     'tok', {**BASE, 'nq': 3}),
+    ("E-noRoleEmb",    'tok', {**BASE, 'role_emb': False}),
+    ("E-noClipEmb",    'tok', {**BASE, 'clip_emb': False}),
+    ("E-absentMask",   'tok', {**BASE, 'absent': 'mask'}),
+    ("C-noSpeech",     'tok', {**BASE, 'drop': ('speech',)}),
+    ("C-noScene",      'tok', {**BASE, 'drop': ('scene',)}),
+    ("C-noSpeechIII",  'tok', {**BASE, 'drop': ('speechIII',)}),
+    ("C-noText",       'tok', {**BASE, 'speech_parts': ('audio', 'voice')}),
+    ("C-noAudio",      'tok', {**BASE, 'speech_parts': ('text', 'voice')}),
+    ("C-noVoice",      'tok', {**BASE, 'speech_parts': ('text', 'audio')}),
+    ("T-clipIIIonly",  'tok', {**BASE, 'clips': (2,)}),
+    ("T-noClipI",      'tok', {**BASE, 'clips': (1, 2)}),
+]
+FAMILY = {'Noise floor': ['Full-reseed'], 'Query / readout': ['Q-meanpool', 'Q-readL3', 'Q-readonly', 'Q-3queries'],
+          'Embeddings': ['E-noRoleEmb', 'E-noClipEmb', 'E-absentMask'],
+          'Speech / scene': ['C-noSpeech', 'C-noScene', 'C-noSpeechIII', 'C-noText', 'C-noAudio', 'C-noVoice'],
+          'Time horizon': ['T-clipIIIonly', 'T-noClipI']}
+EXPERIMENTS = [("RoleNet", 'role', FULL)]    # the shared model cell only knows 'role'; the token arms join after it
+"""),
+    G8B[3], G3[3], G3[4], G8B[6], G8B[7], G8B[11], G8B[12],
+    ("markdown", r"""
+## RoleNet with token-level switches
+"""),
+    ("code", r"""
+class RoleNetTok(RoleNet):
+    # RoleNet with switches for the readout, the embeddings, the absent token, and which speech/scene/clip tokens exist.
+    # Token layout: [queries] + 9 face tokens (role r, clip k at 3r+k) + 3 speech tokens (clip k) + 3 scene tokens (clip k).
+    def __init__(self, cfg, d=RN['D']):
+        super().__init__(FULL, d)
+        self.t = cfg
+        self.nq = cfg['nq'] if cfg['readout'] == 'query' else 0
+        if self.nq > 1:
+            self.queries = nn.Parameter(torch.randn(1, self.nq, d) * 0.02)
+        keep_clip = torch.zeros(3, dtype=torch.bool, device=DEVICE)
+        keep_clip[list(cfg['clips'])] = True
+        kf = keep_clip.repeat(3)                                              # face token 3r+k -> clip k
+        ks, kc = keep_clip.clone(), keep_clip.clone()
+        if 'speech' in cfg['drop']:
+            ks[:] = False
+        if 'speechIII' in cfg['drop']:
+            ks[2] = False
+        if 'scene' in cfg['drop']:
+            kc[:] = False
+        self.keep_face, self.keep_ctx = kf, torch.cat([ks, kc])
+        if not bool(self.keep_ctx.any()):
+            self.head_ctx = None
+        if not bool(kf[2]):                                                  # A's clip-III token gone
+            self.head_A = None
+
+    def forward(self, ix, train=False):
+        B, t = len(ix), self.t
+        d = self.query.shape[-1]
+        zero = torch.zeros(1, device=DEVICE)
+        role_e = self.face_role if t['role_emb'] else torch.zeros_like(self.face_role)
+        clip_e = self.clip_emb if t['clip_emb'] else torch.zeros_like(self.clip_emb)
+        aux = {}
+        h, present = self.pool(FACE[ix], FMASK[ix])                           # [B, 3, 3, d], [B, 3, 3]
+        if t['absent'] == 'token':
+            h = torch.where(present.unsqueeze(-1), h, self.absent.unsqueeze(0).expand(B, -1, -1, -1))
+            vf = self.keep_face.unsqueeze(0).expand(B, -1)
+        else:
+            vf = self.keep_face.unsqueeze(0) & present.reshape(B, 9)
+        h = h + role_e[None, :, None] + clip_e[None, None]
+        ft = h.reshape(B, 9, -1)
+        parts = {'text': self.text(TXT[ix]), 'audio': self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1), 'voice': self.voice(VOI[ix])}
+        spk_ = sum(parts[p] for p in t['speech_parts']) + self.ctx_role[0] + clip_e
+        scn = self.scene(SCN[ix]) + self.ctx_role[1] + clip_e
+        ct = torch.cat([spk_, scn], 1)                                        # [B, 6, d]
+        vc = self.keep_ctx.unsqueeze(0).expand(B, -1)
+        if self.head_face is not None:
+            w = vf.float().unsqueeze(-1)
+            aux['face'] = (self.head_face((ft * w).sum(1) / w.sum(1).clamp(min=1)), YB[ix], RN['aux_w'])
+        if self.head_A is not None:
+            tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+            aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
+        if self.head_ctx is not None:
+            w = vc.float().unsqueeze(-1)
+            aux['ctx'] = (self.head_ctx((ct * w).sum(1) / w.sum(1).clamp(min=1)), YB[ix], RN['aux_w'])
+        vf, vc = vf.clone(), vc.clone()
+        if train and self.cfg['mdrop']:
+            u = torch.rand(B, device=DEVICE)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+            vf &= ~drop_face.unsqueeze(1)
+            vc &= ~drop_ctx.unsqueeze(1)
+        nq = self.nq
+        q = [] if nq == 0 else [(self.query if nq == 1 else self.queries).expand(B, -1, -1)]
+        toks = torch.cat(q + [ft, ct], 1)
+        valid = torch.cat([torch.ones(B, nq, dtype=torch.bool, device=DEVICE), vf, vc], 1)
+        # never leave a sample without a valid data token (an all-masked row would produce NaN through attention)
+        valid[:, nq] |= ~valid[:, nq:].any(1)
+        mask = None
+        if nq and t['q_readonly']:
+            T_ = toks.shape[1]
+            mask = torch.zeros(T_, T_, dtype=torch.bool, device=DEVICE)
+            mask[nq:, :nq] = True                                            # data tokens cannot attend to the query
+        out = self.enc(toks, mask=mask, src_key_padding_mask=~valid)
+        if t['readout'] == 'query':
+            z = out[:, :nq].mean(1)
+        elif t['readout'] == 'mean':
+            w = valid.float().unsqueeze(-1)
+            z = (out * w).sum(1) / w.sum(1).clamp(min=1)
+        else:                                                                 # 'L3': listener face token of clip III
+            z = out[:, nq + 3 * 1 + 2]
+        return self.head(z), aux
+
+
+MAKE['tok'] = lambda cfg: RoleNetTok(cfg)
+HP['tok'] = HP['role']
+EXPERIMENTS = ARMS
+print("parameters:", {n: f"{sum(p.numel() for p in MAKE[k](c).parameters()) / 1e6:.3f}M" for n, k, c in EXPERIMENTS})
+"""),
+    ("markdown", r"""
+## 5-fold episode cross-validation (same folds and seeds as G8b / G11 / G12)
+"""),
+    ("code", r"""
+import re
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_)
+
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+OOF = {name: np.full((len(SEEDS), N, 7), np.nan, np.float32) for name, _, _ in EXPERIMENTS}
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for name, kind, cfg in EXPERIMENTS:
+        for si, seed in enumerate(SEEDS):
+            p, sel = train_eval(kind, cfg, tr, dev, te, seed + 1000 * f + cfg.get('seed_offset', 0))
+            OOF[name][si, te_rows] = p
+            w, u = war_uar(p.argmax(1), y_all[te_rows], 7)
+            log.append({'fold': f, 'exp': name, 'seed': seed, 'sel_UAR': sel, 'UAR': u, 'WAR': w})
+            print(f"fold {f} {name:<14} seed {seed}: sel {sel:5.2f} | UAR {u:5.2f} WAR {w:5.2f} | "
+                  f"{(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+
+assert all(not np.isnan(v).any() for v in OOF.values())
+safe = lambda s: re.sub(r'[^0-9A-Za-z]+', '_', s).strip('_')
+assert len({safe(k) for k in OOF}) == len(OOF), "colliding npz keys"
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g13_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g13_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
+         listener_in_III=FMASK[:, 1, 2].any(-1).cpu().numpy(), **{safe(k): v for k, v in OOF.items()})
+print("saved g13_oof_probs.npz and g13_fold_seed_log.csv")
+"""),
+    ("markdown", r"""
+## Results (plain argmax, seed ensemble, 95% bootstrap over episodes)
+"""),
+    ("code", r"""
+def boot_delta(pa, pb, y, s, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    groups = [np.where(s == e)[0] for e in np.unique(s)]
+    d = []
+    for _ in range(n_boot):
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        wa, ua = war_uar(pa[idx], y[idx], 7); wb, ub = war_uar(pb[idx], y[idx], 7)
+        d.append((ua - ub, wa - wb))
+    return np.percentile(np.array(d), [2.5, 97.5], axis=0)
+
+
+PRED = {k: np.log(v.mean(0) + 1e-9).argmax(1) for k, v in OOF.items()}
+print(f"== per-seed pooled out-of-fold UAR ({N} MCIS, {len(EPS)} episodes) ==")
+for k, v in OOF.items():
+    per = [war_uar(v[s].argmax(1), y_all, 7)[1] for s in range(len(v))]
+    print(f"  {k:<14} " + " ".join(f"{u:5.2f}" for u in per) + f"  (mean {np.mean(per):.2f})")
+print("\n== seed ensemble ==")
+for k in PRED:
+    report(k, PRED[k], y_all, src)
+
+uF = war_uar(PRED['Full'], y_all, 7)[1]
+noise = abs(uF - war_uar(PRED['Full-reseed'], y_all, 7)[1])
+print(f"\n== Full − arm (ΔUAR > 0 means the removed element helps); noise floor |Full − Full-reseed| = {noise:.2f} ==")
+ROWS = []
+for fam, arms in FAMILY.items():
+    print(f"\n  [{fam}]")
+    for a in arms:
+        lo, hi = boot_delta(PRED['Full'], PRED[a], y_all, src)
+        wa, ua = war_uar(PRED[a], y_all, 7)
+        dlt = uF - ua
+        folds = sum(war_uar(PRED['Full'][fold_of_row == f], y_all[fold_of_row == f], 7)[1]
+                    > war_uar(PRED[a][fold_of_row == f], y_all[fold_of_row == f], 7)[1] for f in range(N_OUTER))
+        if a == 'Full-reseed':
+            verdict = 'noise floor'
+        elif lo[0] > 0 and abs(dlt) > noise:
+            verdict = 'MATTERS'
+        elif hi[0] < 0:
+            verdict = 'HURTS (simpler is better)'
+        else:
+            verdict = 'replaceable'
+        ROWS.append({'family': fam, 'arm': a, 'UAR': ua, 'dUAR': dlt, 'lo': lo[0], 'hi': hi[0], 'folds_full_better': folds,
+                     'verdict': verdict})
+        print(f"    {a:<14} UAR {ua:5.2f} | Full − arm {dlt:+5.2f} [{lo[0]:+5.2f},{hi[0]:+5.2f}] | "
+              f"Full better in {folds}/5 folds | {verdict}")
+pd.DataFrame(ROWS).to_csv(f"{OUT_DIR}/g13_summary.csv", index=False)
+
+# the readout question on its natural subset: does reading the listener token work only when the listener is visible?
+vis = FMASK[:, 1, 2].any(-1).cpu().numpy()
+for sname, m in (('listener in III', vis), ('no listener in III', ~vis)):
+    lo, hi = boot_delta(PRED['Full'][m], PRED['Q-readL3'][m], y_all[m], src[m])
+    d = war_uar(PRED['Full'][m], y_all[m], 7)[1] - war_uar(PRED['Q-readL3'][m], y_all[m], 7)[1]
+    print(f"\n  Full − Q-readL3 [{sname}, n={m.sum()}] {d:+.2f} [{lo[0]:+.2f},{hi[0]:+.2f}]")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -5263,6 +5562,7 @@ if __name__ == "__main__":
                         ("g9_rolenet_plus_cv.ipynb", G9),
                         ("g10_test_preregistered.ipynb", G10),
                         ("g11_channel_ablations_cv.ipynb", G11),
-                        ("g12_cs_rolenet_cv.ipynb", G12)]:
+                        ("g12_cs_rolenet_cv.ipynb", G12),
+                        ("g13_token_ablations_cv.ipynb", G13)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

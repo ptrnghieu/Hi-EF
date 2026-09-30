@@ -392,8 +392,10 @@ super-ensemble gives 26.35. Against this distribution:
 **Reading.**
 1. The query token is not needed. Mean-pooling, reading the listener's clip-III token, a read-only query and three
    queries all score within noise of Full.
-2. Role and clip embeddings and the explicit "absent" token are replaceable. The token *slots* (fixed positions per
-   role × clip) already tell the model which role and clip a token belongs to.
+2. Role and clip embeddings and the explicit "absent" token are replaceable. RoleNet has no positional encoding, so
+   without the role embedding the Transformer cannot tell A's, L's and O's face tokens apart (except through the
+   per-role absent token). The score does not drop, so the model uses *what* the faces show more than *whose* face it
+   is. This does not contradict G11: removing the listener's tokens removes their content, not only their label.
 3. No single speech or scene sub-channel is needed on its own; the model compensates with the others.
 4. Context from earlier clips (I, II) matters; together with the G11 listener effect (+2.52) these are the effects
    that survive the noise floor.

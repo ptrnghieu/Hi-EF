@@ -402,3 +402,28 @@ super-ensemble gives 26.35. Against this distribution:
    that survive the noise floor.
 5. Contrasts of about 1 UAR between 3-seed runs are within noise. That includes RoleNet − noRole in G8b (+1.17) and
    minus-O in G11. Final claims should use more seeds (≥10) or report against the same-model noise distribution.
+
+## G14 results: ten-seed confirmation (5-fold CV, 2,421 MCIS, 10 seeds, plain; test untouched)
+
+The first three `Full` seeds reproduce G13 `Full` bit for bit (25.00), so the run is deterministic per implementation.
+
+| Arm | 10-seed ensemble UAR | per-seed UAR (mean ± SD) | Full − arm, seeds + episodes [95%] | episodes only | folds Full better | Verdict (fixed rule) |
+|---|---|---|---|---|---|---|
+| Full | 26.24 | 24.74 ± 0.97 | | | | |
+| Q-meanpool | 26.42 | 24.18 ± 0.97 | −0.18 [−1.55, +1.62] | [−1.26, +0.93] | 3/5 | inconclusive → keep query |
+| minus-L | 24.20 | 22.80 ± 0.75 | **+2.04 [+0.21, +3.46]** | [+1.10, +3.07] | 5/5 | **CONFIRMED** |
+| T-clipIIIonly | 24.11 | 22.52 ± 0.55 | **+2.13 [+0.20, +4.08]** | [+0.50, +3.51] | 4/5 | **CONFIRMED** |
+| noRole | 25.80 | 24.11 ± 0.78 | +0.44 [−1.21, +2.16] | [−0.74, +1.84] | 4/5 | not confirmed |
+
+- Three-seed sub-ensembles of the 10 `Full` seeds: 25.49 ± 0.56 (range 24.30–26.96), which matches the G13 estimate.
+- The listener effect sits where the listener is visible: Full − minus-L is +2.80 on the 1,451 MCIS with the
+  listener in clip III and +0.54 on the 970 without.
+
+**Reading.**
+1. Two effects survive seed and episode noise: **the listener's face tokens** (+2.0) and **the context of clips I–II**
+   (+2.1).
+2. **Splitting the faces into A / L / O roles is not established** (+0.44, CI includes 0). `noRole` still sees the
+   listener's face, pooled with the others. With G13 `E-noRoleEmb`, this says the gain comes from *having the
+   listener's face* in the input, not from labelling it as a separate role.
+3. Dropping the query token neither helps nor hurts clearly. Non-inferiority within 1 UAR is not shown, so RoleNet
+   keeps the query token.

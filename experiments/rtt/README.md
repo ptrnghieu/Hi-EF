@@ -477,3 +477,17 @@ Post hoc, model-based (G14 10-seed probabilities, same MCIS): the per-MCIS gain 
 3. What matters is *what kind* of observation of the target is available: a listening/non-speaking face carries
    information about the next emotion, a speaking face much less. Label-level persistence (G15 gate 2) remains
    directional.
+
+## G17 results: listening vs speaking observations of the same person (paired; analysis only; test untouched)
+
+| Contrast | n | silent − speaking (bits) [95%] |
+|---|---|---|
+| **P1** same MCIS, separate models, equal frames (primary) | 257 | **−0.007 [−0.131, +0.120]** |
+| P1, silent clip later / earlier | 95 / 162 | −0.051 [−0.333, +0.242] / +0.004 [−0.182, +0.220] |
+| P2 paired, one model over all context observations | 257 | −0.008 [−0.068, +0.056] |
+| P2 all observations: silent / speaking (unpaired) | 1,047 / 639 | +0.066 [+0.014, +0.120] / +0.052 [−0.015, +0.113] |
+
+**Decision (fixed rule): constraint (iii) is dropped.** Paired within the same MCIS and person, a face observed while
+B is silent is not more informative than one observed while B speaks. The G16 T3 gap (≈ 0 vs +0.046 bits) was a
+between-MCIS composition effect. Together with G16, the G15 near > far gap is explained neither by elapsed time nor
+by listening vs speaking; only a small, non-significant advantage of the clip-III reaction remains (G16 T2 +0.020).

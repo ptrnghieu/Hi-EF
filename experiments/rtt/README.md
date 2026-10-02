@@ -492,3 +492,26 @@ Post hoc, model-based (G14 10-seed probabilities, same MCIS): the per-MCIS gain 
 B is silent is not more informative than one observed while B speaks. The G16 T3 gap (≈ 0 vs +0.046 bits) was a
 between-MCIS composition effect. Together with G16, the G15 near > far gap is explained neither by elapsed time nor
 by listening vs speaking; only a small, non-significant advantage of the clip-III reaction remains (G16 T2 +0.020).
+
+## G19 results: forecastable pairwise distinctions, I–II vs I–III (5-fold CV, train+val, RoleNet 10 seeds + LR; test untouched)
+
+**Decision (fixed rule): CONTINUE.** Rule 1: Spearman(RoleNet, LR) of pair AUCs at I–III = 0.75 (≥ 0.7; at I–II 0.86).
+Rule 2: 4 eligible pairs gain from clip III with CI > 0, 11 pairs are above chance at I–II with a Δ CI including 0.
+
+| Pair (RoleNet) | AUC I–II | AUC I–III | Δ [95%] |
+|---|---|---|---|
+| happy/sad | 0.702 | 0.770 | **+0.068 [+0.040, +0.090]** (LR +0.049 [+0.025, +0.075]) |
+| happy/surprise | 0.702 | 0.753 | **+0.051 [+0.024, +0.084]** |
+| angry/happy | 0.756 | 0.804 | **+0.048 [+0.028, +0.069]** |
+| disgust/happy | 0.717 | 0.763 | **+0.046 [+0.016, +0.083]** |
+| happy/neutral, neutral/sad, angry/neutral | 0.75–0.77 | 0.75–0.79 | +0.007 to +0.017, CI incl. 0 |
+| angry/sad, angry/disgust, disgust/sad | 0.56–0.59 | 0.59–0.62 | CI incl. 0 |
+
+Post hoc (not part of the rules):
+- All four pairs that gain from clip III involve **happy** (mean Δ over happy pairs +0.046, other pairs +0.010).
+- Distinctions inside the negative emotions (angry/sad, angry/disgust, disgust/sad) and surprise vs
+  neutral/disgust stay near chance (AUC ≈ 0.58–0.62) with or without clip III.
+- Which pairs gain from clip III is **not** stable across predictor families: Spearman of Δ between RoleNet and LR
+  = 0.25. LR confirms only happy/sad; with clip III added, LR loses AUC on several pairs (e.g. neutral/sad −0.031,
+  disgust/neutral −0.035), plausibly because its feature count grows by half.
+- Rule 1 passed narrowly (0.75 vs 0.70).

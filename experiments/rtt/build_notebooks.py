@@ -6194,6 +6194,158 @@ print(f"saved {OUT_DIR}/g17_results.json")
 ]
 
 
+G19 = [
+    ("markdown", r"""
+# G19 — Which emotion distinctions are forecastable, and which ones clip III adds (5-fold CV, train+val; test untouched)
+
+**Question.** A 7-class label hides 21 pairwise distinctions that may differ in how well they can be forecast from
+the observed window, and in how much clip III adds. For each pair (a, b) we measure how well a predictor separates
+MCIS whose clip-IV label is a from those labelled b, with clips I–II only and with clips I–III.
+
+**Predictors (two families).**
+* RoleNet (the G14 `Full` model) restricted by the token mask to the clips of the information set; 10 seeds; the same
+  folds, early stopping and hyper-parameters as G14.
+* Multinomial logistic regression on pooled per-clip features: mean HSEmotion probabilities + valence/arousal over all
+  faces in the clip, a face-present flag, and text, audio and scene features reduced to 32 dims each by PCA fitted in
+  the training fold. Standardised, C = 1. No tuning. Trained on all training-fold rows.
+
+**Information sets:** I–II, I–III, and III only (reported, not used in the rules).
+
+**Measure.** Pair AUC of log p(a|X) − log p(b|X) on the out-of-fold MCIS labelled a or b (invariant to class priors).
+Pairs where a class has fewer than 50 MCIS in train+val are reported as "insufficient data" and excluded from the
+rules (this removes the 6 pairs with fear). 95% intervals: RoleNet by a two-level bootstrap over seeds and
+source folders; the logistic regression by a bootstrap over source folders. No multiplicity correction (pilot).
+
+**Decision rules (fixed before running).**
+1. *Stable structure*: Spearman correlation between the RoleNet and the logistic-regression pair-AUC vectors at
+   I–III, over the eligible pairs, is ≥ 0.7.
+2. *Information-dependent structure* (RoleNet): adding clip III to I–II gives Δ = AUC(I–III) − AUC(I–II) with
+   CI > 0 for at least 2 eligible pairs, **and** at least 2 eligible pairs have AUC(I–II) with CI lower bound > 0.5
+   while their Δ CI includes 0.
+3. **CONTINUE** if 1 and 2 hold; otherwise **STOP** this direction (structure unstable across predictors, or the gain
+   from clip III is close to uniform).
+"""),
+    ("code", G13[1][1]
+        .replace("SEEDS = [42, 123, 456]                       # as G8b / G11 / G12",
+                 "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14")
+        .split("ARMS = [")[0] + """ARMS = [
+    ("I-II",  'tok', {**BASE, 'clips': (0, 1)}),
+    ("I-III", 'tok', BASE),
+    ("III",   'tok', {**BASE, 'clips': (2,)}),
+]
+INFOSETS = {'I-II': (0, 1), 'I-III': (0, 1, 2), 'III': (2,)}
+MIN_CLASS, LR_C, PCA_K, N_BOOT = 50, 1.0, 32, 1000
+EXPERIMENTS = [a for a in ARMS if a[1] == 'role']
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8], G13[9], G13[10],
+    ("markdown", r"""
+## RoleNet: 5-fold CV over the information sets (10 seeds)
+"""),
+    ("code", G13[12][1].replace("g13_", "g19_")),
+    ("markdown", r"""
+## Logistic regression on pooled per-clip features (same folds)
+"""),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA as _PCA
+
+EXPR = np.zeros((N, 3, 11), np.float32)
+for n, row in enumerate(DEV.itertuples()):
+    for k, c in enumerate((row.clip1, row.clip2, row.clip3)):
+        if len(FB[c]):
+            EXPR[n, k, :10] = FB[c][:, :10].mean(0); EXPR[n, k, 10] = 1.0
+TXTn, AUDn, SCNn = TXT.cpu().numpy(), AUD.cpu().numpy(), SCN.cpu().numpy()
+LRP = {k: np.full((N, 7), np.nan, np.float32) for k in INFOSETS}
+for f in range(N_OUTER):
+    tr, te = fold_of_row != f, fold_of_row == f
+    for name, clips in INFOSETS.items():
+        blocks_tr, blocks_te = [], []
+        for k in clips:
+            blocks_tr.append(EXPR[tr, k]); blocks_te.append(EXPR[te, k])
+            for M in (TXTn, AUDn, SCNn):
+                pca = _PCA(PCA_K, random_state=0).fit(M[tr, k])
+                blocks_tr.append(pca.transform(M[tr, k])); blocks_te.append(pca.transform(M[te, k]))
+        Xtr, Xte = np.concatenate(blocks_tr, 1), np.concatenate(blocks_te, 1)
+        sc = StandardScaler().fit(Xtr)
+        m = LogisticRegression(C=LR_C, max_iter=5000).fit(sc.transform(Xtr), y_all[tr])
+        P = np.full((te.sum(), 7), 1e-6); P[:, m.classes_] = m.predict_proba(sc.transform(Xte))
+        LRP[name][te] = P / P.sum(1, keepdims=True)
+    print(f"fold {f}: logistic regression done", flush=True)
+assert all(not np.isnan(v).any() for v in LRP.values())
+np.savez(f"{OUT_DIR}/g19_lr_oof_probs.npz", **{k.replace('-', '_'): v for k, v in LRP.items()})
+"""),
+    ("markdown", r"""
+## Pair AUCs and the fixed decision rules
+"""),
+    ("code", r"""
+import itertools
+from sklearn.metrics import roc_auc_score
+from scipy.stats import spearmanr
+
+cnt = np.bincount(y_all, minlength=7)
+PAIRS = list(itertools.combinations(range(7), 2))
+ELIG = [(a, b) for a, b in PAIRS if cnt[a] >= MIN_CLASS and cnt[b] >= MIN_CLASS]
+groups = [np.where(src == e)[0] for e in np.unique(src)]
+rng = np.random.default_rng(0)
+
+
+def pair_auc(P, a, b, idx):
+    m = idx[np.isin(y_all[idx], [a, b])]
+    if len(np.unique(y_all[m])) < 2:
+        return np.nan
+    return roc_auc_score(y_all[m] == a, np.log(P[m, a] + 1e-9) - np.log(P[m, b] + 1e-9))
+
+
+def draws():
+    for _ in range(N_BOOT):
+        yield np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))]), \
+              rng.integers(0, len(SEEDS), len(SEEDS))
+
+
+ALL = np.arange(N)
+ENS = {k: OOF[k].mean(0) for k in INFOSETS}
+B = list(draws())
+ROWS = []
+for a, b in PAIRS:
+    r = {'pair': f'{EMO[a]}/{EMO[b]}', 'n_a': int(cnt[a]), 'n_b': int(cnt[b]), 'eligible': (a, b) in ELIG}
+    for k in INFOSETS:
+        r[f'rn_{k}'] = pair_auc(ENS[k], a, b, ALL)
+        r[f'lr_{k}'] = pair_auc(LRP[k], a, b, ALL)
+    bd, b12, blr = [], [], []
+    for idx, sd in B:
+        p12, p13 = OOF['I-II'][sd].mean(0), OOF['I-III'][sd].mean(0)
+        u12 = pair_auc(p12, a, b, idx)
+        bd.append(pair_auc(p13, a, b, idx) - u12); b12.append(u12)
+        blr.append(pair_auc(LRP['I-III'], a, b, idx) - pair_auc(LRP['I-II'], a, b, idx))
+    r['rn_delta'] = r['rn_I-III'] - r['rn_I-II']
+    r['rn_delta_lo'], r['rn_delta_hi'] = np.nanpercentile(bd, [2.5, 97.5])
+    r['rn_I-II_lo'] = np.nanpercentile(b12, 2.5)
+    r['lr_delta'] = r['lr_I-III'] - r['lr_I-II']
+    r['lr_delta_lo'], r['lr_delta_hi'] = np.nanpercentile(blr, [2.5, 97.5])
+    ROWS.append(r)
+T = pd.DataFrame(ROWS).sort_values('rn_I-III', ascending=False)
+T.to_csv(f"{OUT_DIR}/g19_pair_auc.csv", index=False)
+with pd.option_context('display.width', 250, 'display.max_columns', 30):
+    print(T[['pair', 'n_a', 'n_b', 'eligible', 'rn_III', 'rn_I-II', 'rn_I-III', 'rn_delta', 'rn_delta_lo', 'rn_delta_hi',
+             'lr_I-II', 'lr_I-III', 'lr_delta', 'lr_delta_lo', 'lr_delta_hi']].round(3).to_string(index=False))
+
+E_ = T[T.eligible]
+rho = spearmanr(E_['rn_I-III'], E_['lr_I-III']).correlation
+rho12 = spearmanr(E_['rn_I-II'], E_['lr_I-II']).correlation
+up = int((E_['rn_delta_lo'] > 0).sum())
+flat = int(((E_['rn_I-II_lo'] > 0.5) & (E_['rn_delta_lo'] <= 0) & (E_['rn_delta_hi'] >= 0)).sum())
+c1, c2 = rho >= 0.7, (up >= 2 and flat >= 2)
+dec = 'CONTINUE' if c1 and c2 else 'STOP'
+print(f"\neligible pairs: {len(E_)} | rule 1: Spearman(RoleNet, LR) at I-III = {rho:.2f} (I-II: {rho12:.2f}) -> {c1}")
+print(f"rule 2: pairs with Δ CI > 0: {up} | pairs above chance at I-II with Δ CI incl. 0: {flat} -> {c2}")
+print(f"== G19 decision (fixed rule): {dec} ==")
+json.dump({'spearman_I_III': float(rho), 'spearman_I_II': float(rho12), 'pairs_up': up, 'pairs_flat': flat,
+           'rule1': bool(c1), 'rule2': bool(c2), 'decision': dec}, open(f"{OUT_DIR}/g19_decision.json", 'w'), indent=1)
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -6209,6 +6361,7 @@ if __name__ == "__main__":
                         ("g14_ten_seed_confirmation_cv.ipynb", G14),
                         ("g15_dynamics_gates.ipynb", G15),
                         ("g16_time_vs_type.ipynb", G16),
-                        ("g17_listening_vs_speaking.ipynb", G17)]:
+                        ("g17_listening_vs_speaking.ipynb", G17),
+                        ("g19_forecastable_distinctions_cv.ipynb", G19)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

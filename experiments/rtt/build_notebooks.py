@@ -8157,18 +8157,60 @@ EMO_MAP = {'anger': 'angry', 'disgust': 'disgust', 'fear': 'fear', 'joy': 'happy
 SPLITS = (('tr', 'train', 'train'), ('dv', 'dev', 'val'), ('te', 'test', 'test'))   # prefix, MELD name, Hi-EF name
 
 
+MELD_HELP = ("Could not download MELD.Raw automatically. Attach a Kaggle dataset that holds MELD.Raw "
+             "(Add Input -> search 'MELD') and set MELD_LOCAL to its folder, e.g. MELD_LOCAL = '/kaggle/input/<name>'. "
+             "Unextracted train/dev/test .tar.gz files inside it are fine.")
+
+
+def _probe_gzip(url):
+    # first two bytes of the response must be the gzip magic 1f 8b; prints the real error otherwise
+    pr = subprocess.Popen(['curl', '-fsSL', '--max-time', '60', url], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    head = pr.stdout.read(2)
+    pr.kill()
+    err = pr.stderr.read().decode(errors='replace').strip()
+    pr.wait()
+    if head != b'\x1f\x8b':
+        print(f"  {url}: {err[:300]!r}, first bytes {head!r}", flush=True)
+        return False
+    return True
+
+
+def _unpack_inner(src_root, dst_root):
+    # MELD.Raw ships train/dev/test as inner .tar.gz archives; unpack them into dst_root (writable)
+    for inner in glob.glob(f"{src_root}/**/*.tar.gz", recursive=True):
+        rel = os.path.dirname(os.path.relpath(inner, src_root))
+        out = os.path.join(dst_root, rel)
+        os.makedirs(out, exist_ok=True)
+        print("  unpacking", inner, flush=True)
+        subprocess.run(['tar', '-xzf', inner, '-C', out], check=True)
+        if inner.startswith(dst_root):
+            os.remove(inner)
+
+
 def fetch_meld():
     # returns {(prefix, dialogue, utterance): mp4 path} and {prefix: csv path}
     root = MELD_LOCAL
-    if not root:
+    if root:
+        if not glob.glob(f"{root}/**/*.mp4", recursive=True):
+            os.makedirs(WORK, exist_ok=True)
+            if not glob.glob(f"{WORK}/**/*.mp4", recursive=True):
+                _unpack_inner(root, WORK)            # read-only input: unpack the inner archives into WORK
+            assert glob.glob(f"{WORK}/**/*.mp4", recursive=True), f"no MELD .mp4 or .tar.gz found under {root}"
+            for c in glob.glob(f"{root}/**/*_sent_emo.csv", recursive=True):
+                if not os.path.exists(os.path.join(WORK, os.path.basename(c))):
+                    subprocess.run(['cp', c, WORK], check=True)
+            root = WORK
+    else:
         root = WORK
         os.makedirs(WORK, exist_ok=True)
         if not glob.glob(f"{WORK}/**/*.mp4", recursive=True):
+            print("checking the MELD.Raw download link ...", flush=True)
+            if not _probe_gzip(MELD_URL):
+                raise RuntimeError(MELD_HELP)
             print("downloading and unpacking MELD.Raw (about 10 GB) ...", flush=True)
-            subprocess.run(f"wget -q -O - {MELD_URL} | tar -xz -C {WORK}", shell=True, check=True)
-            for inner in glob.glob(f"{WORK}/**/*.tar.gz", recursive=True):
-                subprocess.run(['tar', '-xzf', inner, '-C', os.path.dirname(inner)], check=True)
-                os.remove(inner)
+            subprocess.run(f"set -o pipefail; curl -fsSL --retry 3 {MELD_URL} | tar -xz -C {WORK}", shell=True,
+                           check=True, executable='/bin/bash')
+            _unpack_inner(WORK, WORK)
     vids = {}
     for p in glob.glob(f"{root}/**/*.mp4", recursive=True):
         m = re.fullmatch(r'dia(\d+)_utt(\d+)\.mp4', os.path.basename(p))
@@ -8186,7 +8228,7 @@ def fetch_meld():
         else:
             csvs[s] = f"{WORK}/{name}_sent_emo.csv"
             os.makedirs(WORK, exist_ok=True)
-            subprocess.run(['wget', '-q', '-O', csvs[s], CSV_URL.format(name)], check=True)
+            subprocess.run(['curl', '-fsSL', '--retry', '3', '-o', csvs[s], CSV_URL.format(name)], check=True)
     print("videos found per split:", {s: sum(k[0] == s for k in vids) for s, _, _ in SPLITS})
     return vids, csvs
 

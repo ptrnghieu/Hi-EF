@@ -25,8 +25,8 @@ The test split (8 episodes, 409 MCIS) is **not** untouched. Recorded accesses:
 | When | What | Model family |
 |---|---|---|
 | G4 run 1 | single preregistered test run; invalid for the trajectory arms (cache-key bug), valid for the other rows | RtT / trajectory forecasters, B1 |
-| G4 re-run | announced in the README after the bug fix; **its outcome is not recorded in the repo** | same |
-| G5 | 5-fold CV over all 53 episodes, so the folds evaluate on test episodes; prepared to run after G4; **whether it was run is not recorded in the repo** | same |
+| G4 re-run | announced in the README after the bug fix; **execution not verified** (no record in the repo or in the conversation history) | same |
+| G5 | 5-fold CV over all 53 episodes, so the folds evaluate on test episodes; prepared to run after G4; **execution not verified** (no record in the repo or in the conversation history) | same |
 | G10 | single preregistered test run (`PREREG_G10_TEST.md`) | RoleNet, PaperBest, B1, LateFusion, RoleNet-noRole |
 
 After G10 the main reporting metric was switched from LA-scored UAR (the preregistered primary, not confirmed:
@@ -44,14 +44,29 @@ further use of a test split that has already been read for model selection decis
 | Text | CLIP text encoder on the clip transcript (`clip.tokenize`, 77-token context, captions-style pretraining) | `text_feature` [512] |
 | Audio | ESResNeXt-FBSP from AudioCLIP (`ESRNXFBSP.pt`), `num_classes = 527`: AudioSet class outputs, then a linear map 527→512 in the model | `audio_feature` [527], `audio_found` |
 
-- The cached features match these dimensions. The script that produced `hi-ef-features-v2` is **not in the repo**, so
-  freezing, checkpoint and truncation details are inferred, not verified.
+- The cached features match these dimensions. The script that produced `hi-ef-features-v2` was **not found** (not in
+  the repo, not located by the authors), so freezing, checkpoint and truncation details are inferred, not verified.
 - Neither text nor audio is a representation made for emotion or prosody. The audio feature is a 527-way sound-event
   vector, not a speech/paralinguistic embedding.
 - Our own extraction (G8a): HSEmotion per face (PCA 128), 18 geometric features, ArcFace identities clustered per
   window (cosine 0.45), voice embeddings for who-speaks cues, mouth/audio-envelope sync.
-- Consistent with this: removing text does not hurt RoleNet (G13); text alone is worse than the class prior in NLL
-  (G20, 1.814 vs 1.790).
+- Observed with these features: removing text does not hurt RoleNet (G13); text alone is worse than the class prior
+  in NLL (G20, 1.814 vs 1.790). This does not show that the encoder is the cause.
+
+**Annotation columns not used so far** (`annotation.csv`, labelled clips only: every clip III/IV, 30.8% of clip I,
+40.5% of clip II):
+
+| Column | Content | Values (all labelled clips) |
+|---|---|---|
+| 2 | upper-face action description | e.g. brow lower 1,220, outer brow raiser 1,054, "Nan" 781 |
+| 3 | lower-face action description | e.g. lower lip depressor & lips part 1,772, lip stretcher & lips part 1,448 |
+| 4 | scene | work 2,360, daily 1,899, social 463, entertainment 61 |
+| 5 | interaction polarity | negative 2,234, positive 1,318, neutral 1,231 (used only as an auxiliary target in G2/G3) |
+| 6 | intensity | weak 3,252, powerful 1,531 |
+| 8 | label uncertainty (1 certain – 3 uncertain) | 3,587 / 559 / 637; level 3 is frequent for sad (177/699), disgust (112/416), fear (35/64) (used only as clip-IV weights in G3 `certw`) |
+
+These are human annotations: they may serve as training-time supervision; using them as inputs for clips I–III would
+be the same kind of oracle as the gold A label and is outside the protocol.
 
 ## 3. Established findings (train+val CV unless stated)
 
@@ -61,11 +76,11 @@ further use of a test split that has already been read for model selection decis
 | F2 | B's own face is the main extra signal | G11 minus-L +2.52 [+1.35, +3.63]; G14 +2.04 (10 seeds) | about half of it is a generic ablation cost (G11 DiD +1.25, n.s.) |
 | F3 | Earlier clips matter | G13 T-clipIIIonly below all 220 same-model ensembles; B's I/II appearances +2.76 [+0.54, +5.10] when B is absent in III | history enters additively (F7) |
 | F4 | Bystanders carry no detectable specific information | G11 DiD +0.24 [−2.59, +3.01] | face channel only |
-| F5 | Who-is-who is weakly used | G13: role embedding, clip embedding, absent token all replaceable; G8b noRole +1.17 [−0.01, +2.29] | assignment is a heuristic (L = B in 81.4% vs a clip-IV proxy) |
-| F6 | No continuous-time decay; listening vs speaking does not matter | G16 T1 −0.017; G17 P1 −0.007 | discrete clip steps only |
-| F7 | History adds information but does not change the response rule | **[chat]** hysteresis: additive history +0.149 bits; no A × history interaction at any C | LR on current features |
+| F5 | No benefit established for the role *representations* tried | G13: removing role embedding, clip embedding or the absent token stays within noise; G8b noRole +1.17 [−0.01, +2.29] | removing the embedding keeps the earlier selection and grouping of observations into role tokens; non-significant differences do not show the models are equivalent; L = B in 81.4% vs a clip-IV proxy |
+| F6 | No difference detected for elapsed time or for listening vs speaking observations | G16 T1 −0.017 [−0.115, +0.078]; G17 P1 −0.007 [−0.131, +0.120] | only the contrasts and time scales tested; does not show that the true dynamics are discrete or that the two kinds of observation are equivalent |
+| F7 | History adds information; no benefit detected from an A × history interaction | **[chat]** hysteresis: additive history +0.149 bits; the interaction model adds nothing at any C | LR on current features only |
 | F8 | B shows label inertia | **[chat]** β_B − β_other = +0.39 [+0.03, +0.73] at clip II; G15 G2a directional | only where B's earlier label exists (B spoke) |
-| F9 | Gold earlier B labels are very informative but not recoverable | **[chat]** on the 26% of MCIS with an earlier labelled B turn: copy-B (gold) 39.07 vs RoleNet 27.98 UAR; needs a recognizer ≥ 50–60%, current ≈ 31% | G9: a perfect "B spoke" pointer adds nothing inside RoleNet |
+| F9 | Gold earlier B labels are very informative; the current recognizer does not recover them | **[chat]** on the 26% of MCIS with an earlier labelled B turn: copy-B (gold) 39.07 vs RoleNet 27.98 UAR; current clip recognizer ≈ 31% | the "≥ 50–60%" figure is the threshold of one error simulation of one pipeline, not a general condition (recognizers with equal UAR can give different forecasts); G9: a perfect "B spoke" pointer adds nothing inside RoleNet |
 | F10 | Clip III adds mainly happy-vs-other separability (RoleNet only) | G19 + PIC: happy minus other gain RN +0.036 [+0.016, +0.059], LR +0.007 [−0.009, +0.024] | not replicated across families |
 | F11 | No forecast value of text × audio-visual non-additivity | G20: Δ_NLL neural −0.008 [−0.030, +0.017], LR −0.016 [−0.022, −0.011]; EMAP of RoleNet −0.002 | weak text representation (§2) |
 | F12 | Seed noise is large | 3-seed ensembles vary by ±0.4–0.56 UAR (SD); G13 Full vs Full-reseed 1.17 | contrasts below ~1.5 UAR need 10 seeds |
@@ -92,6 +107,7 @@ further use of a test split that has already been read for model selection decis
 | Max-entropy pairwise-preserving contrast Q₂ + density-ratio discriminator | additive-logit model + residual interaction (GA²M / EMAP / PID estimators); the discriminator is a noisier estimator of the same quantity |
 | Composition-consistent reduced models (missing participants) | automatic for marginals of any joint model; enforcing it needs a latent-variable / state-space model (VAEAC, MMIN, neural processes) |
 | PIC-weighted auxiliary loss | proper weighted Brier score; mandatory control CE + happy/non-happy auxiliary |
+| Forecast-aware recognition loss with uncertainty-adaptive weights (softmin over candidate transition matrices T_m + KL correction) | **withdrawn by the authors.** The loss is strictly proper (excess-risk identity checked numerically, gap ≈ 5e-18), but with limited capacity it can prefer a recognizer that is worse under every T_m: T₁ = [[1,0,0],[0,1,1]], T₂ = [[0,1,0],[1,0,1]], q = (.25,.25,.5); r₁ = (.27,.23,.5) has recognition error 0.0008, propagated error 0.0008 under both T_m and 0 for the averaged forecaster, r₂ = (.22,.22,.56) has 0.0054 / 0.0018 / 0.0018; the softmin loss (τ = 0.01, λ = 0.1) gives excess 0.00691 for r₁ vs 0.00234 for r₂ (re-computed here). Cause: the curvature of the softmin entropy adds Cov_w(∇H_m)/τ, a penalty on disagreement between the T_m. The corrected form, ‖T̄(C)(r − e_s)‖² + λ‖r − e_s‖² with T̄(C) fixed, measures the deployed forecaster's error but is a context-dependent proper loss (Hepburn et al. 2018; Plaud et al. ICML 2026, as cited by the authors) and is kept only as a baseline |
 
 Note: reducing to a known form is not by itself a reason to reject. What must still be compared is the assumptions,
 the estimator, the supervision it needs and the guarantees. These three were set aside mainly together with the
@@ -102,8 +118,8 @@ evidence in 4a/§3 (F7, F4, F11).
 | Direction | Missing |
 |---|---|
 | Appraisal / goal-state of B (z_B) | human labels (no labelling staff) |
-| Two-step recognize-B-then-forecast | a B recognizer ≥ 50–60% on Hi-EF clips (F9) |
-| Any claim about text or prosody content | an emotion/paralinguistic text and audio representation (§2) |
+| Two-step recognize-B-then-forecast | a recognizer of earlier states whose errors matter less for the forecast (F9); the cause of the weak recognition is not separated: person assignment, domain, observation quality, or the gap between utterance-level labels and facial expression (HSEmotion is already face-specific) |
+| Any claim about text or prosody content | an emotion/paralinguistic text and audio representation (§2); this is a separate gap from the two-step row, not necessarily the same cause |
 | Effect of identity-assignment errors | ground truth of who is who (only a clip-IV proxy, evaluation-only) |
 
 ### 4d. Still open, no sufficiently new solution yet

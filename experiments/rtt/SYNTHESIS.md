@@ -147,3 +147,16 @@ Each candidate must state, before any experiment:
 5. Testability without new labels: which data separate the new solution from the closest prior.
 6. "If the proposal is replaced by the closest method with reasonable tuning, what is lost?"
 7. Which finding in §3 it would contradict, and why that finding does not already rule it out.
+
+## 6. Problem statements proposed by the authors (chronological) and their status
+
+| # | Problem statement (authors) | What was done on Hi-EF | Status | Testable on MELD? |
+|---|---|---|---|---|
+| P1 | **Situation of B, not only B's expression**: forecasting needs z_B = B's goals and how the conversation supports or blocks them (who sided with B, who broke a commitment); third parties matter through this relation chain | not run; needed relation/goal labels | untested (labels) | partly: MELD has text and speaker IDs at training, so a **B-relative** reading of the context (which turns are B's, who responds to B) can be compared with a speaker-agnostic one without new labels; LLM reading is risky on Friends (contamination) |
+| P2 | Observability-first version of P1: separate the mechanism, what is observable, and evidence the model learns it (blind evaluation, steps A/B/C) | appraisal pilot prepared, dropped | untested (labels) | as P1 |
+| P3 | **Predictable distinctions**: which emotion distinctions are forecastable from the past and how clip III changes them (ρ_X(g), principal inertia components) | G19 (CONTINUE) + PIC follow-up | structure stable within RoleNet; gain from clip III not replicated across predictor families (row 2) | yes: same pair-AUC / PIC analysis with a text forecaster and ~3× more windows |
+| P4 | **Pragmatic combination of content and expression** (pairwise-preserving contrast → additive vs interaction) | G20 | STOP in both families; text features weak | yes, with a stronger text encoder and speech audio (more power) |
+| P5 | **Memory from missing observations** (absent participants keep an influence; composition-consistent reductions) | G21 proposed, not run | premise contradicted on Hi-EF (hysteresis, G11, G13) | partly done: no A × history interaction at label level (F16); MELD speaker IDs allow testing absent-speaker influence directly |
+| P6 | **Forecasting under uncertain person–observation assignment** (certify decisions over valid assignments) | G22 proposed, not run; no identity ground truth on Hi-EF | open; could not measure whether assignment matters | **yes, and only there**: MELD speaker IDs give the true assignment, so the value of correct vs perturbed assignment and decision flips can be measured |
+| P7 | Forecast-aware recognition with uncertainty-adaptive supervision | analysis only | withdrawn (counterexample, §4b) | — |
+| — | Related open findings: mirroring vs shift (F14), B inertia (F8, F16), appraisal from content (G24, running) | | | inertia and mirroring replicate at label level (F16) |

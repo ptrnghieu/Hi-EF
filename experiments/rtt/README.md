@@ -618,8 +618,27 @@ the target's own clip-IV moment separates the negative emotions clearly better t
 is weak everywhere (≤ 0.64). Face and audio carry most of the clip-IV separation; HSEmotion adds mainly valence
 (RA VAL 0.758 → 0.850). C was selected inside the grid for every task.
 
-## G24: appraisal of the content vs reaction direction (prepared; not yet run)
+## G24 results: LLM appraisal of subtitles I–III vs reaction direction (gpt-4o-mini, LR, train+val; test untouched)
 
-Pre-registered in the header of `g24_appraisal_reaction_cv.ipynb`. Needs Kaggle Internet and the `OPENAI_API_KEY`
-secret (as G1); about 2 × 2,421 cached calls. Dry run with a mocked LLM: all cells run (decision STOP on random
-features, as expected); a missing-key guard stops the run if an appraisal dimension is absent in > 5% of responses.
+**Decision (fixed rule): STOP.** Δ_shift = NEG_shift(FC+app) − NEG_shift(FC) = +0.002 [−0.005, +0.010];
+NEG_shift(APP) = 0.496 [0.458, 0.532] (lower bound not > 0.5).
+
+| Arm | NEG all [95%] | NEG shift [95%] | UAR all / shift |
+|---|---|---|---|
+| FC | 0.560 [0.526, 0.592] | 0.538 [0.501, 0.571] | 22.0 / 19.2 |
+| FC+app | 0.562 [0.530, 0.593] | 0.540 [0.503, 0.573] | 22.5 / 19.2 |
+| APP | 0.514 [0.477, 0.549] | 0.496 [0.458, 0.532] | 15.5 / 14.8 |
+| FC+llm (direct LLM forecast) | 0.565 [0.531, 0.597] | 0.534 [0.498, 0.566] | 22.4 / 19.2 |
+
+Measurement checks (descriptive):
+- All 2,421 responses parsed. The ratings are nearly degenerate: caused_by_other 0.97 ± 0.15, caused_by_responder
+  0.00 ± 0.00, most other dimensions close to 0/1.
+- event_valence carries valence (happy vs negative AUC 0.64 for A's own clip-III label, 0.62 for B), but the
+  dimensions that should separate negative emotions do not, even for A's emotion in the very text the LLM read
+  (angry/sad by other-causation 0.50, by control 0.51; sad/angry by loss 0.54; disgust/angry by norm violation 0.52).
+- Inner-CV NLL improves slightly with appraisal or with the direct forecast (≈ 0.01), i.e. valence information only.
+- Contamination probe: the LLM named House of Cards for 2/30 items.
+
+Reading: with this zero-shot appraisal reading of the subtitles, no information about the direction of B's negative
+reaction was found. The measurement itself is weak (degenerate ratings; no within-negative separation even for the
+speaker of the read text), so a better appraisal measure is not excluded.

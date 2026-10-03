@@ -7503,6 +7503,351 @@ json.dump({'decision': dec, 'change_shift': [float(main.delta), float(main.lo), 
 ]
 
 
+G26A = [
+    ("markdown", r"""
+# G26a — G8a face / voice features for clip IV (train + val only)
+
+The unchanged G8a extraction, run on the **clip IV** of every train/val MCIS (test clip IV is not read). These features
+are used only (a) as a training-time target for the responder pointer of G26 (who is B?) and (b) to measure the
+oracle in G26. Clip IV is never an input of a forecaster. No label is read. Output: `c4shard_*.pkl` → make it a dataset.
+"""),
+    G8A[1],
+    ("code", G8A[2][1].replace('SHARD_DIR = f"{OUT_DIR}/g8a"', 'SHARD_DIR = f"{OUT_DIR}/g8a_clip4"')),
+    ("code", G8A[3][1]
+        .replace("usecols=['sample_id', 'split', 'clip1', 'clip2', 'clip3'])   # no label columns",
+                 "usecols=['sample_id', 'split', 'clip1', 'clip2', 'clip3', 'clip4'])   # no label columns")
+        .replace("clips = sorted(set(sp[['clip1', 'clip2', 'clip3']].values.ravel()))",
+                 "clips = sorted(set(sp[sp.split.isin(['train', 'val'])].clip4))      # clip IV, train + val only")
+        .replace("| clips I-III {len(clips)}", "| clips IV (train+val) {len(clips)}")),
+    G8A[4], G8A[5],
+    ("code", G8A[6][1].replace('f"{SHARD_DIR}/shard_*.pkl"', 'f"{SHARD_DIR}/c4shard_*.pkl"')
+                       .replace('f"{SHARD_DIR}/shard_{n_shard:03d}.pkl"', 'f"{SHARD_DIR}/c4shard_{n_shard:03d}.pkl"')),
+    G8A[7],
+    ("code", G8A[8][1].replace('f"{SHARD_DIR}/shard_*.pkl"', 'f"{SHARD_DIR}/c4shard_*.pkl"')
+                       .replace("c3 = sorted(set(sp.clip3))", "c3 = sorted(clips)        # clip IV: B speaks here")),
+]
+assert "clip IV, train + val only" in G26A[3][1] and G26A[6][1].count("c4shard_") == 3 and "c4shard_" in G26A[8][1]
+
+G26 = [
+    ("markdown", r"""
+# G26 — Responder-Pointer RoleNet: learning who will respond (5-fold CV, train+val, 10 seeds; test untouched)
+
+**Question.** Forecasting B's emotion needs B's face (minus-L −2.04 UAR), but B's identity is not given; RoleNet picks
+the listener L with a fixed rule (the second most frequent identity in clip III, B in ~81% of MCIS), and pooling all
+faces without roles is about as good (noRole +0.44, n.s.). Does *knowing who the responder is* matter, and can a model
+learn it?
+
+**Responder identity (training target / oracle only).** B = the dominant identity of clip IV (G26a features), matched to
+an identity cluster of clips I–III by ArcFace centroid cosine ≥ 0.45 (not A). Clip IV is never a forecaster input.
+
+**Arms** (RoleNet G14 `Full` settings, same folds, early stopping, 10 seeds):
+* `Heuristic` — RoleNet as is (L by rule).
+* `Oracle` — L = the true responder cluster (empty if B is not seen in I–III); upper bound for any pointer.
+* `Pointer` — the L tokens are an α-weighted mixture of up to K = 4 candidate identities (all non-A clusters, the rule's
+  L first); α = softmax over candidates + a null option, computed from each candidate's pooled face tokens and
+  observable cues (presence per clip, frame share and mouth-audio synchrony in clip III, face size). Trained with
+  CE(emotion) + 0.5 · CE(pointer, true responder); at inference only clips I–III are used.
+
+**Decision (fixed before running; ΔUAR plain, 10-seed ensemble, two-level bootstrap over seeds and episodes).**
+1. **Stage 1 (headroom):** Δ_oracle = UAR(`Oracle`) − UAR(`Heuristic`). If its CI lower bound ≤ 0 → **STOP: knowing the
+   responder does not improve the forecast on Hi-EF**; `Pointer` is not trained.
+2. **Stage 2 (method):** only if stage 1 passes, Δ_pointer = UAR(`Pointer`) − UAR(`Heuristic`); CI lower bound > 0 →
+   **POINTER HELPS**, else **POINTER NOT SHOWN**.
+Reported: NLL differences, responder coverage, rule accuracy vs pointer accuracy on held-out folds.
+"""),
+    ("code", G13[1][1]
+        .replace("SEEDS = [42, 123, 456]                       # as G8b / G11 / G12",
+                 "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14")
+        .split("ARMS = [")[0] + """ARMS = [("Full", 'tok', BASE)]
+EXPERIMENTS = []
+K_CAND, LAMBDA_PTR, N_BOOT = 4, 0.5, 2000
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8], G13[9], G13[10],
+    ("markdown", "## True responder (clip IV, target/oracle only), oracle roles and candidate identities"),
+    ("code", r"""
+G84 = {}
+for f in sorted(glob.glob("/kaggle/input/**/c4shard_*.pkl", recursive=True)):
+    G84.update(pickle.load(open(f, 'rb')))
+miss4 = sorted(set(DEV.clip4) - set(G84))
+print(f"clip IV records {len(G84)} | missing for {len(miss4)} MCIS clips")
+
+
+def cluster_arcs(E):
+    if len(E) < 2:
+        return np.zeros(len(E), int)
+    return AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
+                                   distance_threshold=1 - SAME_PERSON_COS).fit_predict(E)
+
+
+unit = lambda v: v / (np.linalg.norm(v) + 1e-9)
+SLOT_O, FMASK_O, VOI_O = {}, np.zeros_like(FMASK.cpu().numpy() if torch.is_tensor(FMASK) else FMASK), np.zeros_like(
+    VOI.cpu().numpy() if torch.is_tensor(VOI) else VOI)
+CSLOT = {}
+CMASK = np.zeros((N, K_CAND, 3, MAXF), bool)
+CF = np.zeros((N, K_CAND, 7), np.float32)
+TGT = np.full(N, K_CAND, np.int64)                    # index of the true responder among the candidates; K = null
+STAT = {'B_found_IV': 0, 'B_in_I_III': 0, 'rule_L_is_B': 0, 'rule_has_L': 0, 'B_in_candidates': 0}
+for n, row in enumerate(tqdm(DEV.itertuples(), total=N, desc='responder')):
+    cl = [row.clip1, row.clip2, row.clip3]
+    items = [(k, j) for k, c in enumerate(cl) for j in range(len(G8[c]['faces']))]
+    E = np.stack([G8[cl[k]]['faces'][j]['arc'] for k, j in items]).astype(np.float32) if items else np.zeros((0, 512))
+    lab = cluster_arcs(E) if len(items) else np.zeros(0, int)        # identical to the role cell
+    frames = defaultdict(set)
+    for (k, j), p in zip(items, lab):
+        frames[(k, p)].add(G8[cl[k]]['faces'][j]['frame'])
+    ids3 = sorted({p for (k, p) in frames if k == 2}, key=lambda p: -len(frames[(2, p)]))
+    A = ids3[0] if ids3 else None
+    L = ids3[1] if len(ids3) > 1 else None
+    tot = defaultdict(int)
+    for (k, p), fr in frames.items():
+        tot[p] += len(fr)
+    # true responder: dominant identity of clip IV matched to a clip I-III cluster (not A)
+    bt = None
+    f4 = G84.get(row.clip4, {}).get('faces', [])
+    if f4:
+        E4 = np.stack([d['arc'] for d in f4]).astype(np.float32)
+        l4 = cluster_arcs(E4)
+        fr4 = defaultdict(set)
+        for d, p in zip(f4, l4):
+            fr4[p].add(d['frame'])
+        dom = max(fr4, key=lambda p: len(fr4[p]))
+        if len(fr4[dom]) / max(G84[row.clip4]['meta']['n_sampled'], 1) >= DOMINANT_MIN_FRAC:
+            STAT['B_found_IV'] += 1
+            c4 = unit(E4[l4 == dom].mean(0))
+            best, bp = SAME_PERSON_COS, None
+            for p in tot:
+                s = float(unit(E[lab == p].mean(0)) @ c4)
+                if s >= best:
+                    best, bp = s, p
+            bt = bp if bp is not None and bp != A else None
+    STAT['B_in_I_III'] += bt is not None
+    STAT['rule_has_L'] += L is not None
+    STAT['rule_L_is_B'] += (L is not None) and (L == bt)
+    # oracle roles: A as before, L = true responder, O = everyone else
+    roleO = lambda p: 0 if p == A else (1 if (bt is not None and p == bt) else 2)
+    by = defaultdict(list)
+    for (k, j), p in zip(items, lab):
+        by[(roleO(p), k)].append(j)
+    for k, c in enumerate(cl):
+        for r in range(3):
+            idx = pick_frames(sorted(by[(r, k)], key=lambda j: G8[c]['faces'][j]['t']), MAXF)
+            SLOT_O[(n, r, k)] = (c, idx); FMASK_O[n, r, k, :len(idx)] = True
+        v = [x for r in range(3) for x in sync(c, by[(r, k)])]
+        VOI_O[n, k] = v + list(VOI[n, k][6:].cpu().numpy() if torch.is_tensor(VOI) else VOI[n, k][6:])
+    # candidates: the rule's L first, then the other non-A identities by frame count in I-III
+    cand = ([L] if L is not None else []) + sorted([p for p in tot if p not in (A, L)], key=lambda p: -tot[p])
+    cand = cand[:K_CAND]
+    if bt is not None and bt in cand:
+        TGT[n] = cand.index(bt); STAT['B_in_candidates'] += 1
+    n3 = max(G8[cl[2]]['meta']['n_sampled'], 1)
+    for i, p in enumerate(cand):
+        for k, c in enumerate(cl):
+            idx = pick_frames(sorted([j for (kk, j), q in zip(items, lab) if kk == k and q == p],
+                                     key=lambda j: G8[c]['faces'][j]['t']), MAXF)
+            CSLOT[(n, i, k)] = (c, idx); CMASK[n, i, k, :len(idx)] = True
+        f3 = [j for (kk, j), q in zip(items, lab) if kk == 2 and q == p]
+        r3, sd3 = sync(cl[2], f3)
+        size3 = np.mean([np.sqrt(max((G8[cl[2]]['faces'][j]['box'][2] - G8[cl[2]]['faces'][j]['box'][0]) *
+                                     (G8[cl[2]]['faces'][j]['box'][3] - G8[cl[2]]['faces'][j]['box'][1]), 0)) / 100
+                         for j in f3]) if f3 else 0.0
+        CF[n, i] = [float(CMASK[n, i, k].any()) for k in range(3)] + [len(frames[(2, p)]) / n3, r3, sd3, size3]
+print({k: v for k, v in STAT.items()})
+print(f"rule accuracy (L == true responder | responder seen in I-III and rule has L): "
+      f"{STAT['rule_L_is_B'] / max(STAT['B_in_I_III'], 1):.3f}")
+print("pointer targets:", np.bincount(TGT, minlength=K_CAND + 1), "(last = null)")
+
+
+def build_all(fit_clips):
+    pca = None
+    if HAS_EMB:
+        pool = np.concatenate([EMB[c] for c in fit_clips if EMB.get(c) is not None])
+        pick = np.random.default_rng(0).choice(len(pool), min(60000, len(pool)), replace=False)
+        pca = PCA(PCA_DIM, random_state=0).fit(pool[pick].astype(np.float32))
+    FV = {c: (np.zeros((0, FDIM), np.float32) if len(FB[c]) == 0 else
+              (np.concatenate([pca.transform(EMB[c].astype(np.float32)), FB[c]], 1) if HAS_EMB else FB[c])) for c in need}
+
+    def fill(slots, shape):
+        a = np.zeros(shape, np.float16)
+        for (n, r, k), (c, idx) in slots.items():
+            if idx:
+                a[n, r, k, :len(idx)] = FV[c][idx]
+        return torch.tensor(a, device=DEVICE)
+    return (fill(SLOT, (N, 3, 3, MAXF, FDIM)), fill(SLOT_O, (N, 3, 3, MAXF, FDIM)),
+            fill(CSLOT, (N, K_CAND, 3, MAXF, FDIM)))
+
+
+FMASK_H, VOI_H = FMASK, VOI
+FMASK_O, VOI_O = T(FMASK_O), T(VOI_O.astype(np.float32))
+CMASK, CF, TGT_T = T(CMASK), T(CF), T(TGT)
+"""),
+    ("markdown", "## Pointer model"),
+    ("code", r"""
+class RoleNetPtr(RoleNetTok):
+    # RoleNet whose listener tokens are a learned mixture over candidate identities (+ a null option)
+    def __init__(self, cfg, d=RN['D']):
+        super().__init__(cfg, d)
+        self.cand_proj = nn.Sequential(nn.LayerNorm(d + 7), nn.Linear(d + 7, d), nn.GELU(), nn.Linear(d, 1))
+        self.null_logit = nn.Parameter(torch.zeros(1))
+
+    def forward(self, ix, train=False):
+        B = len(ix)
+        hc, pc = self.pool(CAND[ix], CMASK[ix])                               # [B, K, 3, d], [B, K, 3]
+        w = pc.float().unsqueeze(-1)
+        summ = (hc * w).sum(2) / w.sum(2).clamp(min=1)                        # [B, K, d]
+        logit = self.cand_proj(torch.cat([summ, CF[ix]], -1)).squeeze(-1)     # [B, K]
+        logit = logit.masked_fill(~pc.any(-1), -1e4)
+        full = torch.cat([logit, self.null_logit.expand(B, 1)], 1)            # [B, K + 1]
+        alpha = torch.softmax(full, 1)
+        absL = self.absent[1].unsqueeze(0).unsqueeze(0)                       # [1, 1, 3, d]
+        hc = torch.where(pc.unsqueeze(-1), hc, absL.expand(B, hc.shape[1], -1, -1))
+        hL = (alpha[:, :-1, None, None] * hc).sum(1) + alpha[:, -1, None, None] * self.absent[1].unsqueeze(0)
+        self._hL = hL                                                         # used by the patched pool below
+        logits, aux = super().forward(ix, train)
+        tgt = torch.where(TGT_T[ix] >= 0, TGT_T[ix], torch.full_like(TGT_T[ix], -100))
+        aux['ptr'] = (full, tgt, LAMBDA_PTR)
+        if not train:
+            PTR_EVAL.append((ix.detach().cpu().numpy(), full.argmax(1).detach().cpu().numpy()))
+        return logits, aux
+
+
+PTR_EVAL = []                                                                 # (rows, pointer argmax) at evaluation
+_orig_pool_forward = FramePool.forward
+
+
+def _pool_with_listener(self, x, m):
+    h, present = _orig_pool_forward(self, x, m)
+    owner = getattr(self, '_owner', None)
+    if owner is not None and getattr(owner, '_hL', None) is not None and h.dim() == 4 and h.shape[1] == 3:
+        h = h.clone(); present = present.clone()
+        h[:, 1] = owner._hL                                                   # listener slots := pointer mixture
+        present[:, 1] = True
+        owner._hL = None
+    return h, present
+
+
+FramePool.forward = _pool_with_listener
+
+
+def make_ptr(cfg):
+    m = RoleNetPtr(cfg)
+    object.__setattr__(m.pool, '_owner', m)          # plain reference, not a registered submodule
+    return m
+
+
+MAKE['ptr'] = make_ptr
+HP['ptr'] = HP['role']
+print("pointer parameters:", f"{sum(p.numel() for p in make_ptr(BASE).parameters()) / 1e6:.3f}M")
+"""),
+    ("markdown", "## 5-fold CV: Heuristic and Oracle; Pointer only if stage 1 passes"),
+    ("code", r"""
+import re
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+OOF, PTR_ACC, log = {}, [], []
+t0 = time.time()
+
+
+def run_arms(arms):
+    global FACE, FMASK, VOI, CAND
+    for a in arms:
+        OOF[a] = np.full((len(SEEDS), N, 7), np.nan, np.float32)
+    for f in range(N_OUTER):
+        tr_eps = [e for e in EPS if FOLD[e] != f]
+        dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+        trr = np.where(np.isin(src, tr_eps))[0]
+        fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+        dev_rows = np.where(np.isin(src, dev_eps))[0]
+        te_rows = np.where(fold_of_row == f)[0]
+        FH, FO, FC = build_all(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+        tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+        for a in arms:
+            FACE, FMASK, VOI = (FO, FMASK_O, VOI_O) if a == 'Oracle' else (FH, FMASK_H, VOI_H)
+            CAND = FC
+            kind = 'ptr' if a == 'Pointer' else 'tok'
+            for si, seed in enumerate(SEEDS):
+                PTR_EVAL.clear()
+                p, sel = train_eval(kind, BASE, tr, dev, te, seed + 1000 * f)
+                OOF[a][si, te_rows] = p
+                if a == 'Pointer':
+                    last = {}
+                    for rows_, am in PTR_EVAL:
+                        last.update(zip(rows_.tolist(), am.tolist()))
+                    pr = np.array([last[r] for r in te_rows])
+                    PTR_ACC.append({'fold': f, 'seed': seed, 'pointer_acc': float(np.mean(pr == TGT[te_rows])),
+                                    'rule_acc': float(np.mean(np.where(CMASK[te_rows, 0].any((-1, -2)).cpu().numpy(), 0, K_CAND) == TGT[te_rows]))})
+                u = war_uar(p.argmax(1), y_all[te_rows], 7)[1]
+                log.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'UAR': u})
+                print(f"fold {f} {a:<9} seed {seed}: sel {sel:5.2f} | UAR {u:5.2f} | {(time.time() - t0) / 60:.1f} min",
+                      flush=True)
+                torch.cuda.empty_cache()
+        FACE, FMASK, VOI = FH, FMASK_H, VOI_H
+
+
+def uar_of(pred, idx=None):
+    return war_uar(pred if idx is None else pred[idx], y_all if idx is None else y_all[idx], 7)[1]
+
+
+def two_level(pa, pb, n_boot=N_BOOT, seed=0):
+    rng = np.random.default_rng(seed)
+    groups = [np.where(src == e)[0] for e in np.unique(src)]
+    d, dn = [], []
+    for _ in range(n_boot):
+        A_, B_ = pa[rng.integers(0, len(pa), len(pa))].mean(0), pb[rng.integers(0, len(pb), len(pb))].mean(0)
+        idx = np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])
+        d.append(uar_of(A_.argmax(1), idx) - uar_of(B_.argmax(1), idx))
+        dn.append(-np.log(B_[idx, y_all[idx]] + 1e-9).mean() + np.log(A_[idx, y_all[idx]] + 1e-9).mean())
+    return np.percentile(d, [2.5, 97.5]), np.percentile(dn, [2.5, 97.5])
+
+
+def report(a, b):
+    pa, pb = OOF[a], OOF[b]
+    d = uar_of(pa.mean(0).argmax(1)) - uar_of(pb.mean(0).argmax(1))
+    dn = -np.log(pb.mean(0)[np.arange(N), y_all] + 1e-9).mean() + np.log(pa.mean(0)[np.arange(N), y_all] + 1e-9).mean()
+    (lo, hi), (nlo, nhi) = two_level(pa, pb)
+    print(f"  {a} − {b}: ΔUAR {d:+.2f} [{lo:+.2f}, {hi:+.2f}] | ΔNLL (b − a) {dn:+.4f} [{nlo:+.4f}, {nhi:+.4f}]")
+    return d, lo, hi
+
+
+run_arms(['Heuristic', 'Oracle'])
+print({k: f"{uar_of(v.mean(0).argmax(1)):.2f}" for k, v in OOF.items()})
+print("\n== stage 1 ==")
+d1, lo1, hi1 = report('Oracle', 'Heuristic')
+seen = TGT < K_CAND
+for nm, m in (('responder seen in I-III', seen), ('not seen', ~seen)):
+    print(f"  [{nm}, n={m.sum()}] Oracle {uar_of(OOF['Oracle'].mean(0).argmax(1), m):.2f} | "
+          f"Heuristic {uar_of(OOF['Heuristic'].mean(0).argmax(1), m):.2f}")
+stage1 = lo1 > 0
+dec = 'STOP: knowing the responder does not improve the forecast on Hi-EF'
+d2 = lo2 = hi2 = None
+if stage1:
+    run_arms(['Pointer'])
+    print("\n== stage 2 ==")
+    d2, lo2, hi2 = report('Pointer', 'Heuristic')
+    report('Oracle', 'Pointer')
+    dec = 'POINTER HELPS' if lo2 > 0 else 'POINTER NOT SHOWN'
+    acc = pd.DataFrame(PTR_ACC)
+    acc.to_csv(f"{OUT_DIR}/g26_pointer_accuracy.csv", index=False)
+    print(f"  responder identification on held-out folds (target incl. null): pointer {acc.pointer_acc.mean():.3f} "
+          f"vs rule {acc.rule_acc.mean():.3f}")
+print(f"\n== G26 decision (fixed rule): {dec} ==")
+safe = lambda s: re.sub(r'[^0-9A-Za-z]+', '_', s).strip('_')
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g26_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g26_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src, tgt=TGT,
+         **{safe(k): v for k, v in OOF.items()})
+json.dump({'decision': dec, 'stage1': [d1, lo1, hi1], 'stage2': [d2, lo2, hi2], 'stats': STAT},
+          open(f"{OUT_DIR}/g26_decision.json", 'w'), indent=1, default=float)
+"""),
+]
+
+
 # ======================= MELD in the Hi-EF format (M1 features, M2 G8a, M3 RoleNet) =======================
 _REPO = HERE.parent.parent
 _ESR_FILES = {f"esresnet/{n}": (_REPO / "esresnet" / n).read_text() for n in ("__init__.py", "attention.py", "base.py", "fbsp.py")}
@@ -7937,6 +8282,8 @@ if __name__ == "__main__":
                         ("g23_negative_separability_cv.ipynb", G23),
                         ("g24_appraisal_reaction_cv.ipynb", G24),
                         ("g25_listener_state_vs_reaction.ipynb", G25),
+                        ("g26a_clip4_faces.ipynb", G26A),
+                        ("g26_responder_pointer_cv.ipynb", G26),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

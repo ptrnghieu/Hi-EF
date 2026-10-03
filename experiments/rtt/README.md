@@ -37,6 +37,8 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g23_negative_separability_cv.ipynb` | G23: are angry/sad/disgust separable at all? Pair AUCs of the same LR on the same features for forecasting (I–III → B at IV) vs recognition of B at clip IV (diagnostic) and of A at clip III; reading rules (INVALID / PERCEPTION LIMIT / FORECASTING-SPECIFIC / INTERMEDIATE) fixed in the header; test untouched |
 | `g24_appraisal_reaction_cv.ipynb` | G24: does an LLM appraisal reading of subtitles I–III (10 dimensions, zero-shot, no labels, clip IV text never sent) add information on *which* negative emotion B reacts with? LR as G23 `FC` with/without appraisal; NEG pair AUC on the shift subset (B ≠ A); PASS/STOP rule fixed in the header; direct LLM forecast as control; contamination probe; test untouched |
 | `g25_listener_state_vs_reaction.ipynb` | G25: does the listener's face show B's ongoing state or B's reaction to A? LR on the listener's HSEmotion expression in clip III (`NOW`), clips I/II (`HIST`), their average (`AVG`, one state) or both separately (`SEP`, allows change); REACTION SIGNAL if `SEP` beats `AVG` on shift MCIS; validity check vs the class prior; optional correlation with RoleNet's listener gain (attach `g14_oof_probs.npz`); test untouched |
+| `g26a_clip4_faces.ipynb` | G26a: the unchanged G8a extraction on clip IV of train+val MCIS (test clip IV not read); used only as the responder target / oracle in G26 |
+| `g26_responder_pointer_cv.ipynb` | G26: Responder-Pointer RoleNet — does knowing who responds matter (Oracle vs rule, stage 1) and can a pointer over candidate identities, supervised by clip IV at training only, learn it (stage 2)? 10 seeds, two-level bootstrap, rules fixed in the header; test untouched |
 | `m1_meld_prepare_features.ipynb` | M1: MELD in the Hi-EF format — MCIS windows (I–III → IV by a different speaker), Hi-EF-layout annotation file, `hi-ef-features-v2`-style clip features (CLIP ViT-B/32 face/frame/text, AudioCLIP ESResNeXt-FBSP 527) for clips I–III |
 | `m2_meld_g8a_features.ipynb` | M2: the unchanged G8a face/voice extraction on MELD clips I–III, split into chunks (`N_CHUNKS`, `CHUNK`) |
 | `m3_meld_rolenet.ipynb` | M3: G10's RoleNet / RoleNet-noRole / B1 / LateFusion / PaperBest on MELD (train → fit, dev → early stopping, test once; 3 seeds; no speaker names as input), plus mirroring-vs-shift analysis |
@@ -682,3 +684,9 @@ component beyond that is small and borderline on shift MCIS, possibly specific t
 the stricter control (tuned weighted average) pre-registered on new data (e.g. MELD via M1/M2).
 - Descriptive: L's clip-III argmax expression equals B's clip-IV label in 29.5% of mirror and 22.5% of shift MCIS
   (A's label: 29.5% / 17.6%); expression-change size is similar in shift and mirror (0.574 vs 0.566).
+
+## G26: Responder-Pointer RoleNet (prepared; not yet run)
+
+Run G26a first (≈ 1 h, GPU, no labels; output `c4shard_*.pkl` → dataset), then G26 with the G23 inputs plus the G26a
+output. Stage 1 (Oracle vs rule) decides whether the pointer is trained at all. Dry run on mock features: all cells run,
+including the pointer branch (forced on for the test) and the held-out pointer-accuracy report.

@@ -35,6 +35,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `SYNTHESIS.md` | Evidence synthesis after G20: scope decisions, test-access record, feature-pipeline audit, findings, directions by status, screening checklist |
 | `g20_interaction_gate_cv.ipynb` | G20: gate for forecast value of text × audio-visual non-additivity — `Additive` (a(X)+b(Z), jointly trained) vs `Local` (+ same-clip text × audio bilinear term, main test) and `Window` (full RoleNet / LR window products, secondary) in a neural family (10 seeds, temperature-scaled on the early-stopping episodes) and an LR family (C and temperature by inner CV); decision on Δ_NLL in both families; late-fusion control; EMAP on RoleNet logits; test untouched |
 | `g23_negative_separability_cv.ipynb` | G23: are angry/sad/disgust separable at all? Pair AUCs of the same LR on the same features for forecasting (I–III → B at IV) vs recognition of B at clip IV (diagnostic) and of A at clip III; reading rules (INVALID / PERCEPTION LIMIT / FORECASTING-SPECIFIC / INTERMEDIATE) fixed in the header; test untouched |
+| `g24_appraisal_reaction_cv.ipynb` | G24: does an LLM appraisal reading of subtitles I–III (10 dimensions, zero-shot, no labels, clip IV text never sent) add information on *which* negative emotion B reacts with? LR as G23 `FC` with/without appraisal; NEG pair AUC on the shift subset (B ≠ A); PASS/STOP rule fixed in the header; direct LLM forecast as control; contamination probe; test untouched |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -616,3 +617,9 @@ Descriptive (not a rule outcome): Δ = NEG(RB) − NEG(FC) = +0.132 [+0.107, +0.
 the target's own clip-IV moment separates the negative emotions clearly better than the context does. Angry/disgust
 is weak everywhere (≤ 0.64). Face and audio carry most of the clip-IV separation; HSEmotion adds mainly valence
 (RA VAL 0.758 → 0.850). C was selected inside the grid for every task.
+
+## G24: appraisal of the content vs reaction direction (prepared; not yet run)
+
+Pre-registered in the header of `g24_appraisal_reaction_cv.ipynb`. Needs Kaggle Internet and the `OPENAI_API_KEY`
+secret (as G1); about 2 × 2,421 cached calls. Dry run with a mocked LLM: all cells run (decision STOP on random
+features, as expected); a missing-key guard stops the run if an appraisal dimension is absent in > 5% of responses.

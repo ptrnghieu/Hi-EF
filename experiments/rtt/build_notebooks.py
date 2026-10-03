@@ -7039,6 +7039,291 @@ json.dump({'decision': dec, 'NEG_RB': [float(rb.NEG), float(rb.NEG_lo), float(rb
 ]
 
 
+APP_DIMS = ['event_valence', 'caused_by_other', 'caused_by_responder', 'caused_by_circumstance', 'responder_control',
+            'loss', 'norm_violation', 'unexpected', 'goal_obstruction', 'threat']
+
+G24_LR_CELL = (G23[10][1]
+    .replace("""TASKS = {
+    'FC':       ([(k, m) for k in (1, 2, 3) for m in V2], yB_all),
+    'RB':       ([(4, m) for m in V2], yB_all),
+    'RA':       ([(3, m) for m in V2], yA_all),
+    'FC+expr':  ([(k, m) for k in (1, 2, 3) for m in V2 + ['expr']], yB_all),
+    'RA+expr':  ([(3, m) for m in V2 + ['expr']], yA_all),
+    'RB-face':  ([(4, 'face'), (4, 'flags')], yB_all),
+    'RB-text':  ([(4, 'text')], yB_all),
+    'RB-audio': ([(4, 'audio'), (4, 'flags')], yB_all),
+    'RB-scene': ([(4, 'scene')], yB_all),
+}""", """FCSPEC = [(k, m) for k in (1, 2, 3) for m in V2]
+TASKS = {
+    'FC':       (FCSPEC, yB_all),
+    'FC+app':   (FCSPEC + [(0, 'app')], yB_all),
+    'APP':      ([(0, 'app')], yB_all),
+    'FC+llm':   (FCSPEC + [(0, 'llm')], yB_all),
+}""")
+    .replace("""        if mod == 'expr':
+            M = EXPR[:, pos - 1]
+        else:
+            M = BLK[pos][mod]
+        if mod in ('flags', 'expr'):""", """        if mod == 'expr':
+            M = EXPR[:, pos - 1]
+        elif mod == 'app':
+            M = APP
+        elif mod == 'llm':
+            M = LLMP
+        else:
+            M = BLK[pos][mod]
+        if mod in ('flags', 'expr', 'app', 'llm'):""")
+    .replace("has4 = DEV.clip4.isin(CIDX).values\nprint(f\"clip IV features available for {has4.sum()} / {N} MCIS\")\nROWS = np.where(has4)[0]                       # all tasks use the same rows (paired)",
+             "ROWS = np.arange(N)                            # clip IV is not used in G24")
+    .replace("BLK = {k: clip_blocks(DEV[f'clip{k}'].values) for k in (1, 2, 3, 4)}",
+             "BLK = {k: clip_blocks(DEV[f'clip{k}'].values) for k in (1, 2, 3)}")
+    .replace("g23_", "g24_"))
+assert G24_LR_CELL.count("'FC+app'") == 1 and "elif mod == 'app'" in G24_LR_CELL and "ROWS = np.arange(N)" in G24_LR_CELL
+
+G24 = [
+    ("markdown", r"""
+# G24 — Does appraisal of the conversation content forecast *which* negative emotion B reacts with? (5-fold CV, train+val; test untouched)
+
+**Why.** Forecasters succeed mostly when B mirrors A (F14: accuracy 56.9% vs 27.7% on shifts) and hardly separate
+angry / sad / disgust (G19, G23: NEG 0.56 from clips I–III vs 0.69 at clip IV, descriptive). Appraisal theory
+predicts that these emotions differ in how the responder appraises the event: anger — caused by another person and
+controllable; sadness — loss, low control; disgust — norm violation. That information is in *what was said*, which our
+CLIP text features do not capture (G13, G20), and an LLM reading of the subtitles was never run (G1 not executed).
+
+**Appraisal features (no labels).** An LLM reads subtitle lines I–III only (clip IV text is never sent) and rates, for
+the person who will respond next, 10 appraisal dimensions in [0, 1] (valence in [−1, 1]): event valence, caused by
+another person, caused by the responder, caused by circumstances, responder's control, loss, norm violation,
+unexpectedness, goal obstruction, threat. A separate call asks for a direct forecast of the responder's emotion (control
+arm). Responses are cached. Both calls are zero-shot and see no Hi-EF label.
+
+**Arms** (same LR, folds, C selection and features as G23 `FC`): `FC` (CLIP/AudioSet features of I–III), `FC+app`,
+`APP` (appraisal only), `FC+llm` (+ the LLM's direct 7-way forecast; control).
+
+**Measure.** Pair AUC as G23; `NEG` = mean over angry/sad, angry/disgust, disgust/sad. **Shift subset** = MCIS whose
+B label differs from A's clip-III label (gold labels used only to define the subset, never as inputs). 95% CI by a
+bootstrap over source folders, paired across arms.
+
+**Decision (fixed before running).**
+* **PASS** if Δ_shift = NEG_shift(`FC+app`) − NEG_shift(`FC`) has CI lower bound > 0 **and** NEG_shift(`APP`) has CI
+  lower bound > 0.5. Then appraisal read from the content carries shift-direction information that the current
+  features lack → a method pilot on reaction (non-mirroring) forecasting is justified.
+* Otherwise **STOP**: with this reading of the content, the direction of B's negative reaction is not forecastable
+  from clips I–III.
+
+Descriptive: NEG on all MCIS, UAR, `FC+llm` vs `FC+app` (whether a gain is specific to appraisal or to any LLM reading
+of the text), and a contamination probe (does the LLM name the series?). Hi-EF comes from TV shows the LLM may know;
+a PASS must be read together with that probe.
+"""),
+    ("code", "!pip install -q openai"),
+    ("code", G23[1][1] + """
+# ---- G24: LLM settings ----
+MODEL = "gpt-4o-mini"          # any OpenAI chat model with JSON output
+TEMPERATURE = 0.0              # None for models that reject the parameter
+MAX_WORKERS = 8
+CACHE_APP = f"{OUT_DIR}/g24_appraisal_{MODEL.replace('/', '_')}.jsonl"
+CACHE_DIR = f"{OUT_DIR}/g24_direct_{MODEL.replace('/', '_')}.jsonl"
+"""),
+    G23[2], G23[3], G23[4], G23[5], G23[6], G23[7], G23[8],
+    ("markdown", r"""
+## LLM reading of subtitles I–III (appraisal and, separately, a direct forecast)
+"""),
+    ("code", r"""
+from openai import OpenAI
+from concurrent.futures import ThreadPoolExecutor, as_completed
+try:
+    from kaggle_secrets import UserSecretsClient
+    os.environ.setdefault("OPENAI_API_KEY", UserSecretsClient().get_secret("OPENAI_API_KEY"))
+except Exception:
+    pass
+client = OpenAI()
+APP_DIMS = ['event_valence', 'caused_by_other', 'caused_by_responder', 'caused_by_circumstance',
+            'responder_control', 'loss', 'norm_violation', 'unexpected', 'goal_obstruction', 'threat']
+SYSTEM = ("You are an expert in appraisal theory of emotion, annotating TV drama dialogue. You only see subtitle "
+          "text, which may contain transcription errors.")
+CONTEXT = '''Three consecutive subtitle lines from a conversation in a TV drama. Lines [1] and [2] are earlier context
+(speakers not given). Line [3] is spoken by person A. The next line (not shown) will be spoken by a different person,
+the RESPONDER, who reacts to what has happened.
+[1] {t1}
+[2] {t2}
+[3] (A) {t3}
+'''
+TASK_APP = CONTEXT + '''
+Rate how the RESPONDER most likely appraises the situation at this moment. Do not name an emotion.
+- event_valence: how good (+1) or bad (-1) the situation is for the responder
+- caused_by_other: caused by A or another person (0-1)
+- caused_by_responder: caused by the responder themselves (0-1)
+- caused_by_circumstance: caused by circumstances / nobody (0-1)
+- responder_control: how much the responder can still change or cope with it (0-1)
+- loss: something valued is lost or irreversibly damaged (0-1)
+- norm_violation: something offensive, immoral, or repulsive happened (0-1)
+- unexpected: how unexpected it is for the responder (0-1)
+- goal_obstruction: it blocks something the responder wants (0-1)
+- threat: it is a danger or threat to the responder (0-1)
+Return JSON only with these 10 keys and numeric values.'''
+TASK_DIR = CONTEXT + '''
+Which emotion will the RESPONDER most likely express in the next line?
+Labels: angry, disgust, fear, happy, neutral, sad, surprise.
+Return JSON only, a probability for every label (summing to 1): {{"angry": p, ...}}'''
+
+
+def call(task, row, retries=5):
+    msgs = [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": task.format(t1=row['t1'] or '(no text)', t2=row['t2'] or '(no text)',
+                                                    t3=row['t3'] or '(no text)')}]
+    kw = dict(model=MODEL, messages=msgs, response_format={"type": "json_object"})
+    if TEMPERATURE is not None:
+        kw["temperature"] = TEMPERATURE
+    for attempt in range(retries):
+        try:
+            return json.loads(client.chat.completions.create(**kw).choices[0].message.content)
+        except Exception as e:
+            ERRORS.append(f"{type(e).__name__}: {e}")
+            if "temperature" in str(e) and "temperature" in kw:
+                kw.pop("temperature"); continue
+            time.sleep(2 ** attempt)
+    return None
+
+
+def run_cache(task, path):
+    cache = {}
+    if os.path.exists(path):
+        for line in open(path):
+            d = json.loads(line); cache[d['sample_id']] = d['response']
+    todo = [r for r in DEV.to_dict('records') if r['sample_id'] not in cache]
+    print(f"{os.path.basename(path)}: cached {len(cache)} | to query {len(todo)}", flush=True)
+    with ThreadPoolExecutor(MAX_WORKERS) as pool, open(path, 'a') as f:
+        futs = {pool.submit(call, task, r): r['sample_id'] for r in todo}
+        for fut in as_completed(futs):
+            sid, resp = futs[fut], fut.result()
+            if resp is not None:
+                cache[sid] = resp; f.write(json.dumps({'sample_id': sid, 'response': resp}) + "\n")
+    n_ok = sum(s in cache for s in DEV.sample_id)
+    print(f"  responses {n_ok}/{N}")
+    if n_ok < 0.95 * N:
+        raise RuntimeError("More than 5% of items have no response; re-run this cell (cached items are skipped).")
+    return cache
+
+
+ERRORS = []
+if call(TASK_APP, DEV.iloc[0].to_dict(), retries=2) is None:
+    raise RuntimeError(f"Pre-flight call failed (Internet on? OPENAI_API_KEY secret? MODEL?). {ERRORS[-1:]}")
+C_APP, C_DIR = run_cache(TASK_APP, CACHE_APP), run_cache(TASK_DIR, CACHE_DIR)
+if ERRORS:
+    print(f"{len(ERRORS)} API errors, e.g.", sorted(set(ERRORS))[:2])
+
+
+def num(d, k, lo, hi):
+    try:
+        return float(np.clip(float(d[k]), lo, hi))
+    except Exception:
+        return np.nan
+
+
+APP = np.array([[num(C_APP.get(s) or {}, k, -1 if k == 'event_valence' else 0, 1) for k in APP_DIMS]
+                for s in DEV.sample_id], np.float32)
+miss = np.isnan(APP)
+print("missing appraisal values per dimension:", dict(zip(APP_DIMS, miss.sum(0))))
+if (miss.mean(0) > 0.05).any():
+    raise RuntimeError("An appraisal dimension is missing in more than 5% of responses; check the JSON keys.")
+APP = np.where(miss, np.nanmean(APP, 0), APP)         # rare; filled with the column mean (no labels involved)
+
+
+def to_probs(d):
+    d = {str(k).strip().lower(): v for k, v in d.items()} if isinstance(d, dict) else {}
+    p = np.array([num(d, e, 0, 1) if e in d else 0.0 for e in EMO]); p = np.nan_to_num(p)
+    return p / p.sum() if p.sum() > 0 else np.full(7, 1 / 7)
+
+
+LLMP = np.stack([to_probs(C_DIR.get(s)) for s in DEV.sample_id]).astype(np.float32)
+print(pd.DataFrame(APP, columns=APP_DIMS).describe().loc[['mean', 'std']].round(2).to_string())
+"""),
+    ("markdown", r"""
+## Logistic regressions (same set-up as G23 `FC`)
+"""),
+    ("code", G24_LR_CELL),
+    ("markdown", r"""
+## Pair AUCs on all MCIS and on the shift subset; fixed decision
+"""),
+    ("code", r"""
+from sklearn.metrics import roc_auc_score
+
+E2 = {e: i for i, e in enumerate(EMO)}
+SHIFT = yB_all != yA_all
+print(f"shift subset: {SHIFT.sum()} / {N} MCIS")
+
+
+def pair_auc(t, a, b, idx):
+    m = idx[np.isin(yB_all[idx], [E2[a], E2[b]])]
+    if len(np.unique(yB_all[m])) < 2:
+        return np.nan
+    return roc_auc_score(yB_all[m] == E2[a], LOGIT[t][m, E2[a]] - LOGIT[t][m, E2[b]])
+
+
+def score(t, idx):
+    d = {f"{a}/{b}": pair_auc(t, a, b, idx) for a, b in NEG_PAIRS}
+    d['NEG'] = np.nanmean(list(d.values()))
+    return d
+
+
+groups = [np.where(src == e)[0] for e in np.unique(src)]
+rng = np.random.default_rng(0)
+DRAWS = [np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))]) for _ in range(N_BOOT)]
+SUB = {'all': lambda idx: idx, 'shift': lambda idx: idx[SHIFT[idx]]}
+PT = {(t, s): score(t, f(np.arange(N))) for t in TASKS for s, f in SUB.items()}
+BS = {(t, s): [score(t, f(idx)) for idx in DRAWS] for t in TASKS for s, f in SUB.items()}
+
+rows = []
+for (t, s), d in PT.items():
+    r = {'task': t, 'subset': s, **d}
+    r['NEG_lo'], r['NEG_hi'] = np.nanpercentile([b['NEG'] for b in BS[(t, s)]], [2.5, 97.5])
+    m = np.arange(N) if s == 'all' else np.where(SHIFT)[0]
+    r['UAR'] = war_uar(LOGIT[t][m].argmax(1), yB_all[m], 7)[1]
+    rows.append(r)
+R = pd.DataFrame(rows)
+R.to_csv(f"{OUT_DIR}/g24_pair_auc.csv", index=False)
+print(R.round(3).to_string(index=False))
+
+
+def delta(a, b, s):
+    pt = PT[(a, s)]['NEG'] - PT[(b, s)]['NEG']
+    lo, hi = np.nanpercentile([x['NEG'] - y['NEG'] for x, y in zip(BS[(a, s)], BS[(b, s)])], [2.5, 97.5])
+    return pt, lo, hi
+
+
+d_shift = delta('FC+app', 'FC', 'shift')
+app_lo = R[(R.task == 'APP') & (R.subset == 'shift')].NEG_lo.iloc[0]
+print(f"\nΔ_shift = NEG_shift(FC+app) − NEG_shift(FC) = {d_shift[0]:+.3f} [{d_shift[1]:+.3f}, {d_shift[2]:+.3f}]")
+print(f"NEG_shift(APP) lower bound = {app_lo:.3f}")
+for a, b, s in [('FC+app', 'FC', 'all'), ('FC+llm', 'FC', 'shift'), ('FC+app', 'FC+llm', 'shift')]:
+    p, lo, hi = delta(a, b, s)
+    print(f"  (descriptive) {a} − {b} [{s}]: {p:+.3f} [{lo:+.3f}, {hi:+.3f}]")
+dec = 'PASS' if d_shift[1] > 0 and app_lo > 0.5 else 'STOP'
+print(f"== G24 decision (fixed rule): {dec} ==")
+json.dump({'decision': dec, 'delta_shift': list(map(float, d_shift)), 'NEG_shift_APP_lo': float(app_lo),
+           'model': MODEL}, open(f"{OUT_DIR}/g24_decision.json", 'w'), indent=1)
+"""),
+    ("markdown", r"""
+## Contamination probe (for the limitations section)
+"""),
+    ("code", r"""
+probe = DEV.sample(n=30, random_state=0)
+names = []
+for r in probe.to_dict('records'):
+    q = (f"Which TV series are these subtitle lines from? Answer with the series name only, or 'unknown'.\n"
+         f"[1] {r['t1']}\n[2] {r['t2']}\n[3] {r['t3']}")
+    kw = dict(model=MODEL, messages=[{"role": "user", "content": q}])
+    if TEMPERATURE is not None:
+        kw["temperature"] = TEMPERATURE
+    try:
+        names.append(client.chat.completions.create(**kw).choices[0].message.content.strip())
+    except Exception as e:
+        names.append(f"error: {type(e).__name__}")
+print(pd.Series(names).value_counts().head(10).to_string())
+json.dump(names, open(f"{OUT_DIR}/g24_contamination_probe.json", 'w'), indent=1)
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -7057,6 +7342,7 @@ if __name__ == "__main__":
                         ("g17_listening_vs_speaking.ipynb", G17),
                         ("g19_forecastable_distinctions_cv.ipynb", G19),
                         ("g20_interaction_gate_cv.ipynb", G20),
-                        ("g23_negative_separability_cv.ipynb", G23)]:
+                        ("g23_negative_separability_cv.ipynb", G23),
+                        ("g24_appraisal_reaction_cv.ipynb", G24)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

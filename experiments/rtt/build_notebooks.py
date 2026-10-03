@@ -7851,6 +7851,292 @@ json.dump({'decision': dec, 'stage1': [d1, lo1, hi1], 'stage2': [d2, lo2, hi2], 
 ]
 
 
+G27 = [
+    ("markdown", r"""
+# G27 — Pilot: aggregate mention representations before or after classification? (5-fold CV, train+val, 3 seeds; test untouched)
+
+**What this pilot tests — and what it does not.** It tests whether keeping *contextualised mention representations*
+separate until after the classifier (late aggregation) forecasts B's clip-IV emotion better than merging them before
+the classifier (early aggregation), with the same candidates, gate and head. It does **not** test full event-role
+perspectives: there is no semantic-role parsing, no coreference, no cross-turn merging, and no perspective-specific
+training (no external experiencer data). A negative result is limited to this design; it does not show that event roles
+or experiencer-specific training are useless. A positive result shows a benefit of late aggregation here, not that the
+model understands perspectives.
+
+**Candidates (from clips I–III only).** Every mention span is its own candidate, tagged with its clip: pronouns by a
+fixed list (1st / 2nd / 3rd person, incl. apostrophe-less forms such as "youre", "hes") and person names from a fixed
+NER model (`dslim/bert-base-NER`, PER). No merging across clips or mentions ("I" in clip I and clip II stay separate;
+"you" is not assumed to be B). One **whole-context candidate** (mean of all content tokens) is always present, so
+windows without mentions still get a valid forecast.
+
+**Encoder.** RoBERTa-large, frozen, no new tokens. Input `<s> I </s> II </s> III </s>` with the tokenizer's existing
+separator; a mention = mean of the last-4-layer hidden states over its tokens (character offsets). Cached once.
+
+**Audio-visual vector v** (same for all arms): per clip CLIP face / frame / AudioSet audio (PCA-32 each), mean
+HSEmotion + face flag, audio flag; scaler and PCA fitted on the training part of each fold. A compact baseline, not
+RoleNet.
+
+**Arms** (same gate g over candidates, same head F; trained separately):
+* `A` — whole-context candidate only: p = softmax F([z_ctx; v]).
+* `B` early — p = softmax F([Σ_j w_j z_j; v]).
+* `C` late — p = Σ_j w_j softmax F([z_j; v]) (shared head for all candidates).
+w = softmax over candidates of g([z_j; v]); z_j includes a candidate-type and clip embedding.
+
+**Protocol (fixed before running).** Same source folds as G8b–G26; early stopping on 5 held-out training episodes
+(dev NLL); 3 seeds; OOF probabilities averaged over seeds. **Primary:** Δ = NLL(B) − NLL(C), per-MCIS loss differences
+bootstrapped over source folders (seeds and mentions are not treated as independent samples). **C beats B** if the CI
+lower bound is > 0. Secondary: C − A, B − A, UAR; windows with vs without mentions.
+"""),
+    ("code", G13[1][1].split("ARMS = [")[0] + """ARMS = []
+EXPERIMENTS = []
+TEXT_MODEL, NER_MODEL = "roberta-large", "dslim/bert-base-NER"
+SEEDS3 = [42, 123, 456]
+N_BOOT, PCA_K, MAX_CAND = 2000, 32, 16
+PILOT = dict(d=128, lr=1e-3, wd=1e-2, dropout=0.3, epochs=100, patience=10, batch=64)
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Mention candidates and frozen RoBERTa-large representations (cached)"),
+    ("code", r"""
+import re
+from transformers import AutoTokenizer, AutoModel, pipeline
+
+PRON = {'1st': "i me my mine myself we us our ours ourselves im ive",
+        '2nd': "you your yours yourself yourselves youre youve youll youd ya",
+        '3rd': "he him his himself she her hers herself they them their theirs themselves hes shes theyre theyve theyll theyd"}
+PRON = {w: k for k, ws in PRON.items() for w in ws.split()}
+TYPES = ['context', '1st', '2nd', '3rd', 'name']
+tok = AutoTokenizer.from_pretrained(TEXT_MODEL)
+enc = AutoModel.from_pretrained(TEXT_MODEL, output_hidden_states=True).to(DEVICE).eval()
+ner = pipeline('ner', model=NER_MODEL, aggregation_strategy='simple', device=0 if DEVICE == 'cuda' else -1)
+
+TXTS = [[r.t1 or '', r.t2 or '', r.t3 or ''] for r in DEV.itertuples()]
+uniq = sorted({t for ts in TXTS for t in ts if t.strip()})
+NERS = {}
+for i in range(0, len(uniq), 64):
+    for t, ents in zip(uniq[i:i + 64], ner(uniq[i:i + 64])):
+        NERS[t] = [(int(e['start']), int(e['end'])) for e in ents if e['entity_group'] == 'PER']
+
+
+def mentions(t):
+    out = [(m.start(), m.end(), PRON[m.group(0).lower()]) for m in re.finditer(r"[A-Za-z]+", t) if m.group(0).lower() in PRON]
+    out += [(s, e, 'name') for s, e in NERS.get(t, [])]
+    return sorted(out)
+
+
+ZC, ZT, ZK, ZM, MENT = [], [], [], [], []             # vectors, type id, clip id, mask, readable spans
+D_TXT = enc.config.hidden_size
+for n, ts in enumerate(tqdm(TXTS, desc='encode')):
+    ids, spans = [tok.cls_token_id], []
+    for k, t in enumerate(ts):
+        e = tok(t, add_special_tokens=False, return_offsets_mapping=True)
+        base = len(ids)
+        ids += e['input_ids'] + [tok.sep_token_id]
+        for s, en, ty in mentions(t):
+            toks = [base + i for i, (a, b) in enumerate(e['offset_mapping']) if a < en and b > s]
+            if toks:
+                spans.append((toks, TYPES.index(ty), k, t[s:en]))
+    with torch.no_grad():
+        hs = enc(torch.tensor([ids], device=DEVICE)).hidden_states
+    h = torch.stack(hs[-4:]).mean(0)[0].float().cpu().numpy()                 # [T, D]
+    content = [i for i, x in enumerate(ids) if x not in (tok.cls_token_id, tok.sep_token_id)]
+    vec = [h[content].mean(0) if content else np.zeros(D_TXT, np.float32)]
+    ty, cl, ment = [0], [3], []
+    for toks, t_, k, s in spans[:MAX_CAND - 1]:
+        vec.append(h[toks].mean(0)); ty.append(t_); cl.append(k); ment.append((s, TYPES[t_], k))
+    m = np.zeros(MAX_CAND, bool); m[:len(vec)] = True
+    V = np.zeros((MAX_CAND, D_TXT), np.float32); V[:len(vec)] = np.stack(vec)
+    T_ = np.zeros(MAX_CAND, np.int64); T_[:len(ty)] = ty
+    K_ = np.full(MAX_CAND, 3, np.int64); K_[:len(cl)] = cl
+    ZC.append(V); ZT.append(T_); ZK.append(K_); ZM.append(m); MENT.append(ment)
+ZC, ZT, ZK, ZM = np.stack(ZC), np.stack(ZT), np.stack(ZK), np.stack(ZM)
+NMENT = ZM.sum(1) - 1
+print(f"mentions per window: mean {NMENT.mean():.2f} | windows with >= 1 mention {np.mean(NMENT > 0) * 100:.1f}% | "
+      f"capped at {MAX_CAND - 1}: {np.mean(NMENT >= MAX_CAND - 1) * 100:.1f}%")
+print("mention types:", {TYPES[t]: int(((ZT == t) & ZM).sum()) for t in range(1, 5)})
+json.dump({s: m for s, m in zip(DEV.sample_id.values, MENT)}, open(f"{OUT_DIR}/g27_mentions.json", 'w'))
+del enc; torch.cuda.empty_cache()
+"""),
+    ("markdown", "## Audio-visual vector (fitted per fold) and the three arms"),
+    ("code", r"""
+from sklearn.decomposition import PCA as _PCA
+from sklearn.preprocessing import StandardScaler
+
+EXPR = np.zeros((N, 3, 11), np.float32)
+for n, row in enumerate(DEV.itertuples()):
+    for k, c in enumerate((row.clip1, row.clip2, row.clip3)):
+        if len(FB[c]):
+            EXPR[n, k, :10] = FB[c][:, :10].mean(0); EXPR[n, k, 10] = 1.0
+ix3 = CLIPIDX.cpu().numpy() if torch.is_tensor(CLIPIDX) else CLIPIDX
+fmk = FEAT['fmask'].float().unsqueeze(-1)
+FACEm = ((FEAT['face'] * fmk).sum(1) / fmk.sum(1).clamp(min=1)).cpu().numpy()
+ORIm = FEAT['ori'].mean(1).cpu().numpy()
+AF = FEAT['afound'].float().cpu().numpy()
+AUDn = (F.normalize(FEAT['audio'], dim=-1).cpu().numpy()) * AF[:, None]
+
+
+def av_vectors(tr, te):
+    A_, B_ = [], []
+    for k in range(3):
+        cidx = ix3[:, k]
+        for M, fitmask in ((FACEm, None), (ORIm, None), (AUDn, AF > 0)):
+            rows = cidx[tr] if fitmask is None else cidx[tr][fitmask[cidx[tr]]]
+            p = _PCA(min(PCA_K, len(rows) - 1), random_state=0).fit(M[rows])
+            A_.append(p.transform(M[cidx[tr]])); B_.append(p.transform(M[cidx[te]]))
+        A_.append(np.concatenate([EXPR[tr, k], AF[cidx[tr], None]], 1)); B_.append(np.concatenate([EXPR[te, k], AF[cidx[te], None]], 1))
+    a, b = np.concatenate(A_, 1), np.concatenate(B_, 1)
+    sc = StandardScaler().fit(a)
+    return sc.transform(a).astype(np.float32), sc.transform(b).astype(np.float32)
+
+
+class Pilot(nn.Module):
+    def __init__(self, arm, d_av, d=PILOT['d'], p=PILOT['dropout']):
+        super().__init__()
+        self.arm = arm
+        self.z = nn.Sequential(nn.LayerNorm(D_TXT), nn.Linear(D_TXT, d))
+        self.type_emb, self.clip_emb = nn.Embedding(len(TYPES), d), nn.Embedding(4, d)
+        self.v = nn.Sequential(nn.Linear(d_av, d), nn.GELU(), nn.Dropout(p))
+        self.gate = nn.Sequential(nn.Linear(2 * d, d), nn.GELU(), nn.Linear(d, 1))
+        self.head = nn.Sequential(nn.Dropout(p), nn.Linear(2 * d, d), nn.GELU(), nn.Dropout(p), nn.Linear(d, 7))
+
+    def forward(self, zc, zt, zk, zm, av):                        # returns log-probabilities [B, 7]
+        z = self.z(zc) + self.type_emb(zt) + self.clip_emb(zk)    # [B, M, d]
+        v = self.v(av)
+        if self.arm == 'A':
+            return F.log_softmax(self.head(torch.cat([z[:, 0], v], -1)), -1)
+        vv = v.unsqueeze(1).expand_as(z)
+        g = self.gate(torch.cat([z, vv], -1)).squeeze(-1).masked_fill(~zm, -1e4)
+        w = torch.softmax(g, 1)
+        self.last_w = w.detach()
+        if self.arm == 'B':
+            return F.log_softmax(self.head(torch.cat([(w.unsqueeze(-1) * z).sum(1), v], -1)), -1)
+        lq = F.log_softmax(self.head(torch.cat([z, vv], -1)), -1)           # [B, M, 7]
+        return torch.logsumexp(torch.log(w.clamp(min=1e-12)).unsqueeze(-1) + lq, 1)
+
+
+ZC_T, ZT_T, ZK_T, ZM_T = T(ZC), T(ZT), T(ZK), T(ZM)
+
+
+def fit_pilot(arm, AV_all, tr, dev, te, seed):
+    seed_all(seed)
+    m = Pilot(arm, AV_all.shape[1]).to(DEVICE)
+    opt = torch.optim.AdamW(m.parameters(), lr=PILOT['lr'], weight_decay=PILOT['wd'])
+    AVt = T(AV_all)
+    run = lambda ix: m(ZC_T[ix], ZT_T[ix], ZK_T[ix], ZM_T[ix], AVt[ix])
+    yb = T(y_all)
+    best, state, bad = 1e9, None, 0
+    for ep in range(PILOT['epochs']):
+        m.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm), PILOT['batch']):
+            j = perm[i:i + PILOT['batch']]
+            loss = F.nll_loss(run(j), yb[j])
+            opt.zero_grad(); loss.backward(); opt.step()
+        m.eval()
+        with torch.no_grad():
+            dl = F.nll_loss(run(dev), yb[dev]).item()
+        if dl < best - 1e-4:
+            best, bad, state = dl, 0, {k: v.detach().clone() for k, v in m.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= PILOT['patience']:
+                break
+    m.load_state_dict(state); m.eval()
+    with torch.no_grad():
+        lp = run(te).exp().cpu().numpy()
+        w = m.last_w.cpu().numpy() if arm != 'A' else None
+    return lp, w, best
+"""),
+    ("markdown", "## 5-fold CV (same folds as G8b–G26), 3 seeds"),
+    ("code", r"""
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+ARMS3 = ['A', 'B', 'C']
+OOF = {a: np.full((len(SEEDS3), N, 7), np.nan, np.float32) for a in ARMS3}
+GATE = {a: np.full((len(SEEDS3), N, MAX_CAND), np.nan, np.float32) for a in ('B', 'C')}
+log, t0 = [], time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    a_tr, a_te = av_vectors(trr, te_rows)                   # scaler / PCA fitted on the training part only
+    AV_all = np.zeros((N, a_tr.shape[1]), np.float32); AV_all[trr], AV_all[te_rows] = a_tr, a_te
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for a in ARMS3:
+        for si, seed in enumerate(SEEDS3):
+            p, w, sel = fit_pilot(a, AV_all, tr, dev, te, seed + 1000 * f)
+            OOF[a][si, te_rows] = p
+            if w is not None:
+                GATE[a][si, te_rows] = w
+            log.append({'fold': f, 'arm': a, 'seed': seed, 'dev_nll': sel})
+            print(f"fold {f} arm {a} seed {seed}: dev NLL {sel:.4f} | eval NLL "
+                  f"{-np.log(p[np.arange(len(te_rows)), y_all[te_rows]] + 1e-9).mean():.4f} | {(time.time() - t0) / 60:.1f} min",
+                  flush=True)
+assert all(not np.isnan(v).any() for v in OOF.values())
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g27_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g27_oof.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src, n_mentions=NMENT,
+         **{f"p_{a}": v for a, v in OOF.items()}, **{f"gate_{a}": v for a, v in GATE.items()})
+"""),
+    ("markdown", "## Primary contrast and secondary analyses"),
+    ("code", r"""
+P = {a: OOF[a].mean(0) for a in ARMS3}
+L = {a: -np.log(P[a][np.arange(N), y_all] + 1e-9) for a in ARMS3}           # per-MCIS loss, averaged over seeds
+groups = [np.where(src == e)[0] for e in np.unique(src)]
+rng = np.random.default_rng(0)
+DRAWS = [np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))]) for _ in range(N_BOOT)]
+
+
+def uar(p, idx):
+    return war_uar(p[idx].argmax(1), y_all[idx], 7)[1]
+
+
+def contrast(a, b, mask=None):
+    base = np.arange(N) if mask is None else np.where(mask)[0]
+    d = (L[a] - L[b])
+    pt = d[base].mean()
+    bs = []
+    for idx in DRAWS:
+        ii = idx if mask is None else idx[mask[idx]]
+        bs.append(d[ii].mean())
+    lo, hi = np.percentile(bs, [2.5, 97.5])
+    du = uar(P[b], base) - uar(P[a], base)
+    return pt, lo, hi, du
+
+
+print({a: f"NLL {L[a].mean():.4f} | UAR {uar(P[a], np.arange(N)):.2f}" for a in ARMS3})
+rows = []
+for a, b in (('B', 'C'), ('A', 'C'), ('A', 'B')):
+    for name, m in (('all', None), ('with mention', NMENT > 0), ('no mention', NMENT == 0)):
+        pt, lo, hi, du = contrast(a, b, m)
+        rows.append({'contrast': f"NLL({a}) - NLL({b})", 'subset': name, 'delta': pt, 'lo': lo, 'hi': hi,
+                     'UAR(b) - UAR(a)': du})
+R = pd.DataFrame(rows)
+R.to_csv(f"{OUT_DIR}/g27_contrasts.csv", index=False)
+print(R.round(4).to_string(index=False))
+main = R[(R.contrast == 'NLL(B) - NLL(C)') & (R.subset == 'all')].iloc[0]
+dec = 'C BEATS B (late aggregation helps in this design)' if main.lo > 0 else 'NO EVIDENCE THAT LATE AGGREGATION HELPS (this design)'
+print(f"\n== G27 decision (fixed rule): {dec} ==  Δ = {main.delta:+.4f} [{main.lo:+.4f}, {main.hi:+.4f}]")
+for a in ('B', 'C'):
+    G = np.nanmean(GATE[a], 0)
+    w_ctx = G[:, 0]
+    print(f"  gate {a}: mean weight on the whole-context candidate {np.nanmean(w_ctx):.3f} | on mentions (windows with mentions) "
+          f"{np.nanmean(1 - w_ctx[NMENT > 0]):.3f}")
+json.dump({'decision': dec, 'delta_BC': [float(main.delta), float(main.lo), float(main.hi)],
+           'mention_share': float(np.mean(NMENT > 0))}, open(f"{OUT_DIR}/g27_decision.json", 'w'), indent=1)
+"""),
+]
+
+
 # ======================= MELD in the Hi-EF format (M1 features, M2 G8a, M3 RoleNet) =======================
 _REPO = HERE.parent.parent
 _ESR_FILES = {f"esresnet/{n}": (_REPO / "esresnet" / n).read_text() for n in ("__init__.py", "attention.py", "base.py", "fbsp.py")}
@@ -8287,6 +8573,7 @@ if __name__ == "__main__":
                         ("g25_listener_state_vs_reaction.ipynb", G25),
                         ("g26a_clip4_faces.ipynb", G26A),
                         ("g26_responder_pointer_cv.ipynb", G26),
+                        ("g27_mention_aggregation_pilot.ipynb", G27),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

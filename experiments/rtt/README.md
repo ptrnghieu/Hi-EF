@@ -39,6 +39,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g25_listener_state_vs_reaction.ipynb` | G25: does the listener's face show B's ongoing state or B's reaction to A? LR on the listener's HSEmotion expression in clip III (`NOW`), clips I/II (`HIST`), their average (`AVG`, one state) or both separately (`SEP`, allows change); REACTION SIGNAL if `SEP` beats `AVG` on shift MCIS; validity check vs the class prior; optional correlation with RoleNet's listener gain (attach `g14_oof_probs.npz`); test untouched |
 | `g26a_clip4_faces.ipynb` | G26a: the unchanged G8a extraction on clip IV of train+val MCIS (test clip IV not read); used only as the responder target / oracle in G26 |
 | `g26_responder_pointer_cv.ipynb` | G26: Responder-Pointer RoleNet — does knowing who responds matter (Oracle vs rule, stage 1) and can a pointer over candidate identities, supervised by clip IV at training only, learn it (stage 2)? 10 seeds, two-level bootstrap, rules fixed in the header; test untouched |
+| `g27_mention_aggregation_pilot.ipynb` | G27 pilot: early (B) vs late (C) aggregation of contextualised mention representations (frozen RoBERTa-large, pronoun + NER person mentions per clip, whole-context candidate), same gate and head, plus whole-context arm A; shared fold-fitted audio-visual vector; 3 seeds; primary NLL(B) − NLL(C); test untouched. Tests mention aggregation, not full event-role perspectives |
 | `m1_meld_prepare_features.ipynb` | M1: MELD in the Hi-EF format — MCIS windows (I–III → IV by a different speaker), Hi-EF-layout annotation file, `hi-ef-features-v2`-style clip features (CLIP ViT-B/32 face/frame/text, AudioCLIP ESResNeXt-FBSP 527) for clips I–III |
 | `m2_meld_g8a_features.ipynb` | M2: the unchanged G8a face/voice extraction on MELD clips I–III, split into chunks (`N_CHUNKS`, `CHUNK`) |
 | `m3_meld_rolenet.ipynb` | M3: G10's RoleNet / RoleNet-noRole / B1 / LateFusion / PaperBest on MELD (train → fit, dev → early stopping, test once; 3 seeds; no speaker names as input), plus mirroring-vs-shift analysis |
@@ -704,3 +705,10 @@ different matching).
 Reading: giving RoleNet the true responder's face as the listener does not change the forecast, even on the 390 MCIS
 where the rule picks the wrong person. Together with noRole (G14 +0.44, n.s.), the information RoleNet uses is in the
 faces themselves, not in knowing whose face it is.
+
+## G27: mention-aggregation pilot (prepared; not yet run)
+
+Pre-registered in the header of `g27_mention_aggregation_pilot.ipynb` (scope: aggregation of mention representations,
+not event-role perspectives). Needs Internet (RoBERTa-large, `dslim/bert-base-NER`) and the G23 inputs. Dry run with a
+small encoder on mock audio-visual features but the real transcripts of 180 MCIS: all cells run; 95% of windows have at
+least one mention (mean 3.6 per window).

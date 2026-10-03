@@ -36,6 +36,9 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g20_interaction_gate_cv.ipynb` | G20: gate for forecast value of text × audio-visual non-additivity — `Additive` (a(X)+b(Z), jointly trained) vs `Local` (+ same-clip text × audio bilinear term, main test) and `Window` (full RoleNet / LR window products, secondary) in a neural family (10 seeds, temperature-scaled on the early-stopping episodes) and an LR family (C and temperature by inner CV); decision on Δ_NLL in both families; late-fusion control; EMAP on RoleNet logits; test untouched |
 | `g23_negative_separability_cv.ipynb` | G23: are angry/sad/disgust separable at all? Pair AUCs of the same LR on the same features for forecasting (I–III → B at IV) vs recognition of B at clip IV (diagnostic) and of A at clip III; reading rules (INVALID / PERCEPTION LIMIT / FORECASTING-SPECIFIC / INTERMEDIATE) fixed in the header; test untouched |
 | `g24_appraisal_reaction_cv.ipynb` | G24: does an LLM appraisal reading of subtitles I–III (10 dimensions, zero-shot, no labels, clip IV text never sent) add information on *which* negative emotion B reacts with? LR as G23 `FC` with/without appraisal; NEG pair AUC on the shift subset (B ≠ A); PASS/STOP rule fixed in the header; direct LLM forecast as control; contamination probe; test untouched |
+| `m1_meld_prepare_features.ipynb` | M1: MELD in the Hi-EF format — MCIS windows (I–III → IV by a different speaker), Hi-EF-layout annotation file, `hi-ef-features-v2`-style clip features (CLIP ViT-B/32 face/frame/text, AudioCLIP ESResNeXt-FBSP 527) for clips I–III |
+| `m2_meld_g8a_features.ipynb` | M2: the unchanged G8a face/voice extraction on MELD clips I–III, split into chunks (`N_CHUNKS`, `CHUNK`) |
+| `m3_meld_rolenet.ipynb` | M3: G10's RoleNet / RoleNet-noRole / B1 / LateFusion / PaperBest on MELD (train → fit, dev → early stopping, test once; 3 seeds; no speaker names as input), plus mirroring-vs-shift analysis |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -642,3 +645,12 @@ Measurement checks (descriptive):
 Reading: with this zero-shot appraisal reading of the subtitles, no information about the direction of B's negative
 reaction was found. The measurement itself is weak (degenerate ratings; no within-negative separation even for the
 speaker of the read text), so a better appraisal measure is not excluded.
+
+## MELD in the Hi-EF setting (M1–M3, prepared; not yet run)
+
+Order: M1 (Internet; downloads MELD.Raw ≈ 10 GB into `/tmp`, or attach a copy via `MELD_LOCAL`) → make its output a
+dataset → M2 once per chunk (attach M1) → M3 (attach M1 and all M2 outputs). Speaker names are never an input; clip IV
+is never processed; the Hi-EF features are re-implemented because the original extraction script is not available.
+Local checks: M1 ran end to end on synthetic MELD videos with the real CLIP and AudioCLIP models (AudioCLIP weights load
+with no missing keys) and a mocked face detector; M2's MELD-specific cells and its G8a clip listing ran (the G8a model
+cells are unchanged); M3 ran end to end on mock M1/M2 outputs built from the real MELD transcripts.

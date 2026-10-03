@@ -7324,6 +7324,419 @@ json.dump(names, open(f"{OUT_DIR}/g24_contamination_probe.json", 'w'), indent=1)
 ]
 
 
+# ======================= MELD in the Hi-EF format (M1 features, M2 G8a, M3 RoleNet) =======================
+_REPO = HERE.parent.parent
+_ESR_FILES = {f"esresnet/{n}": (_REPO / "esresnet" / n).read_text() for n in ("__init__.py", "attention.py", "base.py", "fbsp.py")}
+_ESR_FILES["ignite_trainer/_interfaces.py"] = (_REPO / "ignite_trainer" / "_interfaces.py").read_text()
+_ESR_FILES["ignite_trainer/__init__.py"] = "from ._interfaces import AbstractNet, AbstractTransform\n"
+_t = (_REPO / "utils" / "transforms.py").read_text()
+_ESR_FILES["utils/transforms.py"] = "import math\nimport numpy as np\nimport torch\n\n" + _t[_t.index("def scale"):_t.index("class ToTensor1D")]
+_ESR_FILES["utils/__init__.py"] = ""
+
+MELD_FETCH = r'''
+import os, re, glob, subprocess
+from concurrent.futures import ThreadPoolExecutor
+
+MELD_URL = "https://web.eecs.umich.edu/~mihalcea/downloads/MELD.Raw.tar.gz"
+CSV_URL = "https://raw.githubusercontent.com/declare-lab/MELD/master/data/MELD/{}_sent_emo.csv"
+EMO_MAP = {'anger': 'angry', 'disgust': 'disgust', 'fear': 'fear', 'joy': 'happy', 'neutral': 'neutral',
+           'sadness': 'sad', 'surprise': 'surprise'}
+SPLITS = (('tr', 'train', 'train'), ('dv', 'dev', 'val'), ('te', 'test', 'test'))   # prefix, MELD name, Hi-EF name
+
+
+def fetch_meld():
+    # returns {(prefix, dialogue, utterance): mp4 path} and {prefix: csv path}
+    root = MELD_LOCAL
+    if not root:
+        root = WORK
+        os.makedirs(WORK, exist_ok=True)
+        if not glob.glob(f"{WORK}/**/*.mp4", recursive=True):
+            print("downloading and unpacking MELD.Raw (about 10 GB) ...", flush=True)
+            subprocess.run(f"wget -q -O - {MELD_URL} | tar -xz -C {WORK}", shell=True, check=True)
+            for inner in glob.glob(f"{WORK}/**/*.tar.gz", recursive=True):
+                subprocess.run(['tar', '-xzf', inner, '-C', os.path.dirname(inner)], check=True)
+                os.remove(inner)
+    vids = {}
+    for p in glob.glob(f"{root}/**/*.mp4", recursive=True):
+        m = re.fullmatch(r'dia(\d+)_utt(\d+)\.mp4', os.path.basename(p))
+        if not m:
+            continue                                   # skips macOS '._' files and other names
+        low = os.path.relpath(p, root).lower()
+        s = 'te' if 'test' in low else 'dv' if 'dev' in low else 'tr' if 'train' in low else None
+        if s:
+            vids[(s, int(m[1]), int(m[2]))] = p
+    csvs = {}
+    for s, name, _ in SPLITS:
+        found = glob.glob(f"{root}/**/{name}_sent_emo.csv", recursive=True)
+        if found:
+            csvs[s] = found[0]
+        else:
+            csvs[s] = f"{WORK}/{name}_sent_emo.csv"
+            os.makedirs(WORK, exist_ok=True)
+            subprocess.run(['wget', '-q', '-O', csvs[s], CSV_URL.format(name)], check=True)
+    print("videos found per split:", {s: sum(k[0] == s for k in vids) for s, _, _ in SPLITS})
+    return vids, csvs
+
+
+def clip_id(s, d, u):
+    return f"{s}{int(d):05d}/{int(u):03d}"
+
+
+def extract_wavs(clips, vids, sr):
+    # mono wav per clip at <WORK>/audio/<ep>/<num>.wav (ffmpeg), skipped when present
+    def one(c):
+        s, d, u = c[:2], int(c[2:7]), int(c[8:])
+        out = f"{WORK}/audio/{c}.wav"
+        if os.path.exists(out) or (s, d, u) not in vids:
+            return
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-i', vids[(s, d, u)], '-vn', '-ac', '1', '-ar', str(sr),
+                        out], check=False)
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(one, clips))
+    print("wav files:", len(glob.glob(f"{WORK}/audio/**/*.wav", recursive=True)), flush=True)
+'''
+
+M1 = [
+    ("markdown", r"""
+# M1 — MELD in the Hi-EF format: MCIS windows, annotation file and Hi-EF-style clip features
+
+* **MCIS**: three consecutive utterances I, II, III of one MELD dialogue, then utterance IV spoken by a **different**
+  speaker than III (Hi-EF's interaction rule). Label = MELD emotion of IV, mapped to the Hi-EF names
+  (anger→angry, joy→happy, sadness→sad). Splits: MELD train → `train`, dev → `val` (early stopping), test → `test`.
+  `source_folder` = dialogue. Speaker names are **not** written anywhere the models read.
+* **Annotation file** in the Hi-EF layout (`MELD/Hi-EF/annotation.csv`, no header: 0 clip id, 1 text, 5 polarity =
+  MELD sentiment, 7 emotion, 8 uncertainty = 1). Clip id = `<tr|dv|te><dialogue:05d>/<utterance:03d>`.
+* **Features per clip I–III** in the `hi-ef-features-v2` format (re-implemented; the original Hi-EF extraction script
+  is not available): 16 evenly spaced frames; CLIP ViT-B/32 image features of the largest detected face per frame
+  (`face_features`, `face_valid_mask`) and of the whole frame (`ori_features`); CLIP text features of the transcript;
+  AudioCLIP ESResNeXt-FBSP AudioSet outputs (527) on 3 s of de-silenced audio at 22.05 kHz, as in the Hi-EF code.
+* Clip IV is never processed. Output: `meld_split.csv`, `meld_hief/`, `meld_features/` → make it a dataset for M2/M3.
+
+Needs Internet (MELD.Raw ≈ 10 GB, unpacked in `/tmp`) or an attached copy of MELD.Raw (`MELD_LOCAL`).
+"""),
+    ("code", "!pip install -q insightface onnx termcolor\n!pip uninstall -y -q onnxruntime onnxruntime-gpu\n!pip install -q \"onnxruntime-gpu==1.22.0\""),
+    ("code", r"""
+# ======== CONFIG ========
+OUT_DIR = "/kaggle/working"
+WORK = "/tmp/meld"                  # large scratch space for the raw videos
+MELD_LOCAL = None                   # or the path of an attached dataset holding the MELD.Raw videos and CSVs
+ESR_URL = "https://github.com/AndreyGuzhov/AudioCLIP/releases/download/v0.1/ESRNXFBSP.pt"
+N_FRAMES, DET_SIZE, MIN_DET_SCORE, MIN_FACE_PX, FACE_MARGIN = 16, (640, 640), 0.5, 24, 0.2
+AUDIO_SR = 22050                    # AudioCLIP sample rate (the Hi-EF preprocessing)
+DEBUG_N = None                      # e.g. 40 windows for a smoke test
+"""),
+    ("code", MELD_FETCH + r"""
+import numpy as np, pandas as pd
+vids, csvs = fetch_meld()
+"""),
+    ("markdown", "## MCIS windows, split file and annotation file"),
+    ("code", r"""
+U = []
+for s, name, hname in SPLITS:
+    d = pd.read_csv(csvs[s])
+    d['s'], d['hsplit'] = s, hname
+    U.append(d)
+U = pd.concat(U, ignore_index=True)
+U['cid'] = [clip_id(s, d, u) for s, d, u in zip(U.s, U.Dialogue_ID, U.Utterance_ID)]
+U['emo'] = U.Emotion.map(EMO_MAP)
+assert U.emo.notna().all()
+U['text'] = U.Utterance.astype(str).str.replace('\x92', "'").str.replace('\x91', "'").str.replace('\x93', '"').str.replace('\x94', '"')
+rows = []
+for (s, d), g in U.sort_values(['s', 'Dialogue_ID', 'Utterance_ID']).groupby(['s', 'Dialogue_ID'], sort=False):
+    c, sp_, em = g.cid.tolist(), g.Speaker.tolist(), g.emo.tolist()
+    for i in range(3, len(g)):
+        if sp_[i] == sp_[i - 1]:
+            continue                                   # Hi-EF: the last two clips feature different people
+        rows.append({'split': g.hsplit.iloc[0], 'source_folder': f"{s}{int(d):05d}", 'clip1': c[i - 3],
+                     'clip2': c[i - 2], 'clip3': c[i - 1], 'clip4': c[i], 'clip3_emotion': em[i - 1],
+                     'clip4_emotion': em[i]})
+SP = pd.DataFrame(rows)
+if DEBUG_N:
+    SP = SP.groupby('split', group_keys=False).head(DEBUG_N)
+SP.insert(0, 'sample_id', [f"meld{n:05d}" for n in range(len(SP))])
+SP.to_csv(f"{OUT_DIR}/meld_split.csv", index=False)
+ann_dir = f"{OUT_DIR}/meld_hief/MELD/Hi-EF"
+os.makedirs(ann_dir, exist_ok=True)
+A = pd.DataFrame({0: U.cid, 1: U.text, 2: '', 3: '', 4: '', 5: U.Sentiment.str.lower(), 6: '', 7: U.emo, 8: '1'})
+A.to_csv(f"{ann_dir}/annotation.csv", header=False, index=False)
+print("MCIS per split:", SP.split.value_counts().to_dict())
+print("label share:", SP.clip4_emotion.value_counts(normalize=True).round(3).to_dict())
+print(f"P(clip IV emotion == clip III emotion) = {(SP.clip4_emotion == SP.clip3_emotion).mean():.3f}")
+CLIPS = sorted(set(SP[['clip1', 'clip2', 'clip3']].values.ravel()))
+miss = [c for c in CLIPS if (c[:2], int(c[2:7]), int(c[8:])) not in vids]
+print(f"clips I-III {len(CLIPS)} | without video {len(miss)} (features stay empty for those)")
+"""),
+    ("markdown", "## Audio, models and per-clip features"),
+    ("code", r"""
+import torch, cv2, sys, urllib.request
+from PIL import Image
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+extract_wavs(CLIPS, vids, AUDIO_SR)
+
+# AudioCLIP's ESResNeXt-FBSP (code as in this repository's esresnet/, with minimal stubs for its imports)
+PKG = f"{WORK}/esr_pkg"
+for rel, src in """ + repr(_ESR_FILES) + r""".items():
+    os.makedirs(os.path.dirname(f"{PKG}/{rel}"), exist_ok=True)
+    open(f"{PKG}/{rel}", 'w').write(src)
+sys.path.insert(0, PKG)
+from esresnet import ESResNeXtFBSP
+esr_path = f"{WORK}/ESRNXFBSP.pt"
+if not os.path.exists(esr_path):
+    urllib.request.urlretrieve(ESR_URL, esr_path)
+esr = ESResNeXtFBSP(n_fft=2048, hop_length=561, win_length=1654, window='blackmanharris', normalized=True,
+                    onesided=True, spec_height=-1, spec_width=-1, num_classes=527, apply_attention=True, pretrained=False)
+r = esr.load_state_dict(torch.load(esr_path, map_location='cpu'), strict=False)
+assert not r.missing_keys, r.missing_keys[:5]
+esr = esr.to(DEVICE).eval()
+
+from transformers import CLIPModel, CLIPProcessor
+clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(DEVICE).eval()
+proc = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+feat = lambda o: (o if torch.is_tensor(o) else o.pooler_output).float().cpu()
+
+from insightface.app import FaceAnalysis
+det = FaceAnalysis(name='buffalo_l', allowed_modules=['detection'],
+                   providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+det.prepare(ctx_id=0, det_size=DET_SIZE)
+import librosa
+"""),
+    ("code", r"""
+FEAT_DIR = f"{OUT_DIR}/meld_features"
+os.makedirs(FEAT_DIR, exist_ok=True)
+TEXT = dict(zip(U.cid, U.text))
+
+
+def frames_of(path):
+    cap = cv2.VideoCapture(path)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+    keep = set(np.linspace(0, max(n - 1, 0), N_FRAMES).astype(int).tolist()) if n else set()
+    out, i = [], 0
+    while len(out) < len(keep):
+        ok, fr = cap.read()
+        if not ok:
+            break
+        if i in keep:
+            out.append(fr)
+        i += 1
+    cap.release()
+    return out
+
+
+def largest_face(fr):
+    faces = [f for f in det.get(fr) if f.det_score >= MIN_DET_SCORE]
+    if not faces:
+        return None
+    x1, y1, x2, y2 = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])).bbox
+    w, h = x2 - x1, y2 - y1
+    if min(w, h) < MIN_FACE_PX:
+        return None
+    H, W = fr.shape[:2]
+    x1, y1 = int(max(0, x1 - FACE_MARGIN * w)), int(max(0, y1 - FACE_MARGIN * h))
+    x2, y2 = int(min(W, x2 + FACE_MARGIN * w)), int(min(H, y2 + FACE_MARGIN * h))
+    return fr[y1:y2, x1:x2]
+
+
+def audio_527(c):
+    p = f"{WORK}/audio/{c}.wav"
+    if not os.path.exists(p):
+        return torch.zeros(527), False
+    try:
+        wav, _ = librosa.load(p, sr=AUDIO_SR, mono=True)
+    except Exception:
+        return torch.zeros(527), False
+    if len(wav) < AUDIO_SR // 10 or np.abs(wav).max() < 1e-4:
+        return torch.zeros(527), False
+    L = 3 * AUDIO_SR                                   # the Hi-EF preprocessing: trim silence, centre 3 s
+    wav, idx = librosa.effects.trim(wav, top_db=20)
+    if len(wav) < L:
+        wav = np.pad(wav, (0, L - len(wav)))
+    elif len(wav) > L:
+        mid = len(wav) // 2
+        wav = wav[mid - L // 2: mid - L // 2 + L]
+    x = torch.tensor(wav[None, None] * 32768.0, dtype=torch.float32, device=DEVICE)
+    with torch.no_grad():
+        return esr(x)[0].float().cpu(), True
+
+
+todo = [c for c in CLIPS if not os.path.exists(f"{FEAT_DIR}/{c.replace('/', '_')}.pt")]
+print(f"features to extract: {len(todo)} / {len(CLIPS)}", flush=True)
+stats = {'no_video': 0, 'face_frames': 0, 'frames': 0, 'audio': 0}
+t0 = time.time() if 'time' in dir() else None
+import time
+t0 = time.time()
+for n, c in enumerate(todo):
+    key = (c[:2], int(c[2:7]), int(c[8:]))
+    frs = frames_of(vids[key]) if key in vids else []
+    stats['no_video'] += not frs
+    face = torch.zeros(N_FRAMES, 512); ori = torch.zeros(N_FRAMES, 512); fmask = torch.zeros(N_FRAMES, dtype=torch.bool)
+    if frs:
+        crops = [largest_face(f) for f in frs]
+        imgs = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frs]
+        cimg = [Image.fromarray(cv2.cvtColor(cr, cv2.COLOR_BGR2RGB)) for cr in crops if cr is not None]
+        with torch.no_grad():
+            o = feat(clip.get_image_features(pixel_values=proc(images=imgs + cimg, return_tensors='pt').pixel_values.to(DEVICE)))
+        ori[:len(frs)] = o[:len(frs)]
+        j = len(frs)
+        for k, cr in enumerate(crops):
+            if cr is not None:
+                face[k], fmask[k] = o[j], True
+                j += 1
+        stats['frames'] += len(frs); stats['face_frames'] += int(fmask.sum())
+    with torch.no_grad():
+        tok = proc.tokenizer([TEXT.get(c, '') or ' '], truncation=True, max_length=77, padding=True, return_tensors='pt')
+        txt = feat(clip.get_text_features(**{k: v.to(DEVICE) for k, v in tok.items()}))[0]
+    aud, found = audio_527(c)
+    stats['audio'] += found
+    torch.save({'face_features': face.half(), 'ori_features': ori.half(), 'face_valid_mask': fmask,
+                'text_feature': txt.half(), 'audio_feature': aud, 'audio_found': found},
+               f"{FEAT_DIR}/{c.replace('/', '_')}.pt")
+    if (n + 1) % 500 == 0:
+        el = (time.time() - t0) / 60
+        print(f"{n + 1}/{len(todo)} | {el:.1f} min | ETA {el / (n + 1) * (len(todo) - n - 1):.0f} min | {stats}", flush=True)
+print("done", stats)
+"""),
+    ("markdown", "## Sanity checks"),
+    ("code", r"""
+have = {f[:-3].replace('_', '/', 1) for f in os.listdir(FEAT_DIR) if f.endswith('.pt')}
+assert set(CLIPS) <= have, f"{len(set(CLIPS) - have)} clips without features"
+sample = [torch.load(f"{FEAT_DIR}/{c.replace('/', '_')}.pt") for c in CLIPS[:: max(1, len(CLIPS) // 300)]]
+print(f"face-valid frame share {np.mean([s['face_valid_mask'].float().mean().item() for s in sample]):.2f} | "
+      f"audio found {np.mean([s['audio_found'] for s in sample]):.2f} | "
+      f"text norm {np.mean([s['text_feature'].float().norm().item() for s in sample]):.2f}")
+print("outputs:", os.listdir(OUT_DIR))
+"""),
+]
+
+_G8A_CFG_OLD = G8A[2][1]
+M2 = [
+    ("markdown", r"""
+# M2 — G8a face / voice features for MELD (clips I–III), in chunks
+
+Runs the unchanged G8a extraction on the MELD clips laid out like Hi-EF (`<root>/MELD/Hi-EF/video|audio/<ep>/<num>`).
+Attach the M1 output (for `meld_split.csv`). The work is split into `N_CHUNKS` parts so that each Kaggle session
+stays within its time limit: run this notebook once per `CHUNK` (0 … N_CHUNKS−1) and attach every output to M3.
+"""),
+    G8A[1],
+    ("code", r"""
+# ======== CONFIG ========
+import glob
+WORK = "/tmp/meld"
+MELD_LOCAL = None                    # or the path of an attached MELD.Raw copy
+N_CHUNKS, CHUNK = 3, 0               # run once per CHUNK
+SPLIT_CSV = sorted(glob.glob("/kaggle/input/**/meld_split.csv", recursive=True))[0]
+DATASET_DIR = "/tmp/meldhief"
+OUT_DIR = "/kaggle/working"
+SHARD_DIR = f"{OUT_DIR}/g8a"
+SHARD_SIZE = 250
+""" + _G8A_CFG_OLD[_G8A_CFG_OLD.index("SAMPLE_FPS"):]),
+    ("code", MELD_FETCH + r"""
+import pandas as pd
+vids, csvs = fetch_meld()
+_sp = pd.read_csv(SPLIT_CSV, dtype=str)
+_clips = sorted(set(_sp[['clip1', 'clip2', 'clip3']].values.ravel()))[CHUNK::N_CHUNKS]
+vroot = f"{DATASET_DIR}/MELD/Hi-EF/video"
+for c in _clips:
+    key = (c[:2], int(c[2:7]), int(c[8:]))
+    if key in vids:
+        os.makedirs(f"{vroot}/{c.split('/')[0]}", exist_ok=True)
+        if not os.path.exists(f"{vroot}/{c}.mp4"):
+            os.symlink(vids[key], f"{vroot}/{c}.mp4")
+extract_wavs(_clips, vids, 16000)
+aroot = f"{DATASET_DIR}/MELD/Hi-EF/audio"
+if not os.path.exists(aroot):
+    os.symlink(f"{WORK}/audio", aroot)
+"""),
+    ("code", G8A[3][1].replace(
+        "clips = sorted(set(sp[['clip1', 'clip2', 'clip3']].values.ravel()))",
+        "clips = sorted(set(sp[['clip1', 'clip2', 'clip3']].values.ravel()))[CHUNK::N_CHUNKS]   # this chunk only")),
+    G8A[4], G8A[5],
+    ("code", G8A[6][1].replace('f"{SHARD_DIR}/shard_{n_shard:03d}.pkl"', 'f"{SHARD_DIR}/shard_c{CHUNK}_{n_shard:03d}.pkl"')),
+    G8A[7],
+    ("code", G8A[8][1].replace("c3 = sorted(set(sp.clip3))", "c3 = sorted(set(sp.clip3) & set(clips))")),
+]
+assert "shard_c{CHUNK}" in M2[7][1] and "[CHUNK::N_CHUNKS]" in M2[4][1] and "set(clips))" in M2[9][1]
+
+_M3_CFG = G10[2][1]
+_M3_CFG = _M3_CFG[:_M3_CFG.index('DATASET_DIR = ')] + r'''import glob
+
+
+def find_one(pattern):
+    hits = sorted(glob.glob(f"/kaggle/input/**/{pattern}", recursive=True))
+    if not hits:
+        raise FileNotFoundError(f"attach the dataset holding {pattern}")
+    return hits[0]
+
+
+DATASET_DIR = find_one("meld_hief")
+FEATURES_DIR = find_one("meld_features")
+SPLIT_CSV = find_one("meld_split.csv")
+G8A_DIR = "/kaggle/input"            # every attached M2 output (shard_c*_*.pkl) is read
+OUT_DIR = "/kaggle/working"
+UNLOCK_TEST = True                   # MELD test is read once, by this notebook
+''' + _M3_CFG[_M3_CFG.index('\nN_INNER_DEV'):]
+_M3_CFG = _M3_CFG.replace("SEEDS = [42, 123, 456, 789, 1024]", "SEEDS = [42, 123, 456]")
+assert "SEEDS = [42, 123, 456]\n" in _M3_CFG
+
+_M3_RES = (G10[15][1]
+    .replace("('CONFIRMED' if ok else 'NOT CONFIRMED')", "('CI > 0' if ok else 'CI includes 0')")
+    .replace("'descriptive only (sequence stopped)'", "('CI > 0' if ok else 'CI includes 0') + ' (descriptive)'")
+    .replace("PREREGISTERED fixed-sequence contrasts", "Hi-EF G10 contrasts, descriptive on MELD"))
+assert 'print("\\n== per-episode' in _M3_RES
+
+M3 = [
+    ("markdown", r"""
+# M3 — RoleNet and the Hi-EF baselines on MELD in the Hi-EF setting
+
+Same code as G10 (RoleNet, RoleNet-noRole, B1, LateFusion, PaperBest), with MELD data from M1 (windows, annotation,
+CLIP/AudioCLIP features) and M2 (G8a faces and voices). Differences from G10, all fixed before running:
+* training rows = MELD train MCIS, early stopping / selection rows = MELD dev MCIS, evaluation = MELD test MCIS (read
+  once, by this notebook); 3 seeds per neural arm;
+* speaker names are never an input: roles come from face clustering exactly as in Hi-EF; clip IV is never read;
+* the Hi-EF fixed-sequence contrasts are reported as descriptive (CI > 0 / CI includes 0); the per-episode table is
+  dropped (MELD test has ~280 dialogues);
+* extra analysis: plain-scored accuracy on MCIS where B's label equals A's (mirroring) vs not (shift), as Hi-EF F14,
+  and the gold-label references (copy-A, P(B | A)).
+"""),
+    G10[1],
+    ("code", _M3_CFG),
+    ("code", G10[3][1].replace(
+        "if not DEBUG_PER_EPISODE:\n    assert len(EPS) == 45 and len(TEST_EPS) == 8 and IS_TEST.sum() == 409\n", "")),
+    G10[4], G10[5], G10[6],
+    ("code", G10[7][1].replace("os.path.join(G8A_DIR, '**', 'shard_*.pkl')", "os.path.join(G8A_DIR, '**', 'shard_c*_*.pkl')")),
+    G10[8], G10[9], G10[10], G10[11],
+    ("markdown", "## Train on MELD train (early stopping on MELD dev), evaluate once on MELD test"),
+    ("code", G10[13][1].replace(
+        """sel_eps = sorted(random.Random(SELECT_SEED).sample(list(EPS), N_INNER_DEV))
+trr = np.where(~IS_TEST)[0]
+fit_rows = np.where(~IS_TEST & ~np.isin(src, sel_eps))[0]
+dev_rows = np.where(np.isin(src, sel_eps))[0]""",
+        """sel_eps = 'MELD dev'
+trr = np.where(~IS_TEST)[0]
+fit_rows = np.where((DEV.split == 'train').values)[0]
+dev_rows = np.where((DEV.split == 'val').values)[0]""").replace("g10_", "m3_")),
+    G10[14],
+    ("code", _M3_RES[:_M3_RES.index('print("\\n== per-episode')]),
+    ("markdown", "## Mirroring vs shift (as Hi-EF F14) and gold-label references"),
+    ("code", r"""
+yA_t = DEV.yA.values[te_rows]
+same = yt == yA_t
+print(f"P(yB == yA) on MELD test MCIS: {same.mean():.3f} (Hi-EF train+val 0.355)")
+for k in PRED['plain']:
+    p = PRED['plain'][k]
+    print(f"  {k:<15} plain acc mirror {100 * np.mean(p[same] == yt[same]):5.1f} | shift {100 * np.mean(p[~same] == yt[~same]):5.1f} "
+          f"| UAR all {uar7(p, yt):5.2f} | predicts A's label on shifts {100 * np.mean(p[~same] == yA_t[~same]):4.1f}%")
+Ttr = np.ones((7, 7))
+for a, b in zip(DEV.yA.values[trr], y_all[trr]):
+    Ttr[a, b] += 1
+Ttr /= Ttr.sum(1, keepdims=True)
+print(f"[gold reference] copy A's label: UAR {uar7(yA_t, yt):.2f} | P(B | A_gold) plain UAR {uar7(Ttr[yA_t].argmax(1), yt):.2f}, "
+      f"LA UAR {uar7((np.log(Ttr[yA_t]) - LA_TAU * LOGPI_TR).argmax(1), yt):.2f}")
+"""),
+]
+assert "fit_rows = np.where((DEV.split == 'train').values)[0]" in M3[13][1]
+assert "per-episode" not in M3[15][1] and "CI includes 0" in M3[15][1]
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -7343,6 +7756,9 @@ if __name__ == "__main__":
                         ("g19_forecastable_distinctions_cv.ipynb", G19),
                         ("g20_interaction_gate_cv.ipynb", G20),
                         ("g23_negative_separability_cv.ipynb", G23),
-                        ("g24_appraisal_reaction_cv.ipynb", G24)]:
+                        ("g24_appraisal_reaction_cv.ipynb", G24),
+                        ("m1_meld_prepare_features.ipynb", M1),
+                        ("m2_meld_g8a_features.ipynb", M2),
+                        ("m3_meld_rolenet.ipynb", M3)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

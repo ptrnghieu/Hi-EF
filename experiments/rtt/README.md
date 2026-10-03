@@ -656,8 +656,29 @@ Local checks: M1 ran end to end on synthetic MELD videos with the real CLIP and 
 with no missing keys) and a mocked face detector; M2's MELD-specific cells and its G8a clip listing ran (the G8a model
 cells are unchanged); M3 ran end to end on mock M1/M2 outputs built from the real MELD transcripts.
 
-## G25: listener state vs reaction (prepared; not yet run)
+## G25 results: listener state vs reaction (train+val, analysis only; test untouched)
 
-Pre-registered in the header of `g25_listener_state_vs_reaction.ipynb`. Attach the same datasets as G23 and, optionally,
-the G14 output (`g14_oof_probs.npz`). Dry run on mock features: all cells run, including the G14 branch (decision
-INVALID on random features, as expected).
+S = 1,070 MCIS with the listener visible in clip III and in clip I/II (694 shift, 376 mirror).
+
+| Contrast (NLL difference, > 0 = second model better) | Subset | Δ [95%] |
+|---|---|---|
+| validity: prior − NOW | all S | +0.089 [+0.062, +0.116] |
+| **change: AVG − SEP** (pre-registered decision) | **shift** | **+0.0125 [+0.0027, +0.0230]** |
+| change: AVG − SEP | all S / mirror | +0.0088 [+0.0027, +0.0153] / +0.0020 [−0.0085, +0.0127] |
+| recency: HIST − NOW | all S / shift | +0.035 [+0.012, +0.058] / +0.029 [+0.005, +0.052] |
+
+**Decision (fixed rule): REACTION SIGNAL.**
+
+**Caveat found after the run (my design flaw).** The pre-registered control  weights both observations equally, but
+the clip-III observation is more informative (recency row), so  can beat  without any change information.
+Post-hoc check (, own grouped folds, not pre-registered): against a weighted average with the
+weight tuned in inner CV (chosen w = 0.6–0.8 on clip III), SEP − WAVG on shift MCIS = +0.0076 [+0.0003, +0.0149] (all S
++0.0047 [−0.0015, +0.0103]); SEP vs clip III alone () +0.0046 [−0.0045, +0.0133]. SEP coefficients for clips III and
+I/II point in the same direction for angry, fear, happy, neutral and sad (correlation 0.45–0.91), in opposite directions
+for disgust (−0.08) and surprise (−0.28).
+
+Reading: most of the listener information is B's state, weighted towards the most recent observation; a change
+component beyond that is small and borderline on shift MCIS, possibly specific to surprise/disgust. A confirmation needs
+the stricter control (tuned weighted average) pre-registered on new data (e.g. MELD via M1/M2).
+- Descriptive: L's clip-III argmax expression equals B's clip-IV label in 29.5% of mirror and 22.5% of shift MCIS
+  (A's label: 29.5% / 17.6%); expression-change size is similar in shift and mirror (0.574 vs 0.566).

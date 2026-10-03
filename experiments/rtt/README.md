@@ -669,11 +669,11 @@ S = 1,070 MCIS with the listener visible in clip III and in clip I/II (694 shift
 
 **Decision (fixed rule): REACTION SIGNAL.**
 
-**Caveat found after the run (my design flaw).** The pre-registered control  weights both observations equally, but
-the clip-III observation is more informative (recency row), so  can beat  without any change information.
-Post-hoc check (, own grouped folds, not pre-registered): against a weighted average with the
+**Caveat found after the run (my design flaw).** The pre-registered control `AVG` weights both observations equally, but
+the clip-III observation is more informative (recency row), so `SEP` can beat `AVG` without any change information.
+Post-hoc check (`analysis/g25_posthoc.py`, own grouped folds, not pre-registered): against a weighted average with the
 weight tuned in inner CV (chosen w = 0.6–0.8 on clip III), SEP − WAVG on shift MCIS = +0.0076 [+0.0003, +0.0149] (all S
-+0.0047 [−0.0015, +0.0103]); SEP vs clip III alone () +0.0046 [−0.0045, +0.0133]. SEP coefficients for clips III and
++0.0047 [−0.0015, +0.0103]); SEP vs clip III alone (`NOW`) +0.0046 [−0.0045, +0.0133]. SEP coefficients for clips III and
 I/II point in the same direction for angry, fear, happy, neutral and sad (correlation 0.45–0.91), in opposite directions
 for disgust (−0.08) and surprise (−0.28).
 

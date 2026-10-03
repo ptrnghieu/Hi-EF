@@ -597,8 +597,22 @@ Notes:
 - LR: C was chosen at the lower end of the grid (0.003) in every fold and arm, so even stronger regularisation might be
   preferred. The interaction arms are worse at the same C.
 
-## G23: negative-emotion separability, recognition vs forecasting (prepared; not yet run)
+## G23 results: negative-emotion separability, recognition vs forecasting (LR, train+val; test untouched)
 
-Pre-registered in the header of `g23_negative_separability_cv.ipynb`. Dry run on mock features: all cells run. A unit
-check confirms the pair-AUC direction (synthetic angry/sad signal → AUC 0.94); on random features the out-of-fold AUC
-falls below 0.5 (fold prior shift), as noted in the header.
+**Reading (fixed rule): INVALID.** The positive control failed narrowly: VAL(RB) = 0.772 [0.733, 0.808], lower bound
+≤ 0.75. No conclusion of the pre-registered type is drawn. Even setting validity aside, NEG(RB) = 0.692 [0.661, 0.725]
+would fall in INTERMEDIATE (not ≥ 0.70 at the lower bound, not < 0.65 at the upper bound).
+
+| Task | UAR | angry/sad | angry/disgust | disgust/sad | NEG [95%] | VAL [95%] |
+|---|---|---|---|---|---|---|
+| FC (I–III → B at IV) | 22.0 | 0.590 | 0.496 | 0.593 | 0.560 [0.526, 0.592] | 0.645 [0.608, 0.679] |
+| RB (IV → B at IV) | 26.4 | 0.706 | 0.635 | 0.734 | 0.692 [0.661, 0.725] | 0.772 [0.733, 0.808] |
+| RA (III → A at III) | 24.6 | 0.720 | 0.588 | 0.682 | 0.663 [0.631, 0.693] | 0.758 [0.717, 0.794] |
+| FC+expr | 23.2 | 0.602 | 0.507 | 0.605 | 0.571 | 0.721 |
+| RA+expr | 28.8 | 0.755 | 0.610 | 0.696 | 0.687 | 0.850 [0.823, 0.876] |
+| RB-face / text / audio / scene | 23.8 / 17.7 / 16.2 / 21.1 | | | | 0.651 / 0.594 / 0.631 / 0.614 | 0.758 / 0.619 / 0.577 / 0.681 |
+
+Descriptive (not a rule outcome): Δ = NEG(RB) − NEG(FC) = +0.132 [+0.107, +0.160]. With the same features and model,
+the target's own clip-IV moment separates the negative emotions clearly better than the context does. Angry/disgust
+is weak everywhere (≤ 0.64). Face and audio carry most of the clip-IV separation; HSEmotion adds mainly valence
+(RA VAL 0.758 → 0.850). C was selected inside the grid for every task.

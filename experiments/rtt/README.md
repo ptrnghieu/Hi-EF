@@ -32,6 +32,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g16_time_vs_type.ipynb` | G16: separates elapsed time from the type of observation behind G15 gate 1 — listener face in clip II vs clip I when B spoke in neither (primary), clip III vs a non-speaking far clip, and far observations split by whether B spoke; B's speaking from the clip-IV voice (analysis only); decision rules fixed in the header; test untouched |
 | `g17_listening_vs_speaking.ipynb` | G17: paired check of constraint (iii) — the same person's face in a context clip where B is silent vs one where B speaks, same MCIS (B's speaking from the clip-IV voice, analysis only); separate and pooled logistic regressions; decision rule for keeping (iii) in the problem statement fixed in the header; test untouched |
 | `g19_forecastable_distinctions_cv.ipynb` | G19: which pairwise emotion distinctions are forecastable from clips I–II vs I–III — pair AUCs (21 pairs; pairs with a class under 50 MCIS reported only) for RoleNet (10 seeds, token mask per information set) and a pooled-feature logistic regression; two-level bootstrap; decision rules (cross-predictor Spearman ≥ 0.7; non-uniform gain from clip III) fixed in the header; test untouched |
+| `g20_interaction_gate_cv.ipynb` | G20: gate for forecast value of text × audio-visual non-additivity — `Additive` (a(X)+b(Z), jointly trained) vs `Local` (+ same-clip text × audio bilinear term, main test) and `Window` (full RoleNet / LR window products, secondary) in a neural family (10 seeds, temperature-scaled on the early-stopping episodes) and an LR family (C and temperature by inner CV); decision on Δ_NLL in both families; late-fusion control; EMAP on RoleNet logits; test untouched |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -559,3 +560,11 @@ But the gain from clip III does not replicate across families: for happy it appe
 residual direction in neither. → Keep the difficulty-structure conclusion; do **not** confirm the
 information-added-by-direction hypothesis. No objective is designed. If an objective round is ever reached, the
 mandatory control is CE + an auxiliary happy/non-happy target.
+
+## G20: interaction gate (prepared; not yet run)
+
+Pre-registered in the header of `g20_interaction_gate_cv.ipynb`. Main test: Δ_NLL = NLL(Additive) − NLL(Local) with a
+95% CI above 0 in **both** the neural and the LR family → a method pilot is allowed; otherwise stop this direction on
+Hi-EF (read as "no sufficiently strong evidence", not as "no interaction"). Window variant, UAR, late fusion and EMAP
+are secondary. Dry run on mock features: all cells run; the EMAP of the additive model reproduces its logits
+(max |Δ| ≈ 7e-7). Parameters: Additive 1.17M, Local 1.18M, Window (RoleNet) 0.71M.

@@ -6346,6 +6346,460 @@ json.dump({'spearman_I_III': float(rho), 'spearman_I_II': float(rho12), 'pairs_u
 ]
 
 
+G20 = [
+    ("markdown", r"""
+# G20 — Is there forecast value in text × audio-visual non-additivity? (5-fold CV, train+val; test untouched)
+
+**Question.** Does B's clip-IV emotion depend on how what is said (X) combines with how it is expressed (Z), beyond
+what each source gives on its own? This is a gate before any method work. It measures the **forecast value of
+non-additivity in the logits**. It is not a PID synergy estimate, and passing it would not show that a model has
+learned pragmatics.
+
+* X = text features of clips I–III (taken before the sum that forms the speech token).
+* Z = audio, voice (who-speaks cues), faces and scene of clips I–III.
+
+**Models (two families, the same 5 episode folds as G8b–G19).**
+
+| Arm | Logits | Role |
+|---|---|---|
+| `Additive` | a_y(X) + b_y(Z), both branches trained **jointly** by CE on the sum, no exchange of information | main control |
+| `Local` | Additive + Σ_t r_y(x_t, a_t): text × audio of the **same clip**, r shared over clips | **main test** |
+| `Window` | any X–Z interaction in the window | secondary |
+| `LateFusion` | sum of the log-probabilities of two separately trained single-source models | control, reported only |
+
+* Neural family: the X branch is a small Transformer over the 3 text tokens. The Z branch is RoleNet without the text
+  term in its speech tokens (aux heads and modality dropout kept; they see Z only). r is a pure bilinear form
+  (x̃_t ⊙ ã_t → 7 logits, no bias terms, zero at init; set to 0 for clips without audio). `Window` = full RoleNet
+  (G14 `Full`). The same optimiser, early stopping (dev UAR on 5 held-out training episodes) and seeds are used for
+  every arm. Each seed's logits are temperature-scaled on the early-stopping episodes; the ensemble is the mean of the
+  calibrated probabilities of the 10 seeds.
+* Logistic family: multinomial LR on the concatenated features (X: text PCA-32 per clip; Z: audio PCA-32, scene
+  PCA-32, mean HSEmotion + face flag, voice cues, audio-found flag per clip). `Local` adds Σ_t vec(x̃_t ã_tᵀ) with
+  x̃, ã = PCA-8 of text and audio shared over clips. `Window` adds the outer product of PCA-8 of the whole X block and
+  PCA-8 of the whole Z block. C is chosen per arm by inner 5-fold source-grouped CV on NLL; the temperature is fitted
+  on the same inner out-of-fold logits. All PCA, scaling, C choice, early stopping and calibration stay inside the
+  training part of each outer fold.
+
+**Decision (fixed before running).** Δ_NLL = NLL(Additive) − NLL(Local) on the pooled out-of-fold predictions;
+positive means the interaction model is better. 95% CI: neural by a two-level bootstrap over seeds and source folders;
+LR by a bootstrap over source folders; paired draws.
+
+| Main test (Local variant only) | Decision |
+|---|---|
+| CI of Δ_NLL above 0 in **both** families | a method pilot is allowed |
+| only one family | stop developing this direction on Hi-EF |
+| neither family | stop developing this direction on Hi-EF |
+
+A failed test means *no sufficiently strong evidence with these data and model classes*; it does **not** show that
+the true distribution has no interaction. The `Window` variant, UAR and `LateFusion` are reported but cannot replace
+the main criterion; the two families are compared only on the same variant.
+
+**T2 (EMAP, Hessel & Lee 2020) on the logits of full RoleNet.** The projection
+f̂(x_i, z_i) = mean_j f(x_i, z_j) + mean_j f(x_j, z_i) − mean_jk f(x_j, z_k) is computed over the cross-pairs inside
+each evaluation fold (and inside the early-stopping episodes, for its own temperature). The cross-pairs only serve the
+projection of the model; they are not labelled counterfactual conversations. If EMAP barely lowers the score, the
+reading is: *no added forecast value of RoleNet's non-additive part has been seen*. If the main test passes but EMAP
+shows no drop, the pilot is still allowed, but the gains of full RoleNet are not attributed to interaction.
+"""),
+    ("code", G13[1][1]
+        .replace("SEEDS = [42, 123, 456]                       # as G8b / G11 / G12",
+                 "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14 / G19")
+        .split("ARMS = [")[0] + """ARMS = [("Full", 'tok', BASE)]          # only so that the shared cells run; the G20 arms are defined below
+ZCFG = {**BASE, 'speech_parts': ('audio', 'voice')}      # RoleNet without the text term = the Z branch
+N_BOOT, PCA_K, PROD_K, R_DIM = 1000, 32, 8, 32
+LR_CS = [0.003, 0.01, 0.03, 0.1, 0.3, 1.0]
+EXPERIMENTS = [a for a in ARMS if a[1] == 'role']
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8], G13[9], G13[10],
+    ("markdown", r"""
+## G20 models: additive, local interaction, single-source branches; EMAP
+"""),
+    ("code", r"""
+from scipy.optimize import minimize_scalar
+
+
+class XBranch(nn.Module):
+    # text only: query + 3 text tokens (one per clip) -> the RoleNet Transformer -> 7 logits
+    def __init__(self, d=RN['D']):
+        super().__init__()
+        self.text = nn.Sequential(nn.LayerNorm(512), nn.Linear(512, d))
+        self.clip_emb = nn.Parameter(torch.randn(3, d) * 0.02)
+        self.query = nn.Parameter(torch.randn(1, 1, d) * 0.02)
+        layer = nn.TransformerEncoderLayer(d, RN['heads'], 4 * d, RN['dropout'], batch_first=True, norm_first=True)
+        self.enc = nn.TransformerEncoder(layer, RN['layers'], enable_nested_tensor=False)
+        self.head = nn.Sequential(nn.LayerNorm(d), nn.Dropout(0.3), nn.Linear(d, 7))
+
+    def forward(self, ix, train=False):
+        toks = torch.cat([self.query.expand(len(ix), -1, -1), self.text(TXT[ix]) + self.clip_emb], 1)
+        return self.head(self.enc(toks)[:, 0]), {}
+
+
+class LocalR(nn.Module):
+    # r_y(x_t, a_t) = W_y (P x_t ⊙ Q a_t): pure bilinear text x audio term of one clip, shared over clips.
+    # No affine LayerNorm and no biases, so r contains no additive part; zero at init; 0 for clips without audio.
+    def __init__(self, m=R_DIM):
+        super().__init__()
+        self.px = nn.Sequential(nn.LayerNorm(512, elementwise_affine=False), nn.Linear(512, m, bias=False))
+        self.pa = nn.Sequential(nn.LayerNorm(527, elementwise_affine=False), nn.Linear(527, m, bias=False))
+        self.drop, self.out = nn.Dropout(0.3), nn.Linear(m, 7, bias=False)
+        nn.init.zeros_(self.out.weight)
+
+    def forward(self, ix):
+        r = self.out(self.drop(self.px(TXT[ix]) * self.pa(AUD[ix])))              # [B, 3, 7]
+        return (r * AFD[ix].unsqueeze(-1)).sum(1)
+
+
+class AdditiveNet(nn.Module):
+    # a_y(X) + b_y(Z) [+ sum_t r_y(x_t, a_t)]; the branches exchange no information and are trained jointly on the sum
+    def __init__(self, local=False):
+        super().__init__()
+        self.bx, self.bz = XBranch(), RoleNetTok(ZCFG)
+        self.r = LocalR() if local else None
+
+    def forward(self, ix, train=False):
+        lx, _ = self.bx(ix, train)
+        lz, aux = self.bz(ix, train)                                              # aux heads of the Z branch see Z only
+        l = lx + lz
+        if self.r is not None:
+            l = l + self.r(ix)
+        return l, aux
+
+
+MAKE.update({'add': lambda cfg: AdditiveNet(False), 'local': lambda cfg: AdditiveNet(True),
+             'xonly': lambda cfg: XBranch(), 'zonly': lambda cfg: RoleNetTok(ZCFG)})
+for k in ('add', 'local', 'xonly', 'zonly'):
+    HP[k] = HP['role']
+G20_ARMS = [("Additive", 'add', None), ("Local", 'local', None), ("Window", 'tok', BASE),
+            ("X-only", 'xonly', None), ("Z-only", 'zonly', None)]
+print("parameters:", {n: f"{sum(p.numel() for p in MAKE[k](c).parameters() if p.requires_grad) / 1e6:.3f}M"
+                      for n, k, c in G20_ARMS})
+
+
+def fit_model(kind, cfg, tr, dev, seed):
+    # identical to train_eval (optimiser, aux losses, early stopping on dev UAR) but returns the trained model
+    seed_all(seed)
+    hp = HP[kind]
+    model = MAKE[kind](cfg).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    best, best_state, bad = -1, None, 0
+    for ep in range(hp['epochs']):
+        model.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm), hp['batch']):
+            j = perm[i:i + hp['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, w in aux.values():
+                if (t >= 0).any():
+                    loss = loss + w * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(predict(model, dev).argmax(1), y_dev, 7)[1]
+        if u > best:
+            best, bad = u, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    model.eval()
+    return model, best
+
+
+def logits_of(model, ix, bs=512):
+    model.eval()
+    with torch.no_grad():
+        return torch.cat([model(ix[i:i + bs])[0] for i in range(0, len(ix), bs)]).cpu().numpy().astype(np.float64)
+
+
+def emap(model, ix, bs=512):
+    # EMAP on logits: mean_j f(x_i, z_j) + mean_j f(x_j, z_i) - mean_jk f(x_j, z_k) over the cross-pairs of ix.
+    # X (text) is swapped by pointing the global TXT to a copy whose rows ix carry the text of rows ix[(a + s) % n].
+    global TXT
+    n = len(ix)
+    Mx, Mz = torch.zeros(n, 7, device=DEVICE), torch.zeros(n, 7, device=DEVICE)
+    TXT0, TXT2 = TXT, TXT.clone()
+    model.eval()
+    try:
+        TXT = TXT2
+        with torch.no_grad():
+            for s in range(n):
+                sh = (torch.arange(n, device=DEVICE) + s) % n
+                TXT2[ix] = TXT0[ix[sh]]
+                L = torch.cat([model(ix[i:i + bs])[0] for i in range(0, n, bs)])   # row a: f(x_{sh[a]}, z_a)
+                Mz += L
+                Mx.index_add_(0, sh, L)
+    finally:
+        TXT = TXT0
+    tot = Mz.sum(0, keepdim=True) / n ** 2
+    return ((Mx + Mz) / n - tot).cpu().numpy().astype(np.float64)
+
+
+def softmax_np(L):
+    L = L - L.max(1, keepdims=True)
+    E_ = np.exp(L)
+    return E_ / E_.sum(1, keepdims=True)
+
+
+def nll(P, y):
+    return float(-np.log(P[np.arange(len(y)), y] + 1e-12).mean())
+
+
+def fit_T(L, y):
+    return minimize_scalar(lambda t: nll(softmax_np(L / t), y), bounds=(0.05, 20), method='bounded').x
+
+
+def log_softmax_np(L):
+    L = L - L.max(1, keepdims=True)
+    return L - np.log(np.exp(L).sum(1, keepdims=True))
+"""),
+    ("markdown", r"""
+## Neural family: 5-fold episode CV (same folds, early-stopping episodes and seeds as G8b–G19)
+"""),
+    ("code", r"""
+import re
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_)
+
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+NAMES = [a[0] for a in G20_ARMS] + ['LateFusion', 'Window-EMAP']
+OOF = {k: np.full((len(SEEDS), N, 7), np.nan, np.float32) for k in NAMES}     # calibrated probabilities
+log, temps = [], []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    y_dev, y_te = y_all[dev_rows], y_all[te_rows]
+    for si, seed in enumerate(SEEDS):
+        LG = {}
+        for name, kind, cfg in G20_ARMS:
+            model, sel = fit_model(kind, cfg, tr, dev, seed + 1000 * f)
+            LG[name] = (logits_of(model, dev), logits_of(model, te))
+            if name == 'Window':
+                LG['Window-EMAP'] = (emap(model, dev), emap(model, te))
+            if name == 'Additive' and si == 0:
+                err = np.abs(emap(model, te) - LG[name][1]).max()
+                print(f"  EMAP sanity check on the additive model (should be ~0): max |EMAP - f| = {err:.2e}")
+                assert err < 1e-2, "EMAP does not reproduce an additive model"
+            log.append({'fold': f, 'seed': seed, 'arm': name, 'sel_UAR': sel})
+            del model
+            torch.cuda.empty_cache()
+        LG['LateFusion'] = tuple(log_softmax_np(LG['X-only'][i]) + log_softmax_np(LG['Z-only'][i]) for i in (0, 1))
+        msg = []
+        for k in NAMES:
+            Ld, Lt = LG[k]
+            t_ = fit_T(Ld, y_dev)
+            OOF[k][si, te_rows] = softmax_np(Lt / t_)
+            temps.append({'fold': f, 'seed': seed, 'arm': k, 'T': t_})
+            msg.append(f"{k} {nll(OOF[k][si, te_rows], y_te):.3f}")
+        print(f"fold {f} seed {seed}: NLL " + " | ".join(msg) + f" | {(time.time() - t0) / 60:.1f} min", flush=True)
+
+assert all(not np.isnan(v).any() for v in OOF.values())
+safe = lambda s: re.sub(r'[^0-9A-Za-z]+', '_', s).strip('_')
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g20_fold_seed_log.csv", index=False)
+pd.DataFrame(temps).to_csv(f"{OUT_DIR}/g20_temperatures.csv", index=False)
+np.savez(f"{OUT_DIR}/g20_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
+         **{safe(k): v for k, v in OOF.items()})
+print("saved g20_oof_probs.npz, g20_fold_seed_log.csv, g20_temperatures.csv")
+"""),
+    ("markdown", r"""
+## Logistic family (same outer folds; C and temperature chosen inside each training part)
+"""),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA as _PCA
+
+EXPR = np.zeros((N, 3, 11), np.float32)
+for n, row in enumerate(DEV.itertuples()):
+    for k, c in enumerate((row.clip1, row.clip2, row.clip3)):
+        if len(FB[c]):
+            EXPR[n, k, :10] = FB[c][:, :10].mean(0); EXPR[n, k, 10] = 1.0
+TXTn, AUDn, SCNn = TXT.cpu().numpy(), AUD.cpu().numpy(), SCN.cpu().numpy()
+VOIn, AFDn = VOI.cpu().numpy(), AFD.cpu().numpy()
+
+
+def pca_scores(M, tr, te, k, fit_mask=None):
+    rows = tr if fit_mask is None else tr[fit_mask[tr]]
+    p = _PCA(min(k, len(rows) - 1, M.shape[1]), random_state=0).fit(M[rows])
+    return p.transform(M[tr]), p.transform(M[te])
+
+
+def design(tr, te):
+    # all transforms fitted on rows tr only; returns {block: (train matrix, eval matrix)}
+    X_tr, X_te, Z_tr, Z_te = [], [], [], []
+    for k in range(3):
+        a, b = pca_scores(TXTn[:, k], tr, te, PCA_K); X_tr.append(a); X_te.append(b)
+        a, b = pca_scores(AUDn[:, k], tr, te, PCA_K, AFDn[:, k] > 0)
+        Z_tr.append(a * AFDn[tr, k:k + 1]); Z_te.append(b * AFDn[te, k:k + 1])
+        a, b = pca_scores(SCNn[:, k], tr, te, PCA_K); Z_tr.append(a); Z_te.append(b)
+        for M in (EXPR[:, k], VOIn[:, k], AFDn[:, k:k + 1]):
+            Z_tr.append(M[tr]); Z_te.append(M[te])
+    D = {'X': (np.concatenate(X_tr, 1), np.concatenate(X_te, 1)), 'Z': (np.concatenate(Z_tr, 1), np.concatenate(Z_te, 1))}
+    # local: sum_t vec(x~_t a~_t^T), x~ / a~ = PCA of text / audio fitted on the clips of the training rows (shared)
+    tx = _PCA(PROD_K, random_state=0).fit(TXTn[tr].reshape(-1, TXTn.shape[-1]))
+    am = AFDn[tr].reshape(-1) > 0
+    ta = _PCA(PROD_K, random_state=0).fit(AUDn[tr].reshape(-1, AUDn.shape[-1])[am])
+
+    def local(rows):
+        out = np.zeros((len(rows), PROD_K * PROD_K))
+        for k in range(3):
+            xs, as_ = tx.transform(TXTn[rows, k]), ta.transform(AUDn[rows, k]) * AFDn[rows, k:k + 1]
+            out += np.einsum('ni,nj->nij', xs, as_).reshape(len(rows), -1)
+        return out
+    D['local'] = (local(tr), local(te))
+    # window: outer product of PCA-8 of the whole (standardised) X block and of the whole Z block
+    W = []
+    for blk in ('X', 'Z'):
+        s = StandardScaler().fit(D[blk][0])
+        p = _PCA(PROD_K, random_state=0).fit(s.transform(D[blk][0]))
+        W.append((p.transform(s.transform(D[blk][0])), p.transform(s.transform(D[blk][1]))))
+    D['window'] = tuple(np.einsum('ni,nj->nij', W[0][i], W[1][i]).reshape(len(W[0][i]), -1) for i in (0, 1))
+    return D
+
+
+LR_ARMS = {'Additive': ('X', 'Z'), 'Local': ('X', 'Z', 'local'), 'Window': ('X', 'Z', 'window')}
+
+
+def lr_logits(Xtr, ytr, Xte, C):
+    sc = StandardScaler().fit(Xtr)
+    m = LogisticRegression(C=C, max_iter=5000).fit(sc.transform(Xtr), ytr)
+    L = np.full((len(Xte), 7), np.nan)
+    L[:, m.classes_] = m.decision_function(sc.transform(Xte))
+    return np.where(np.isnan(L), np.nanmin(L, 1, keepdims=True) - 10, L)     # a class absent from training: very unlikely
+
+
+LRP = {k: np.full((N, 7), np.nan) for k in LR_ARMS}
+lr_log = []
+for f in range(N_OUTER):
+    tr, te = np.where(fold_of_row != f)[0], np.where(fold_of_row == f)[0]
+    inner = {a: {C: np.zeros((len(tr), 7)) for C in LR_CS} for a in LR_ARMS}
+    for ia, ib in GroupKFold(5).split(tr, groups=src[tr]):
+        D = design(tr[ia], tr[ib])
+        for a, blocks in LR_ARMS.items():
+            Xa, Xb = (np.concatenate([D[b][i] for b in blocks], 1) for i in (0, 1))
+            for C in LR_CS:
+                inner[a][C][ib] = lr_logits(Xa, y_all[tr[ia]], Xb, C)
+    D = design(tr, te)
+    for a, blocks in LR_ARMS.items():
+        scores = {C: nll(softmax_np(inner[a][C]), y_all[tr]) for C in LR_CS}
+        C = min(scores, key=scores.get)
+        t_ = fit_T(inner[a][C], y_all[tr])
+        Xa, Xb = (np.concatenate([D[b][i] for b in blocks], 1) for i in (0, 1))
+        LRP[a][te] = softmax_np(lr_logits(Xa, y_all[tr], Xb, C) / t_)
+        lr_log.append({'fold': f, 'arm': a, 'C': C, 'T': t_, 'n_features': Xa.shape[1], 'inner_nll': scores[C]})
+        print(f"fold {f} LR {a:<8}: C {C} | T {t_:.2f} | {Xa.shape[1]} features | NLL {nll(LRP[a][te], y_all[te]):.3f}",
+              flush=True)
+assert all(not np.isnan(v).any() for v in LRP.values())
+pd.DataFrame(lr_log).to_csv(f"{OUT_DIR}/g20_lr_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g20_lr_oof_probs.npz", **LRP)
+"""),
+    ("markdown", r"""
+## Results and the fixed decision
+"""),
+    ("code", r"""
+groups = [np.where(src == e)[0] for e in np.unique(src)]
+rng = np.random.default_rng(0)
+S_ = len(SEEDS)
+DRAWS = [(np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))]), rng.integers(0, S_, S_))
+         for _ in range(N_BOOT)]
+ALL = np.arange(N)
+
+
+def uar(P, idx):
+    return war_uar(P[idx].argmax(1), y_all[idx], 7)[1]
+
+
+def nn_stat(arm, idx, sd, fn):
+    return fn(OOF[arm][sd].mean(0), idx) if fn is uar else nll(OOF[arm][sd].mean(0)[idx], y_all[idx])
+
+
+def delta(fam, a, b, metric):
+    # metric(a) - metric(b) on the pooled OOF predictions, with a paired bootstrap (two-level for the neural family)
+    if fam == 'neural':
+        f = lambda arm, idx, sd: nn_stat(arm, idx, sd, uar if metric == 'UAR' else None)
+        pt = f(a, ALL, np.arange(S_)) - f(b, ALL, np.arange(S_))
+        bs = [f(a, idx, sd) - f(b, idx, sd) for idx, sd in DRAWS]
+    else:
+        f = (lambda arm, idx: uar(LRP[arm], idx)) if metric == 'UAR' else (lambda arm, idx: nll(LRP[arm][idx], y_all[idx]))
+        pt = f(a, ALL) - f(b, ALL)
+        bs = [f(a, idx) - f(b, idx) for idx, _ in DRAWS]
+    lo, hi = np.percentile(bs, [2.5, 97.5])
+    return pt, lo, hi
+
+
+print(f"== pooled out-of-fold scores ({N} MCIS, {len(EPS)} episodes; neural = mean of {S_} calibrated seeds) ==")
+for k in NAMES:
+    P = OOF[k].mean(0)
+    print(f"  neural {k:<12} NLL {nll(P, y_all):.4f} | UAR {uar(P, ALL):5.2f}")
+for k in LR_ARMS:
+    print(f"  LR     {k:<12} NLL {nll(LRP[k], y_all):.4f} | UAR {uar(LRP[k], ALL):5.2f}")
+
+ROWS = []
+def row(test, fam, a, b, note):
+    for metric in ('NLL', 'UAR'):
+        pt, lo, hi = delta(fam, a, b, metric)
+        if metric == 'UAR':                         # report UAR as b - a so that > 0 also means "b is better"
+            pt, lo, hi = -pt, -hi, -lo
+        ROWS.append({'test': test, 'family': fam, 'contrast': f"{a} vs {b}", 'metric': metric,
+                     'delta': pt, 'lo': lo, 'hi': hi, 'note': note})
+        print(f"  [{test}] {fam:<6} {metric}: Δ = {pt:+.4f} [{lo:+.4f}, {hi:+.4f}]  ({note})")
+
+
+print("\n== main test: Δ_NLL = NLL(Additive) − NLL(Local); > 0 means the local interaction model is better ==")
+for fam in ('neural', 'LR'):
+    row('main', fam, 'Additive', 'Local', 'decision metric: NLL; UAR secondary')
+print("\n== secondary: window variant ==")
+for fam in ('neural', 'LR'):
+    row('window', fam, 'Additive', 'Window', 'secondary')
+print("\n== control: late fusion of separately trained single-source models (neural) ==")
+row('control', 'neural', 'LateFusion', 'Additive', 'Δ > 0: joint additive training beats late fusion')
+print("\n== T2: EMAP projection of full RoleNet; Δ = score(EMAP) − score(RoleNet) as NLL(EMAP) − NLL(RoleNet) ==")
+row('EMAP', 'neural', 'Window-EMAP', 'Window', 'Δ > 0: the non-additive part of RoleNet adds forecast value')
+
+R = pd.DataFrame(ROWS)
+R.to_csv(f"{OUT_DIR}/g20_summary.csv", index=False)
+main = R[(R.test == 'main') & (R.metric == 'NLL')].set_index('family')
+passed = {fam: bool(main.loc[fam, 'lo'] > 0) for fam in ('neural', 'LR')}
+n_pass = sum(passed.values())
+dec = 'PILOT ALLOWED' if n_pass == 2 else 'STOP'
+emap_row = R[(R.test == 'EMAP') & (R.metric == 'NLL')].iloc[0]
+emap_drop = bool(emap_row.lo > 0)
+print(f"\nmain test passed: neural {passed['neural']} | LR {passed['LR']}")
+print(f"== G20 decision (fixed rule): {dec} ==")
+if dec == 'STOP':
+    print("   reading: no sufficiently strong evidence with these data and model classes (this does not show r = 0).")
+if not emap_drop:
+    print("   EMAP: no added forecast value of RoleNet's non-additive part has been seen"
+          + (" -> gains of full RoleNet are not attributed to interaction." if dec != 'STOP' else "."))
+json.dump({'decision': dec, 'main_pass': passed,
+           'main': {fam: {k: float(main.loc[fam, k]) for k in ('delta', 'lo', 'hi')} for fam in ('neural', 'LR')},
+           'emap_nll_delta': [float(emap_row.delta), float(emap_row.lo), float(emap_row.hi)], 'emap_drop': emap_drop},
+          open(f"{OUT_DIR}/g20_decision.json", 'w'), indent=1)
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -6362,6 +6816,7 @@ if __name__ == "__main__":
                         ("g15_dynamics_gates.ipynb", G15),
                         ("g16_time_vs_type.ipynb", G16),
                         ("g17_listening_vs_speaking.ipynb", G17),
-                        ("g19_forecastable_distinctions_cv.ipynb", G19)]:
+                        ("g19_forecastable_distinctions_cv.ipynb", G19),
+                        ("g20_interaction_gate_cv.ipynb", G20)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

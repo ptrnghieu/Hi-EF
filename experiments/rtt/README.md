@@ -706,9 +706,26 @@ Reading: giving RoleNet the true responder's face as the listener does not chang
 where the rule picks the wrong person. Together with noRole (G14 +0.44, n.s.), the information RoleNet uses is in the
 faces themselves, not in knowing whose face it is.
 
-## G27: mention-aggregation pilot (prepared; not yet run)
+## G27 results: mention-aggregation pilot (5-fold CV, train+val, 3 seeds; test untouched)
 
-Pre-registered in the header of `g27_mention_aggregation_pilot.ipynb` (scope: aggregation of mention representations,
-not event-role perspectives). Needs Internet (RoBERTa-large, `dslim/bert-base-NER`) and the G23 inputs. Dry run with a
-small encoder on mock audio-visual features but the real transcripts of 180 MCIS: all cells run; 95% of windows have at
-least one mention (mean 3.6 per window).
+**Decision (fixed rule): NO EVIDENCE THAT LATE AGGREGATION HELPS (this design).** Δ = NLL(B) − NLL(C) =
+−0.0066 [−0.0225, +0.0096]. Scope: aggregation of contextualised mention representations, not event-role perspectives.
+
+| Arm | NLL | UAR |
+|---|---|---|
+| A — whole-context candidate only | **1.6655** | **24.50** |
+| B — early aggregation over mentions | 1.6749 | 23.77 |
+| C — late aggregation over mentions | 1.6815 | 23.69 |
+| (class prior, in-sample) | 1.776 | — |
+
+| Contrast (> 0 = second arm better) | all | with mention | no mention |
+|---|---|---|---|
+| NLL(B) − NLL(C) | −0.0066 [−0.0225, +0.0096] | −0.0074 [−0.0241, +0.0094] | +0.024 [−0.043, +0.088] |
+| NLL(A) − NLL(C) | −0.0160 [−0.0323, +0.0006] | −0.0167 [−0.0331, +0.0000] | +0.012 |
+| NLL(A) − NLL(B) | −0.0094 [−0.0196, +0.0001] | −0.0093 [−0.0189, +0.0000] | −0.012 |
+
+- 97.4% of windows have at least one mention (mean 3.8). Gates put 41% (B) / 30% (C) of the weight on the
+  whole-context candidate.
+- Adding mention candidates does not help either way; both mention arms are slightly worse than the whole-context arm
+  (CIs touch 0). With frozen RoBERTa-large, the whole-context arm reaches NLL 1.666 / UAR 24.5, close to RoleNet's CV
+  level (G20 full RoleNet NLL 1.661 / UAR 26.0) with a far simpler audio-visual vector.

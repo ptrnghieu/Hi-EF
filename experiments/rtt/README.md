@@ -561,10 +561,36 @@ residual direction in neither. → Keep the difficulty-structure conclusion; do 
 information-added-by-direction hypothesis. No objective is designed. If an objective round is ever reached, the
 mandatory control is CE + an auxiliary happy/non-happy target.
 
-## G20: interaction gate (prepared; not yet run)
+## G20 results: interaction gate (5-fold CV, train+val; neural 10 seeds + LR; test untouched)
 
-Pre-registered in the header of `g20_interaction_gate_cv.ipynb`. Main test: Δ_NLL = NLL(Additive) − NLL(Local) with a
-95% CI above 0 in **both** the neural and the LR family → a method pilot is allowed; otherwise stop this direction on
-Hi-EF (read as "no sufficiently strong evidence", not as "no interaction"). Window variant, UAR, late fusion and EMAP
-are secondary. Dry run on mock features: all cells run; the EMAP of the additive model reproduces its logits
-(max |Δ| ≈ 7e-7). Parameters: Additive 1.17M, Local 1.18M, Window (RoleNet) 0.71M.
+**Decision (fixed rule): STOP** this direction on Hi-EF. The main test fails in both families. Reading: no
+sufficiently strong evidence of forecast value from text × audio-visual non-additivity with these data and model
+classes; this does not show that the true distribution has no interaction.
+
+| Contrast | Neural Δ [95%] | LR Δ [95%] |
+|---|---|---|
+| **Main**: NLL(Additive) − NLL(Local) | −0.008 [−0.030, +0.017] | **−0.016 [−0.022, −0.011]** (interaction worse) |
+| UAR(Local) − UAR(Additive) | −0.38 [−1.76, +1.18] | −0.49 [−1.31, +0.31] |
+| Window: NLL(Additive) − NLL(Window) | +0.001 [−0.022, +0.022] | −0.006 [−0.012, −0.001] |
+| Control: NLL(LateFusion) − NLL(Additive) | +0.018 [−0.006, +0.043] | — |
+| EMAP: NLL(EMAP of RoleNet) − NLL(RoleNet) | −0.002 [−0.004, +0.000] | — |
+
+Pooled scores (NLL / UAR; class-prior NLL from the training folds = 1.790):
+
+| Arm | Neural | LR |
+|---|---|---|
+| Additive | 1.662 / 25.49 | 1.699 / 22.78 |
+| Local | 1.670 / 25.11 | 1.715 / 22.28 |
+| Window (neural = full RoleNet) | 1.661 / 25.98 | 1.705 / 22.65 |
+| X-only (text) | 1.814 / 18.48 | — |
+| Z-only (no text) | 1.672 / 27.02 | — |
+| Late fusion | 1.681 / 25.86 | — |
+| EMAP of RoleNet | 1.659 / 26.17 | — |
+
+Notes:
+- EMAP: projecting full RoleNet onto an additive text + rest form does not lower its score (NLL even slightly
+  better), so no added forecast value of RoleNet's non-additive part has been seen.
+- The text branch alone is worse than the class prior in NLL (1.814 vs 1.790) and is only 18.5 UAR. This agrees with
+  G13 (removing text does not hurt). The X side of the test is weak, which limits what this gate can detect.
+- LR: C was chosen at the lower end of the grid (0.003) in every fold and arm, so even stronger regularisation might be
+  preferred. The interaction arms are worse at the same C.

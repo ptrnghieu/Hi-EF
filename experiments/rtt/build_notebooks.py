@@ -6800,6 +6800,245 @@ json.dump({'decision': dec, 'main_pass': passed,
 ]
 
 
+G23 = [
+    ("markdown", r"""
+# G23 — Are the negative emotions separable at all? Recognition vs forecasting (5-fold CV, train+val; test untouched)
+
+**Why.** The only failure that survives every model and check so far: B's clip-IV negative emotions are hardly
+separable by any forecaster (pair AUC angry/sad, angry/disgust, disgust/sad ≈ 0.56–0.62 for RoleNet and LR, with or
+without clip III, also on certain labels only). Before treating this as a forecasting problem, we must know whether
+the same features can separate these emotions when the moment itself is observed. If they cannot, the failure is a
+representation limit (an engineering issue), not a forecasting gap.
+
+**Tasks** (same 2,421 train+val MCIS rows, same 5 episode folds as G8b–G20, same model class and features):
+
+| Task | Input | Label | Role |
+|---|---|---|---|
+| `FC` | clips I–III | B's emotion at IV | forecasting (main) |
+| `RB` | clip IV | B's emotion at IV | recognition of the target at the target moment (diagnostic only: clip IV is an input here and nowhere else) |
+| `RA` | clip III | A's emotion at III | recognition of a speaker in a context clip |
+| `FC+expr`, `RA+expr` | as above + mean HSEmotion per clip (clips I–III only) | | secondary |
+| `RB-face`, `RB-text`, `RB-audio`, `RB-scene` | one stream of clip IV | B at IV | descriptive: which stream separates |
+
+Features per clip (`hi-ef-features-v2`): CLIP face (mean over valid frames), CLIP whole frame, CLIP text, AudioSet audio
+(zero when no audio), each reduced to 32 dims by PCA fitted on the training rows; plus audio-found and face-present
+flags. Model: multinomial logistic regression on standardised features; C chosen per task and fold by inner 5-fold
+source-grouped CV on NLL.
+
+**Measure.** Pair AUC of the logit difference (as G19). `NEG` = mean over angry/sad, angry/disgust, disgust/sad.
+`VAL` (positive control) = mean over angry/happy, happy/sad, disgust/happy. 95% CIs by a bootstrap over source folders
+(1,000 draws, paired across tasks).
+
+**Reading rules (fixed before running).**
+1. *Validity*: the CI lower bound of `VAL(RB)` must be > 0.75; otherwise the recognition set-up is not informative →
+   **INVALID**.
+2. **PERCEPTION LIMIT** if the CI upper bound of `NEG(RB)` < 0.65: even the target's own moment does not separate the
+   negative emotions with these features. The forecasting failure is then a representation limit; no
+   forecasting-specific gap is claimed from it.
+3. **FORECASTING-SPECIFIC** if the CI lower bound of `NEG(RB)` ≥ 0.70 **and** the CI lower bound of
+   Δ = `NEG(RB)` − `NEG(FC)` > 0.05: the moment separates them, the context does not.
+4. Otherwise **INTERMEDIATE**: reported, no gap claimed.
+
+`RA`, the `+expr` arms and the per-stream arms are descriptive. A FORECASTING-SPECIFIC result says that, with these
+features, the distinction appears only at clip IV; it does not by itself show why (e.g. appraisal of the event).
+
+Note: with uninformative features, out-of-fold pair AUCs can fall below 0.5 because each fold's training prior is
+shifted against its evaluation rows (seen in the dry run on random features). `FC` and `RB` share labels, rows and
+folds, so this shift affects both in the same way.
+"""),
+    ("code", G13[1][1].split("ARMS = [")[0] + """ARMS = []                       # no neural arms in G23
+EXPERIMENTS = []
+N_BOOT, PCA_K = 1000, 32
+LR_CS = [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1]
+NEG_PAIRS = [('angry', 'sad'), ('angry', 'disgust'), ('disgust', 'sad')]
+VAL_PAIRS = [('angry', 'happy'), ('happy', 'sad'), ('disgust', 'happy')]
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", r"""
+## Features, folds and the logistic regressions
+"""),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA as _PCA
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_)
+
+has4 = DEV.clip4.isin(CIDX).values
+print(f"clip IV features available for {has4.sum()} / {N} MCIS")
+ROWS = np.where(has4)[0]                       # all tasks use the same rows (paired)
+yB_all, yA_all, src = DEV.yB.values, DEV.yA.values, DEV.source_folder.values
+
+
+def clip_blocks(clips):
+    out = {k: np.zeros((len(clips), d), np.float32) for k, d in (('face', 512), ('scene', 512), ('text', 512),
+                                                                 ('audio', 527), ('flags', 2))}
+    ok = np.array([c in CIDX for c in clips])
+    ix = torch.tensor([CIDX[c] for c in np.asarray(clips)[ok]], device=DEVICE)
+    fm = FEAT['fmask'][ix].unsqueeze(-1).float()
+    af = FEAT['afound'][ix].float().unsqueeze(-1)
+    out['face'][ok] = ((FEAT['face'][ix] * fm).sum(1) / fm.sum(1).clamp(min=1)).cpu().numpy()
+    out['scene'][ok] = FEAT['ori'][ix].mean(1).cpu().numpy()
+    out['text'][ok] = FEAT['text'][ix].cpu().numpy()
+    out['audio'][ok] = (F.normalize(FEAT['audio'][ix], dim=-1) * af).cpu().numpy()
+    out['flags'][ok] = torch.cat([af, (fm.sum(1) > 0).float()], 1).cpu().numpy()
+    return out
+
+
+BLK = {k: clip_blocks(DEV[f'clip{k}'].values) for k in (1, 2, 3, 4)}
+EXPR = np.zeros((N, 3, 11), np.float32)
+for n, row in enumerate(DEV.itertuples()):
+    for k, c in enumerate((row.clip1, row.clip2, row.clip3)):
+        if len(FB[c]):
+            EXPR[n, k, :10] = FB[c][:, :10].mean(0); EXPR[n, k, 10] = 1.0
+
+V2 = ['face', 'scene', 'text', 'audio', 'flags']
+TASKS = {
+    'FC':       ([(k, m) for k in (1, 2, 3) for m in V2], yB_all),
+    'RB':       ([(4, m) for m in V2], yB_all),
+    'RA':       ([(3, m) for m in V2], yA_all),
+    'FC+expr':  ([(k, m) for k in (1, 2, 3) for m in V2 + ['expr']], yB_all),
+    'RA+expr':  ([(3, m) for m in V2 + ['expr']], yA_all),
+    'RB-face':  ([(4, 'face'), (4, 'flags')], yB_all),
+    'RB-text':  ([(4, 'text')], yB_all),
+    'RB-audio': ([(4, 'audio'), (4, 'flags')], yB_all),
+    'RB-scene': ([(4, 'scene')], yB_all),
+}
+
+
+def design(spec, tr, te):
+    # all PCAs are fitted on the training rows tr only
+    A_, B_ = [], []
+    for pos, mod in spec:
+        if mod == 'expr':
+            M = EXPR[:, pos - 1]
+        else:
+            M = BLK[pos][mod]
+        if mod in ('flags', 'expr'):
+            A_.append(M[tr]); B_.append(M[te]); continue
+        fit = tr[BLK[pos]['flags'][tr, 0] > 0] if mod == 'audio' else tr
+        p = _PCA(min(PCA_K, len(fit) - 1, M.shape[1]), random_state=0).fit(M[fit])
+        a, b = p.transform(M[tr]), p.transform(M[te])
+        if mod == 'audio':
+            a, b = a * BLK[pos]['flags'][tr, :1], b * BLK[pos]['flags'][te, :1]
+        A_.append(a); B_.append(b)
+    return np.concatenate(A_, 1), np.concatenate(B_, 1)
+
+
+def softmax_np(L):
+    L = L - L.max(1, keepdims=True); E_ = np.exp(L); return E_ / E_.sum(1, keepdims=True)
+
+
+def nll(L, y):
+    return float(-np.log(softmax_np(L)[np.arange(len(y)), y] + 1e-12).mean())
+
+
+def lr_logits(Xtr, ytr, Xte, C):
+    sc = StandardScaler().fit(Xtr)
+    m = LogisticRegression(C=C, max_iter=3000).fit(sc.transform(Xtr), ytr)
+    L = np.full((len(Xte), 7), np.nan)
+    L[:, m.classes_] = m.decision_function(sc.transform(Xte))
+    return np.where(np.isnan(L), np.nanmin(L, 1, keepdims=True) - 10, L)
+
+
+LOGIT = {t: np.full((N, 7), np.nan) for t in TASKS}
+lr_log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr = ROWS[fold_of_row[ROWS] != f]
+    te = ROWS[fold_of_row[ROWS] == f]
+    for t, (spec, yy) in TASKS.items():
+        inner = {C: np.zeros((len(tr), 7)) for C in LR_CS}
+        for ia, ib in GroupKFold(5).split(tr, groups=src[tr]):
+            Xa, Xb = design(spec, tr[ia], tr[ib])
+            for C in LR_CS:
+                inner[C][ib] = lr_logits(Xa, yy[tr[ia]], Xb, C)
+        scores = {C: nll(inner[C], yy[tr]) for C in LR_CS}
+        C = min(scores, key=scores.get)
+        Xa, Xb = design(spec, tr, te)
+        LOGIT[t][te] = lr_logits(Xa, yy[tr], Xb, C)
+        lr_log.append({'fold': f, 'task': t, 'C': C, 'n_features': Xa.shape[1], 'inner_nll': scores[C]})
+    print(f"fold {f} done | {(time.time() - t0) / 60:.1f} min", flush=True)
+assert all(not np.isnan(LOGIT[t][ROWS]).any() for t in TASKS)
+pd.DataFrame(lr_log).to_csv(f"{OUT_DIR}/g23_lr_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g23_oof_logits.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, yB=yB_all, yA=yA_all,
+         src=src, rows=ROWS, **{t.replace('+', '_').replace('-', '_'): v for t, v in LOGIT.items()})
+print("saved g23_oof_logits.npz and g23_lr_log.csv")
+"""),
+    ("markdown", r"""
+## Pair AUCs and the fixed reading rules
+"""),
+    ("code", r"""
+from sklearn.metrics import roc_auc_score
+
+E2 = {e: i for i, e in enumerate(EMO)}
+
+
+def pair_auc(t, a, b, idx):
+    yy = TASKS[t][1]
+    m = idx[np.isin(yy[idx], [E2[a], E2[b]])]
+    if len(np.unique(yy[m])) < 2:
+        return np.nan
+    return roc_auc_score(yy[m] == E2[a], LOGIT[t][m, E2[a]] - LOGIT[t][m, E2[b]])
+
+
+def score(t, idx):
+    d = {f"{a}/{b}": pair_auc(t, a, b, idx) for a, b in NEG_PAIRS + VAL_PAIRS}
+    d['NEG'] = np.nanmean([d[f"{a}/{b}"] for a, b in NEG_PAIRS])
+    d['VAL'] = np.nanmean([d[f"{a}/{b}"] for a, b in VAL_PAIRS])
+    return d
+
+
+groups = [ROWS[src[ROWS] == e] for e in np.unique(src[ROWS])]
+rng = np.random.default_rng(0)
+DRAWS = [np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))]) for _ in range(N_BOOT)]
+PT = {t: score(t, ROWS) for t in TASKS}
+BS = {t: [score(t, idx) for idx in DRAWS] for t in TASKS}
+
+out = []
+for t in TASKS:
+    r = {'task': t, 'UAR': war_uar(LOGIT[t][ROWS].argmax(1), TASKS[t][1][ROWS], 7)[1]}
+    for k in PT[t]:
+        r[k] = PT[t][k]
+        r[k + '_lo'], r[k + '_hi'] = np.nanpercentile([b[k] for b in BS[t]], [2.5, 97.5])
+    out.append(r)
+R = pd.DataFrame(out)
+R.to_csv(f"{OUT_DIR}/g23_pair_auc.csv", index=False)
+cols = ['task', 'UAR'] + [f"{a}/{b}" for a, b in NEG_PAIRS] + ['NEG', 'NEG_lo', 'NEG_hi'] + \
+       [f"{a}/{b}" for a, b in VAL_PAIRS] + ['VAL', 'VAL_lo', 'VAL_hi']
+with pd.option_context('display.width', 250, 'display.max_columns', 30):
+    print(R[cols].round(3).to_string(index=False))
+
+d_pt = PT['RB']['NEG'] - PT['FC']['NEG']
+d_lo, d_hi = np.nanpercentile([b1['NEG'] - b2['NEG'] for b1, b2 in zip(BS['RB'], BS['FC'])], [2.5, 97.5])
+rb = R.set_index('task').loc['RB']
+print(f"\nΔ = NEG(RB) − NEG(FC) = {d_pt:+.3f} [{d_lo:+.3f}, {d_hi:+.3f}]")
+if rb.VAL_lo <= 0.75:
+    dec = 'INVALID'
+elif rb.NEG_hi < 0.65:
+    dec = 'PERCEPTION LIMIT'
+elif rb.NEG_lo >= 0.70 and d_lo > 0.05:
+    dec = 'FORECASTING-SPECIFIC'
+else:
+    dec = 'INTERMEDIATE'
+print(f"== G23 reading (fixed rule): {dec} ==")
+json.dump({'decision': dec, 'NEG_RB': [float(rb.NEG), float(rb.NEG_lo), float(rb.NEG_hi)],
+           'VAL_RB': [float(rb.VAL), float(rb.VAL_lo), float(rb.VAL_hi)],
+           'NEG_FC': [float(PT['FC']['NEG'])], 'delta': [float(d_pt), float(d_lo), float(d_hi)],
+           'n_rows': int(len(ROWS))}, open(f"{OUT_DIR}/g23_decision.json", 'w'), indent=1)
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -6817,6 +7056,7 @@ if __name__ == "__main__":
                         ("g16_time_vs_type.ipynb", G16),
                         ("g17_listening_vs_speaking.ipynb", G17),
                         ("g19_forecastable_distinctions_cv.ipynb", G19),
-                        ("g20_interaction_gate_cv.ipynb", G20)]:
+                        ("g20_interaction_gate_cv.ipynb", G20),
+                        ("g23_negative_separability_cv.ipynb", G23)]:
         (HERE / name).write_text(json.dumps(nb(cells), indent=1, ensure_ascii=False))
         print("wrote", HERE / name)

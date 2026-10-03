@@ -34,6 +34,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g19_forecastable_distinctions_cv.ipynb` | G19: which pairwise emotion distinctions are forecastable from clips I–II vs I–III — pair AUCs (21 pairs; pairs with a class under 50 MCIS reported only) for RoleNet (10 seeds, token mask per information set) and a pooled-feature logistic regression; two-level bootstrap; decision rules (cross-predictor Spearman ≥ 0.7; non-uniform gain from clip III) fixed in the header; test untouched |
 | `SYNTHESIS.md` | Evidence synthesis after G20: scope decisions, test-access record, feature-pipeline audit, findings, directions by status, screening checklist |
 | `g20_interaction_gate_cv.ipynb` | G20: gate for forecast value of text × audio-visual non-additivity — `Additive` (a(X)+b(Z), jointly trained) vs `Local` (+ same-clip text × audio bilinear term, main test) and `Window` (full RoleNet / LR window products, secondary) in a neural family (10 seeds, temperature-scaled on the early-stopping episodes) and an LR family (C and temperature by inner CV); decision on Δ_NLL in both families; late-fusion control; EMAP on RoleNet logits; test untouched |
+| `g23_negative_separability_cv.ipynb` | G23: are angry/sad/disgust separable at all? Pair AUCs of the same LR on the same features for forecasting (I–III → B at IV) vs recognition of B at clip IV (diagnostic) and of A at clip III; reading rules (INVALID / PERCEPTION LIMIT / FORECASTING-SPECIFIC / INTERMEDIATE) fixed in the header; test untouched |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).
@@ -595,3 +596,9 @@ Notes:
   G13 (removing text does not hurt). The X side of the test is weak, which limits what this gate can detect.
 - LR: C was chosen at the lower end of the grid (0.003) in every fold and arm, so even stronger regularisation might be
   preferred. The interaction arms are worse at the same C.
+
+## G23: negative-emotion separability, recognition vs forecasting (prepared; not yet run)
+
+Pre-registered in the header of `g23_negative_separability_cv.ipynb`. Dry run on mock features: all cells run. A unit
+check confirms the pair-AUC direction (synthetic angry/sad signal → AUC 0.94); on random features the out-of-fold AUC
+falls below 0.5 (fold prior shift), as noted in the header.

@@ -7324,6 +7324,185 @@ json.dump(names, open(f"{OUT_DIR}/g24_contamination_probe.json", 'w'), indent=1)
 ]
 
 
+G25 = [
+    ("markdown", r"""
+# G25 — Does the listener's face show B's ongoing state or B's reaction to A? (train+val, analysis only; test untouched)
+
+**Why.** B's own face (the listener L) is RoleNet's main extra signal (minus-L −2.04 UAR, 10 seeds), concentrated where
+L is visible and on MCIS where B mirrors A (F14). Two readings:
+* **H-state** — the face shows B's ongoing affective state, which persists into clip IV. Predictions: earlier
+  observations of B are about as useful as the clip-III one; *changes* of B's expression add nothing beyond its level.
+* **H-reaction** — the face shows B starting to react to A's turn. Prediction: the *change* of B's expression from
+  clips I/II to clip III carries information about clip IV beyond the average level, above all where B does not mirror
+  A (shift MCIS).
+Earlier results lean to H-state (G16 T1/T2, G17, G15 G1b), but the change prediction was never tested.
+
+**Data.** MCIS where L is visible in clip III **and** in clip I or II (same identity cluster). Per observation: mean
+HSEmotion probabilities (8 classes) + valence/arousal over at most 8 frames of L (`E3` for clip III, `E12` pooled over
+clips I/II). Labels are never inputs; A's clip-III label is used only to define the shift subset (B ≠ A).
+
+**Models** (multinomial LR, standardised, C chosen by inner source-grouped CV on NLL; outer folds = the G8b–G23 folds):
+`NOW` = E3, `HIST` = E12, `AVG` = (E3 + E12)/2 (one pooled reading of a state), `SEP` = [E3, E12] (allows change).
+
+**Rules (fixed before running; 95% CI = bootstrap over source folders, paired).**
+1. *Validity*: NLL(prior) − NLL(`NOW`) on S has CI lower bound > 0, else **INVALID** (the listener features carry no
+   information here).
+2. **REACTION SIGNAL** if Δ = NLL(`AVG`) − NLL(`SEP`) on the **shift** MCIS of S has CI lower bound > 0.
+3. Otherwise **NO REACTION SIGNAL DETECTED** (consistent with H-state; the CI of Δ is reported as the resolution).
+
+Descriptive: Δ on all of S and on mirror MCIS; NLL(`HIST`) − NLL(`NOW`) (recency); agreement of L's argmax expression in
+clip III with B's clip-IV label and with A's clip-III label, by mirror / shift; and, if `g14_oof_probs.npz` is
+attached, the Spearman correlation between RoleNet's per-MCIS listener gain (log p Full − log p minus-L) and the size
+of L's expression change.
+"""),
+    ("code", G13[1][1].split("ARMS = [")[0] + """ARMS = []
+EXPERIMENTS = []
+N_BOOT, MAX_OBS_FRAMES = 1000, 8
+LR_CS = [1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1, 1.0]
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Listener expression per observation and the four models"),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+yB_all, yA_all, src = DEV.yB.values, DEV.yA.values, DEV.source_folder.values
+
+# HSEmotion 8 classes (Anger, Contempt, Disgust, Fear, Happiness, Neutral, Sadness, Surprise) -> the 7 Hi-EF labels
+H2E = np.zeros((8, 7), np.float32)
+for h, e in enumerate([0, 1, 1, 2, 3, 4, 5, 6]):
+    H2E[h, e] = 1
+rs = np.random.default_rng(0)
+
+
+def obs(n, clips):
+    rows = []
+    for k in clips:
+        c, idx = SLOT[(n, 1, k)]
+        rows += [FB[c][j] for j in idx]
+    if not rows:
+        return None
+    rows = np.stack(rows)
+    if len(rows) > MAX_OBS_FRAMES:
+        rows = rows[rs.choice(len(rows), MAX_OBS_FRAMES, replace=False)]
+    return np.concatenate([rows[:, :8].mean(0), rows[:, 8:10].mean(0)])     # 8 probs + valence, arousal
+
+
+E3 = np.full((N, 10), np.nan, np.float32); E12 = np.full((N, 10), np.nan, np.float32)
+for n in range(N):
+    a, b = obs(n, (2,)), obs(n, (0, 1))
+    if a is not None and b is not None:
+        E3[n], E12[n] = a, b
+S = np.where(~np.isnan(E3[:, 0]))[0]
+SHIFT = yB_all != yA_all
+print(f"S (listener in III and in I/II): {len(S)} MCIS | shift {SHIFT[S].sum()} | mirror {(~SHIFT[S]).sum()}")
+X = {'NOW': E3, 'HIST': E12, 'AVG': (E3 + E12) / 2, 'SEP': np.concatenate([E3, E12], 1)}
+
+
+def lr_logp(Xtr, ytr, Xte, C):
+    sc = StandardScaler().fit(Xtr)
+    m = LogisticRegression(C=C, max_iter=3000).fit(sc.transform(Xtr), ytr)
+    L = np.full((len(Xte), 7), np.log(1e-6))
+    L[:, m.classes_] = np.log(np.clip(m.predict_proba(sc.transform(Xte)), 1e-6, 1))
+    return L - np.log(np.exp(L).sum(1, keepdims=True))
+
+
+LOGP = {k: np.full((N, 7), np.nan) for k in list(X) + ['prior']}
+clog = []
+for f in range(N_OUTER):
+    tr, te = S[fold_of_row[S] != f], S[fold_of_row[S] == f]
+    pri = (np.bincount(yB_all[tr], minlength=7) + 1) / (len(tr) + 7)
+    LOGP['prior'][te] = np.log(pri)
+    for k, M in X.items():
+        best = None
+        for C in LR_CS:
+            L = np.zeros((len(tr), 7))
+            for a, b in GroupKFold(5).split(tr, groups=src[tr]):
+                L[b] = lr_logp(M[tr[a]], yB_all[tr[a]], M[tr[b]], C)
+            s = -L[np.arange(len(tr)), yB_all[tr]].mean()
+            if best is None or s < best[0]:
+                best = (s, C)
+        LOGP[k][te] = lr_logp(M[tr], yB_all[tr], M[te], best[1])
+        clog.append({'fold': f, 'model': k, 'C': best[1]})
+pd.DataFrame(clog).to_csv(f"{OUT_DIR}/g25_lr_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g25_listener_obs.npz", sample_id=DEV.sample_id.values, S=S, E3=E3, E12=E12,
+         **{f"logp_{k}": v for k, v in LOGP.items()})
+"""),
+    ("markdown", "## Fixed decision and descriptive analyses"),
+    ("code", r"""
+from scipy.stats import spearmanr
+
+gS = [S[src[S] == e] for e in np.unique(src[S])]
+rng = np.random.default_rng(0)
+DRAWS = [np.concatenate([gS[i] for i in rng.integers(0, len(gS), len(gS))]) for _ in range(N_BOOT)]
+nl = lambda k, idx: -LOGP[k][idx, yB_all[idx]].mean()
+SUB = {'all S': lambda idx: idx, 'shift': lambda idx: idx[SHIFT[idx]], 'mirror': lambda idx: idx[~SHIFT[idx]]}
+
+
+def delta(a, b, sub):
+    f = SUB[sub]
+    pt = nl(a, f(S)) - nl(b, f(S))
+    lo, hi = np.percentile([nl(a, f(i)) - nl(b, f(i)) for i in DRAWS], [2.5, 97.5])
+    return pt, lo, hi
+
+
+print("NLL on S:", {k: round(nl(k, S), 4) for k in LOGP})
+valid = delta('prior', 'NOW', 'all S')
+rows = [('validity: NLL(prior) - NLL(NOW)', 'all S', *valid)]
+for sub in ('shift', 'all S', 'mirror'):
+    rows.append(('change: NLL(AVG) - NLL(SEP)', sub, *delta('AVG', 'SEP', sub)))
+for sub in ('all S', 'shift'):
+    rows.append(('recency: NLL(HIST) - NLL(NOW)', sub, *delta('HIST', 'NOW', sub)))
+R = pd.DataFrame(rows, columns=['contrast', 'subset', 'delta', 'lo', 'hi'])
+R.to_csv(f"{OUT_DIR}/g25_contrasts.csv", index=False)
+print(R.round(4).to_string(index=False))
+
+main = R[(R.contrast.str.startswith('change')) & (R.subset == 'shift')].iloc[0]
+if valid[1] <= 0:
+    dec = 'INVALID'
+elif main.lo > 0:
+    dec = 'REACTION SIGNAL'
+else:
+    dec = 'NO REACTION SIGNAL DETECTED'
+print(f"\n== G25 decision (fixed rule): {dec} ==  (change on shift MCIS: {main.delta:+.4f} [{main.lo:+.4f}, {main.hi:+.4f}])")
+
+# descriptive: does L's clip-III expression already show B's clip-IV label (early recognition) or A's label (mirroring)?
+e3 = (E3[S, :8] @ H2E).argmax(1)
+for name, m in (('mirror', ~SHIFT[S]), ('shift', SHIFT[S])):
+    print(f"  {name}: L's clip-III argmax expression = B's IV label {np.mean(e3[m] == yB_all[S][m]) * 100:.1f}% | "
+          f"= A's III label {np.mean(e3[m] == yA_all[S][m]) * 100:.1f}% (n={m.sum()})")
+chg = np.abs(E3[S, :8] - E12[S, :8]).sum(1)
+print(f"  size of L's expression change (L1 over 8 classes): mean {chg.mean():.3f} | shift {chg[SHIFT[S]].mean():.3f} vs "
+      f"mirror {chg[~SHIFT[S]].mean():.3f}")
+
+hits = sorted(glob.glob("/kaggle/input/**/g14_oof_probs.npz", recursive=True))
+if hits:
+    z = np.load(hits[0], allow_pickle=True)
+    pos = {s: i for i, s in enumerate(z['sample_id'])}
+    ii = np.array([pos.get(s, -1) for s in DEV.sample_id.values[S]])
+    ok = ii >= 0
+    yy = yB_all[S][ok]
+    gain = (np.log(z['Full'].mean(0)[ii[ok], yy] + 1e-9) - np.log(z['minus_L'].mean(0)[ii[ok], yy] + 1e-9))
+    for name, m in (('all S', np.ones(ok.sum(), bool)), ('shift', SHIFT[S][ok]), ('mirror', ~SHIFT[S][ok])):
+        print(f"  RoleNet listener gain vs expression change [{name}]: Spearman {spearmanr(gain[m], chg[ok][m]).correlation:+.3f} "
+              f"(n={m.sum()}) | mean gain {gain[m].mean():+.3f}")
+else:
+    print("  (g14_oof_probs.npz not attached: RoleNet correlation skipped)")
+json.dump({'decision': dec, 'change_shift': [float(main.delta), float(main.lo), float(main.hi)],
+           'validity': list(map(float, valid)), 'n_S': int(len(S))}, open(f"{OUT_DIR}/g25_decision.json", 'w'), indent=1)
+"""),
+]
+
+
 # ======================= MELD in the Hi-EF format (M1 features, M2 G8a, M3 RoleNet) =======================
 _REPO = HERE.parent.parent
 _ESR_FILES = {f"esresnet/{n}": (_REPO / "esresnet" / n).read_text() for n in ("__init__.py", "attention.py", "base.py", "fbsp.py")}
@@ -7757,6 +7936,7 @@ if __name__ == "__main__":
                         ("g20_interaction_gate_cv.ipynb", G20),
                         ("g23_negative_separability_cv.ipynb", G23),
                         ("g24_appraisal_reaction_cv.ipynb", G24),
+                        ("g25_listener_state_vs_reaction.ipynb", G25),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

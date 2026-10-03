@@ -36,6 +36,7 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g20_interaction_gate_cv.ipynb` | G20: gate for forecast value of text × audio-visual non-additivity — `Additive` (a(X)+b(Z), jointly trained) vs `Local` (+ same-clip text × audio bilinear term, main test) and `Window` (full RoleNet / LR window products, secondary) in a neural family (10 seeds, temperature-scaled on the early-stopping episodes) and an LR family (C and temperature by inner CV); decision on Δ_NLL in both families; late-fusion control; EMAP on RoleNet logits; test untouched |
 | `g23_negative_separability_cv.ipynb` | G23: are angry/sad/disgust separable at all? Pair AUCs of the same LR on the same features for forecasting (I–III → B at IV) vs recognition of B at clip IV (diagnostic) and of A at clip III; reading rules (INVALID / PERCEPTION LIMIT / FORECASTING-SPECIFIC / INTERMEDIATE) fixed in the header; test untouched |
 | `g24_appraisal_reaction_cv.ipynb` | G24: does an LLM appraisal reading of subtitles I–III (10 dimensions, zero-shot, no labels, clip IV text never sent) add information on *which* negative emotion B reacts with? LR as G23 `FC` with/without appraisal; NEG pair AUC on the shift subset (B ≠ A); PASS/STOP rule fixed in the header; direct LLM forecast as control; contamination probe; test untouched |
+| `g25_listener_state_vs_reaction.ipynb` | G25: does the listener's face show B's ongoing state or B's reaction to A? LR on the listener's HSEmotion expression in clip III (`NOW`), clips I/II (`HIST`), their average (`AVG`, one state) or both separately (`SEP`, allows change); REACTION SIGNAL if `SEP` beats `AVG` on shift MCIS; validity check vs the class prior; optional correlation with RoleNet's listener gain (attach `g14_oof_probs.npz`); test untouched |
 | `m1_meld_prepare_features.ipynb` | M1: MELD in the Hi-EF format — MCIS windows (I–III → IV by a different speaker), Hi-EF-layout annotation file, `hi-ef-features-v2`-style clip features (CLIP ViT-B/32 face/frame/text, AudioCLIP ESResNeXt-FBSP 527) for clips I–III |
 | `m2_meld_g8a_features.ipynb` | M2: the unchanged G8a face/voice extraction on MELD clips I–III, split into chunks (`N_CHUNKS`, `CHUNK`) |
 | `m3_meld_rolenet.ipynb` | M3: G10's RoleNet / RoleNet-noRole / B1 / LateFusion / PaperBest on MELD (train → fit, dev → early stopping, test once; 3 seeds; no speaker names as input), plus mirroring-vs-shift analysis |
@@ -654,3 +655,9 @@ is never processed; the Hi-EF features are re-implemented because the original e
 Local checks: M1 ran end to end on synthetic MELD videos with the real CLIP and AudioCLIP models (AudioCLIP weights load
 with no missing keys) and a mocked face detector; M2's MELD-specific cells and its G8a clip listing ran (the G8a model
 cells are unchanged); M3 ran end to end on mock M1/M2 outputs built from the real MELD transcripts.
+
+## G25: listener state vs reaction (prepared; not yet run)
+
+Pre-registered in the header of `g25_listener_state_vs_reaction.ipynb`. Attach the same datasets as G23 and, optionally,
+the G14 output (`g14_oof_probs.npz`). Dry run on mock features: all cells run, including the G14 branch (decision
+INVALID on random features, as expected).

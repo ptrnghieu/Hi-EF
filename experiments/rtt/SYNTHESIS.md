@@ -84,6 +84,7 @@ be the same kind of oracle as the gold A label and is outside the protocol.
 | F10 | Clip III adds mainly happy-vs-other separability (RoleNet only) | G19 + PIC: happy minus other gain RN +0.036 [+0.016, +0.059], LR +0.007 [−0.009, +0.024] | not replicated across families |
 | F11 | No forecast value of text × audio-visual non-additivity | G20: Δ_NLL neural −0.008 [−0.030, +0.017], LR −0.016 [−0.022, −0.011]; EMAP of RoleNet −0.002 | weak text representation (§2) |
 | F12 | Seed noise is large | 3-seed ensembles vary by ±0.4–0.56 UAR (SD); G13 Full vs Full-reseed 1.17 | contrasts below ~1.5 UAR need 10 seeds |
+| F13 | Target-label ambiguity does not explain the near-chance negative distinctions | **[chat]** `analysis/target_ambiguity.py` on G19 OOF (RoleNet I–III, 10 seeds): 25.8% of clip-IV labels are borderline/uncertain (sad 41%, disgust 47%, fear 56%, neutral 15%); NLL 1.62 / 1.77 / 2.00 and UAR 26.8 / 26.1 / 20.7 for levels 1 / 2 / 3, but within-class NLL differences are mixed (angry +0.21, happy +0.27, sad +0.15, disgust −0.05, neutral −0.33); pair AUC on certain targets only: angry/sad +0.04 [+0.01, +0.07], angry/disgust and disgust/sad no change; forecast entropy hardly detects an uncertain target (AUC 0.54); an uncertain clip-III label raises the chance of an uncertain clip-IV label (39% vs 22%) | uncertainty levels are defined only as Certain / Borderline / Uncertain ("multi-modal uncertainty", 5 annotators + a reviewing professor; guideline in the paper's appendix, not available); uncertain labels are mostly weak intensity (91% at level 3) with more emotion–polarity inconsistency (22% vs 8.5%); G3 certainty weighting of the clip-IV loss: B1+certw 23.15 ± 1.75 vs B1 21.65 ± 1.48 seed-mean UAR, no gain with trajectories |
 
 ## 4. Directions tried, by status
 
@@ -99,6 +100,7 @@ be the same kind of oracle as the gold A label and is outside the protocol.
 | History-dependent response (hysteresis) | **[chat]** | LR, current features |
 | Text × AV synergy | G20 | current text/audio features, neural + LR |
 | Direction-wise information added by clip III | G19 + PIC | two predictor families disagree |
+| Target-label ambiguity as the reason negative emotions are not forecastable | **[chat]** F13 | descriptive, one model family (RoleNet OOF) |
 
 ### 4b. Set aside because they reduce to a known method
 

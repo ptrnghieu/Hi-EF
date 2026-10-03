@@ -685,8 +685,22 @@ the stricter control (tuned weighted average) pre-registered on new data (e.g. M
 - Descriptive: L's clip-III argmax expression equals B's clip-IV label in 29.5% of mirror and 22.5% of shift MCIS
   (A's label: 29.5% / 17.6%); expression-change size is similar in shift and mirror (0.574 vs 0.566).
 
-## G26: Responder-Pointer RoleNet (prepared; not yet run)
+## G26 results: does knowing the responder help? (5-fold CV, train+val, 10 seeds; test untouched)
 
-Run G26a first (≈ 1 h, GPU, no labels; output `c4shard_*.pkl` → dataset), then G26 with the G23 inputs plus the G26a
-output. Stage 1 (Oracle vs rule) decides whether the pointer is trained at all. Dry run on mock features: all cells run,
-including the pointer branch (forced on for the test) and the held-out pointer-accuracy report.
+**Decision (fixed rule): STOP — knowing the responder does not improve the forecast on Hi-EF.** Stage 1:
+UAR(Oracle) − UAR(Heuristic) = −0.04 [−1.50, +1.85] (two-level bootstrap). The pointer was therefore not trained.
+
+Responder coverage (clip IV, target/oracle only): B found in clip IV for 2,420 / 2,421 MCIS; matched to an identity in
+clips I–III for 2,127 (88%); the rule's L is B in 993 of its 1,451 picks (68%; G6a measured 81% on 600 MCIS with a
+different matching).
+
+| Subset | n | UAR Heuristic / Oracle | NLL Heuristic / Oracle |
+|---|---|---|---|
+| all | 2,421 | 26.24 / 26.20 | 1.691 / 1.682 |
+| B seen in I–III | 2,107 | 26.98 / 26.90 | 1.670 / 1.664 |
+| B seen, rule picked someone else or nobody | 390 | 28.33 / 28.15 | 1.580 / 1.594 |
+| B not seen in I–III | 314 | 21.20 / 21.29 | 1.836 / 1.804 |
+
+Reading: giving RoleNet the true responder's face as the listener does not change the forecast, even on the 390 MCIS
+where the rule picks the wrong person. Together with noRole (G14 +0.44, n.s.), the information RoleNet uses is in the
+faces themselves, not in knowing whose face it is.

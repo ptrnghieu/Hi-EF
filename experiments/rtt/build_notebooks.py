@@ -7193,7 +7193,7 @@ def run_cache(task, path):
     print(f"{os.path.basename(path)}: cached {len(cache)} | to query {len(todo)}", flush=True)
     with ThreadPoolExecutor(MAX_WORKERS) as pool, open(path, 'a') as f:
         futs = {pool.submit(call, task, r): r['sample_id'] for r in todo}
-        for fut in as_completed(futs):
+        for fut in tqdm(as_completed(futs), total=len(futs), desc=os.path.basename(path), mininterval=10):
             sid, resp = futs[fut], fut.result()
             if resp is not None:
                 cache[sid] = resp; f.write(json.dumps({'sample_id': sid, 'response': resp}) + "\n")

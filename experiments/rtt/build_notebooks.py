@@ -7561,13 +7561,16 @@ Reported: NLL differences, responder coverage, rule accuracy vs pointer accuracy
         .split("ARMS = [")[0] + """ARMS = [("Full", 'tok', BASE)]
 EXPERIMENTS = []
 K_CAND, LAMBDA_PTR, N_BOOT = 4, 0.5, 2000
+# G26a output: attach the G26a notebook output directly or a dataset made from it; files are found recursively
+CLIP4_SHARDS = "/kaggle/input/**/c4shard_*.pkl"
 """),
     G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8], G13[9], G13[10],
     ("markdown", "## True responder (clip IV, target/oracle only), oracle roles and candidate identities"),
     ("code", r"""
 G84 = {}
-for f in sorted(glob.glob("/kaggle/input/**/c4shard_*.pkl", recursive=True)):
+for f in sorted(glob.glob(CLIP4_SHARDS, recursive=True)):
     G84.update(pickle.load(open(f, 'rb')))
+assert G84, f"no clip-IV shards found at {CLIP4_SHARDS}: attach the G26a output"
 miss4 = sorted(set(DEV.clip4) - set(G84))
 print(f"clip IV records {len(G84)} | missing for {len(miss4)} MCIS clips")
 

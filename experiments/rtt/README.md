@@ -515,3 +515,47 @@ Post hoc (not part of the rules):
   = 0.25. LR confirms only happy/sad; with clip III added, LR loses AUC on several pairs (e.g. neutral/sad −0.031,
   disgust/neutral −0.035), plausibly because its feature count grows by half.
 - Rule 1 passed narrowly (0.75 vs 0.70).
+
+### G19 follow-up: structure of the forecastable distinctions (PIC analysis; exploratory, train+val OOF only; test untouched)
+
+Scripts: `g19_pic/pic.py` (raw probabilities) and `g19_pic/pic_cal.py` (temperature-calibrated: T fitted on the 4
+discovery folds, applied to the held-out fold). Input: `g19_oof_probs.npz` and `g19_lr_oof_probs.npz` from G19.
+Bootstrap: source folders are resampled, and every pair/statistic is recomputed in each draw (1,000 draws). Seed
+noise is **not** included (RoleNet = mean of 10 seeds).
+
+**(0) Direct test, happy-pair gain minus other-pair gain** (mean Δ over 5 happy pairs − mean over 10 other pairs):
+RoleNet +0.036 [+0.016, +0.059]; LR +0.007 [−0.009, +0.024]. The difference holds for RoleNet only.
+(Note: the 49% "happy stays happy" figure is P(y_IV = happy | y_III = happy), i.e. A's label at III → B's label at
+IV, not the same person.)
+
+**(A) Spectrum** (Cg = λ D_π g, constant removed):
+- RoleNet, raw: λ1 ≈ λ2 (I–II 0.325/0.282; I–III 0.322/0.269). The top-1 direction rotates between I–II and I–III
+  (|cos| 0.43), but the top-2 subspace is stable (principal cosines 1.00, 0.99). It is spanned by
+  happy-vs-rest and negative-vs-neutral. Calibrated: I–II 0.138/0.119, I–III 0.171/0.142.
+- LR, raw probabilities are badly miscalibrated (flat spectrum, fear loading −8.6; T = 3.5–5.2). Even after
+  calibration, the LR top-1 direction is fear-dominated (rare-class artifact).
+- Across families, the top-2 subspaces share only about one dimension (cosines [0.64, 0.05] at I–II, [0.51, 0.15]
+  at I–III).
+
+**(B) Directions orthogonal to the standardized happy axis h:** the RoleNet residual r1 is
+"angry/sad/fear/disgust vs neutral", stable across information sets (cos 0.99). The LR residual is fear-dominated;
+the cross-family |cos| is 0.29–0.34.
+
+**(C) Held-out validation.** Directions are found on 4 folds (I–III probabilities) and evaluated on the 5th fold
+with true labels. R² is relative to a constant baseline; Δ_g = R²(I–III) − R²(I–II), which equals
+(MSE_I–II − MSE_I–III)/Var g.
+
+| Evaluated on | Direction | R² I–II | R² I–III [95%] | Δ_g [95%] |
+|---|---|---|---|---|
+| RoleNet | h (happy vs rest) | 0.118 | 0.178 [0.142, 0.213] | **+0.061 [+0.038, +0.083]** |
+| RoleNet | r1 found on RoleNet | 0.131 | 0.140 [0.082, 0.193] | +0.009 [−0.012, +0.027] |
+| LR | h | 0.035 | 0.035 [0.007, 0.066] | −0.000 [−0.010, +0.011] |
+| LR | r1 found on RoleNet | 0.078 | 0.063 [0.038, 0.097] | −0.016 [−0.029, −0.001] |
+| either | directions found on LR | ≤ 0 | ≤ 0 | — |
+
+**Reading against the pre-stated decision table: row 2.** A stable direction off the happy axis exists
+(negative emotions vs neutral). Both families predict it on held-out sources when it is discovered from RoleNet.
+But the gain from clip III does not replicate across families: for happy it appears in RoleNet only, and for the
+residual direction in neither. → Keep the difficulty-structure conclusion; do **not** confirm the
+information-added-by-direction hypothesis. No objective is designed. If an objective round is ever reached, the
+mandatory control is CE + an auxiliary happy/non-happy target.

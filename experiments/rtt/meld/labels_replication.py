@@ -19,7 +19,9 @@ def windows(df):
             rows.append(dict(d=d,yA=em[i-1],yB=em[i],y2=em[i-2],y1=em[i-3],s2B=sp[i-2]==B,s1B=sp[i-3]==B,
                              prevB=prevB[0] if prevB else -1))
     return pd.DataFrame(rows)
-tr=windows(pd.concat([pd.read_csv('train_sent_emo.csv'),pd.read_csv('dev_sent_emo.csv')]))
+_tr=pd.read_csv('train_sent_emo.csv'); _dv=pd.read_csv('dev_sent_emo.csv')
+_dv['Dialogue_ID']=_dv['Dialogue_ID']+100000          # train and dev reuse dialogue ids; keep them apart
+tr=windows(pd.concat([_tr,_dv]))
 te=windows(pd.read_csv('test_sent_emo.csv'))
 def uar(p,y): return 100*np.mean([np.mean(p[y==c]==c) for c in np.unique(y)])
 print(f"windows (B != A): train+dev {len(tr)}, test {len(te)}")

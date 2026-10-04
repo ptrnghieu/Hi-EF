@@ -893,3 +893,21 @@ query row carries a single type per family (query-involved / non-face / other), 
 only (layer-1 means are about twice the reported layer-averaged |b| and spread means). This is a property of the
 pre-registered ontology (no query-specific relation types), so G33b remains a valid test of that design; a version with
 query-target relations would be a new hypothesis.
+
+## G35 results: group-level EMAP of RoleNet (5 seeds × 3 folds, train+val; test untouched)
+
+| Quantity (mean per-seed calibrated NLL, held-out; seeds × episodes bootstrap) | Estimate [95% CI] |
+|---|---|
+| NLL full / EMAP3 / EMAP L\|rest / EMAP H\|rest / EMAP E\|rest | 1.7006 / 1.7112 / 1.7053 / 1.7064 / 1.7061 |
+| **D_int** = NLL(EMAP3) − NLL(full) | **+0.0107 [+0.0051, +0.0157]** |
+| NLL(EMAP L\|rest) − NLL(full) | +0.0048 [+0.0005, +0.0097] |
+| NLL(EMAP H\|rest) − NLL(full) | +0.0059 [+0.0011, +0.0098] |
+| NLL(EMAP E\|rest) − NLL(full) | +0.0055 [+0.0008, +0.0096] |
+
+Interaction share of the row-centred held-out logit variance: 5.3% (EMAP3), 2.7–3.4% (one group vs rest).
+UAR (seed ensemble, descriptive): full 24.75, EMAP3 24.48. Median temperature: full 1.62, EMAP3 1.78.
+
+**Reading (fixed rule): INTERACTIONS** — the best additive (no-interaction) approximation of the trained RoleNet
+over listener / history / clip-III event is worse by 0.011 NLL, and each group interacts with the rest. The
+interactions are small (about 5% of the logit variance) and are consistent with G20 (no value from a text × rest
+interaction): the non-additive part lies among the face / context groups, not in text.

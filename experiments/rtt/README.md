@@ -761,3 +761,35 @@ time to adapt.
 
 **Auxiliary: presence flags.** 113 distinct presence patterns. Logistic on the 9 flags vs fold prior: ΔNLL −0.0047
 [−0.0112, +0.0011]; with pairwise interactions −0.0030 [−0.0131, +0.0069] → no association with B's label shown.
+
+## G29 results: context-conditioned evidence pooling (5-fold CV, train+val, 10 seeds; test untouched)
+
+Step 0 (from the saved frame counts; the variance shares were printed in the run log only): share of (MCIS, clip)
+cells with 0 / 1 / 2 / >2 kept frames — A 0.22 / 0.07 / 0.04 / 0.68, L 0.57 / 0.11 / 0.06 / 0.26, O 0.58 / 0.05 /
+0.03 / 0.34. Cells P4 can reweight (≥ 2 frames): 46.9% of all cells, 86.2% of observed cells.
+
+| Quantity (mean of per-seed NLL; seeds × episodes bootstrap, shared draws) | Estimate [95% CI] |
+|---|---|
+| **Δ_43 = NLL(P3) − NLL(P4)** | **+0.018 [−0.081, +0.103]** |
+| **Δ_42 = NLL(P2) − NLL(P4)** | **+0.028 [−0.064, +0.106]** |
+| NLL(P0) − NLL(P4) | −0.018 [−0.098, +0.060] |
+| NLL(R) − NLL(P4) | +0.079 [−0.059, +0.235] |
+| NLL(P1) − NLL(P0) | +0.021 [−0.060, +0.100] |
+
+| Arm | NLL per-seed mean | NLL ensemble | UAR per-seed mean ± SD | UAR ensemble | s / run | peak MB |
+|---|---|---|---|---|---|---|
+| P0 FramePool | 1.897 | 1.679 | 24.63 ± 0.73 | 26.88 | 8.1 | 858 |
+| P1 mean | 1.918 | 1.687 | 24.46 ± 0.55 | 25.68 | 7.8 | 858 |
+| P2 MLP scorer | 1.943 | 1.690 | 24.62 ± 0.78 | 26.61 | 8.7 | 858 |
+| P3 context after | 1.933 | 1.683 | 24.40 ± 0.42 | 26.63 | 9.9 | 860 |
+| P4 context in scores | 1.915 | 1.685 | 24.76 ± 0.77 | 26.33 | 10.4 | 861 |
+| R frame tokens | 1.994 | 1.733 | 22.81 ± 1.08 | 25.23 | 20.4 | 1,456 |
+
+**Reading (fixed rule): NOT CONFIRMED** — neither primary CI is above 0. P4 is not distinguishable from the current
+RoleNet (P0), so it cannot be called an improvement. No pooling variant separates from FramePool; the uncompressed
+frame-token reference R is the weakest arm (descriptively) at 2.5× the time and 1.7× the memory.
+
+Power caveat: with checkpoints chosen by dev UAR, per-seed probabilities are poorly calibrated (per-seed NLL ≈ 1.90–1.99
+vs ensemble ≈ 1.68–1.73) and vary strongly across folds and seeds, so the CIs are about ±0.09 NLL, roughly ten times
+wider than in G28 (NLL selection). Differences of a few hundredths of NLL cannot be detected with this estimand; the
+estimand was fixed before running and is not replaced after the fact.

@@ -11688,6 +11688,146 @@ print("saved to", OUT_DIR)
 ]
 
 
+# ---------------------------------------------------------------- G36b: part B of G36 only (second, disclosed test read of Up-sqrt)
+_G36B_CFG = _G36_CFG + """
+# ---- G36b: part A (G36, 10 seeds x 5 folds) selected Up-sqrt: CV UAR 26.95 vs 26.10, dUAR +0.86 [-0.94, +2.18]
+SELECTED, BETA = 'Up-sqrt', 0.5
+"""
+
+G36B = [
+    ("markdown", r"""
+# G36b — Second, disclosed test read of the class-resampled RoleNet (`Up-sqrt`)
+
+Part B of G36 as a standalone notebook. Part A (development CV, 10 seeds × 5 folds) already ran and, by the rule fixed
+in G36, selected **`Up-sqrt`** (sampling ∝ n_class^−0.5): CV UAR 26.95 vs 26.10 for RoleNet, ΔUAR +0.86 [−0.94, +2.18].
+
+This notebook trains `Up-sqrt` exactly as G10 trained RoleNet (45 development episodes, selection episodes
+`random.Random(2026)`, seeds 42, 123, 456, 789, 1024, plain scoring) and reads the test once. It compares with the
+**saved G10 test predictions** of the baseline and RoleNet (not retrained).
+
+**Inputs:** the four G10 inputs (`hi-ef-dataset`, `hi-ef-features-v2`, the split file, `g8a-features`) and a dataset
+containing **`g10_test_probs.npz`** (or the folder `PaperBest.npy`, `RoleNet.npy`, `sample_id.npy`). GPU.
+The first code cell checks every input and stops at once if one is missing.
+"""),
+    G10[1],
+    ("code", _G36B_CFG),
+    ("code", r"""
+# ---- fail fast: every input must be present before anything heavy runs
+import glob
+import numpy as np
+for name, path in (('DATASET_DIR', DATASET_DIR), ('FEATURES_DIR', FEATURES_DIR), ('SPLIT_CSV', SPLIT_CSV), ('G8A_DIR', G8A_DIR)):
+    assert os.path.exists(path), f"missing input {name}: {path}"
+assert glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF", "annotation.csv")), "annotation.csv not found under DATASET_DIR"
+_npz = [p for g in G10_PROBS_GLOBS for p in glob.glob(g, recursive=True)]
+_npy = [p for g in G10_NPY_GLOBS for p in glob.glob(g, recursive=True)]
+if _npz:
+    G10P = dict(np.load(_npz[0], allow_pickle=True)); _src = _npz[0]
+else:
+    assert _npy, "attach a dataset with g10_test_probs.npz (or PaperBest.npy / RoleNet.npy / sample_id.npy)"
+    _d = os.path.dirname(_npy[0]); _src = _d
+    G10P = {k: np.load(os.path.join(_d, k + '.npy'), allow_pickle=True) for k in ('sample_id', 'PaperBest', 'RoleNet')}
+for k in ('sample_id', 'PaperBest', 'RoleNet'):
+    assert k in G10P, f"saved G10 predictions lack '{k}'"
+assert G10P['PaperBest'].shape[1:] == (len(G10P['sample_id']), 7) and G10P['RoleNet'].shape == G10P['PaperBest'].shape
+print(f"inputs OK | saved G10 predictions from {_src}: {G10P['PaperBest'].shape[0]} seeds x {len(G10P['sample_id'])} test MCIS")
+"""),
+    G10[3], G10[4], G10[5], G10[6], G10[7], G10[8], G10[9],
+    ("markdown", "## Train Up-sqrt with the G10 protocol and read the test once"),
+    ("code", r"""
+def train_eval_w(beta, tr, dev, te, seed):
+    # train_eval('role', FULL, ...) with class-resampled epochs (sampling weight of an MCIS = n_class ** -beta)
+    seed_all(seed)
+    hp = HP['role']
+    model = MAKE['role'](FULL).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    cnt = torch.bincount(YB[tr], minlength=7).float().clamp(min=1)
+    w = cnt[YB[tr]] ** (-beta)
+    best, best_state, bad = -1, None, 0
+    for ep in range(hp['epochs']):
+        model.train()
+        perm = tr[torch.multinomial(w, len(tr), replacement=True)]
+        for i in range(0, len(perm), hp['batch']):
+            j = perm[i:i + hp['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, wt in aux.values():
+                if (t >= 0).any():
+                    loss = loss + wt * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(predict(model, dev).argmax(1), y_dev, 7)[1]
+        if u > best:
+            best, bad = u, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    return predict(model, te), best
+
+
+def recalls(p, y):
+    return np.array([(p[y == c] == c).mean() * 100 if (y == c).any() else np.nan for c in range(7)])
+
+
+y_all = DEV.yB.values
+sel_eps = sorted(random.Random(SELECT_SEED).sample(list(EPS), N_INNER_DEV))
+trr = np.where(~IS_TEST)[0]
+fit_rows = np.where(~IS_TEST & ~np.isin(src, sel_eps))[0]
+dev_rows = np.where(np.isin(src, sel_eps))[0]
+te_rows = np.where(IS_TEST)[0]
+assert not set(src[te_rows]) & set(src[trr])
+pos = {s: i for i, s in enumerate(G10P['sample_id'])}
+take = np.array([pos[s] for s in DEV.sample_id.values[te_rows]])          # align saved predictions by sample id
+SAVED = {'Baseline': G10P['PaperBest'][:, take], 'RoleNet (G10)': G10P['RoleNet'][:, take]}
+print(f"fit {len(fit_rows)} | selection {len(dev_rows)} (episodes {sel_eps}) | test {len(te_rows)}")
+FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+P_new, tlog = [], []
+t0 = time.time()
+for seed in SEEDS:
+    p, sel = train_eval_w(BETA, tr, dev, te, seed)
+    P_new.append(p)
+    w_, u_ = war_uar(p.argmax(1), y_all[te_rows], 7)
+    tlog.append({'seed': seed, 'sel_UAR': sel, 'test_UAR': u_, 'test_WAR': w_})
+    print(f"{SELECTED} seed {seed}: sel {sel:5.2f} | test UAR {u_:5.2f} WAR {w_:5.2f} | {(time.time() - t0) / 60:.1f} min", flush=True)
+PT = {SELECTED: np.stack(P_new), **SAVED}
+np.savez(f"{OUT_DIR}/g36_test_probs.npz", sample_id=DEV.sample_id.values[te_rows], selected=SELECTED,
+         **{k.replace(' ', '_').replace('(', '').replace(')', '').replace('-', '_'): v for k, v in PT.items()})
+pd.DataFrame(tlog).to_csv(f"{OUT_DIR}/g36_test_per_seed.csv", index=False)
+print("saved g36_test_probs.npz and g36_test_per_seed.csv")
+"""),
+    ("markdown", "## Results (second test read, reported whatever the sign)"),
+    ("code", r"""
+yt, st = y_all[te_rows], src[te_rows]
+PRED = {k: v.mean(0).argmax(1) for k, v in PT.items()}
+G_ = [np.where(st == e)[0] for e in np.unique(st)]
+rng = np.random.default_rng(0)
+BOOT = [np.concatenate([G_[j] for j in rng.integers(0, len(G_), len(G_))]) for _ in range(2000)]
+TT = pd.DataFrame([{'model': k, 'UAR': war_uar(v, yt, 7)[1], 'WAR': war_uar(v, yt, 7)[0], **dict(zip(EMO, recalls(v, yt)))}
+                   for k, v in PRED.items()])
+print(f"test MCIS {len(yt)} | class counts {dict(zip(EMO, np.bincount(yt, minlength=7)))}")
+print(TT.round(2).to_string(index=False))
+rows = []
+for b in SAVED:
+    for metric, fn in (('UAR', lambda p, y: war_uar(p, y, 7)[1]), ('WAR', lambda p, y: war_uar(p, y, 7)[0])):
+        d0 = fn(PRED[SELECTED], yt) - fn(PRED[b], yt)
+        ds = [fn(PRED[SELECTED][i], yt[i]) - fn(PRED[b][i], yt[i]) for i in BOOT]
+        lo, hi = np.percentile(ds, [2.5, 97.5])
+        rows.append({'contrast': f"{SELECTED} - {b}", 'metric': metric, 'delta': d0, 'lo': lo, 'hi': hi})
+    wins = sum(war_uar(PRED[SELECTED][g], yt[g], 7)[1] > war_uar(PRED[b][g], yt[g], 7)[1] for g in G_)
+    rows[-2]['episodes_won'] = f"{wins}/{len(G_)}"                    # on the UAR row
+CT = pd.DataFrame(rows)
+print(CT.round(2).to_string(index=False))
+TT.to_csv(f"{OUT_DIR}/g36_test_summary.csv", index=False)
+CT.to_csv(f"{OUT_DIR}/g36_test_contrasts.csv", index=False)
+print("saved g36_test_summary.csv and g36_test_contrasts.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -11723,6 +11863,7 @@ if __name__ == "__main__":
                         ("g34_hypothesis_queries_cv.ipynb", G34),
                         ("g35_group_emap_cv.ipynb", G35),
                         ("g36_resampling_cv_test.ipynb", G36),
+                        ("g36b_test_upsqrt.ipynb", G36B),
                         ("g37_case_frames.ipynb", G37),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),

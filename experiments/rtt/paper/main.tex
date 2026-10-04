@@ -129,8 +129,9 @@ strongest configuration on ours (Section~\ref{sec:protocol}). Classes are imbala
 six examples of \emph{fear}.
 
 \paragraph{Who is on screen?} We grouped the faces of each sample into identities (ArcFace clustering, no
-annotation) and matched voices with ECAPA, using clip IV for analysis only (Figure~\ref{fig:datastats}). Hi-EF is
-multi-party: 47\% of samples show three or more people. The responder is usually present before it speaks: B appears in
+annotation) and matched voices with ECAPA, using clip IV for analysis only (Figure~\ref{fig:datastats}). Although
+the task is framed as a two-party interaction \citep{wang2026hief}, Hi-EF is multi-party in practice: 47\% of samples
+show three or more people. The responder is usually present before it speaks: B appears in
 clips I--III in 88\% of samples, is seen listening in clip III in 48\%, and spoke in clip I or II in 50\%. The editing
 alternates shot and reaction shot: A and B share a frame in only 0.7\% of clip III, so a frame-level summary of a clip
 mixes different people. Turn-taking alone does not identify B, because the clip I/II speaker is a third person in
@@ -159,9 +160,7 @@ attention encoder (Figure~\ref{fig:arch}, Algorithm~\ref{alg:rolenet}). It has f
 
 \begin{figure*}[t]
 \centering
-\fbox{\parbox{0.95\textwidth}{\centering\vspace{1.2cm}\todo{architecture figure: clips I--III $\rightarrow$
-face tracks clustered into identities $\rightarrow$ A / L / O assignment in clip III $\rightarrow$ 9 face tokens +
-3 speech + 3 scene tokens $\rightarrow$ 2 SABs with query $\rightarrow$ $p(y_B)$}\vspace{1.2cm}}}
+\includegraphics[width=\textwidth]{figs/architecture.pdf}
 \caption{\model{}. Faces of clips I--III are grouped into identities; in clip III the most visible identity is the
 speaker A and the second most visible the listener L (responder proxy). Each role $\times$ clip cell becomes one face
 token; each clip adds a speech and a scene token. A query token pools the jointly encoded set into the forecast.}
@@ -559,7 +558,9 @@ development data but is a second read of the test split for \model{}; it is repo
 \textbf{Rare classes.} \model{} never forecasts \emph{fear} or \emph{surprise} correctly on test. \textbf{Small test set.} Eight test
 episodes give wide intervals; one \emph{fear} example is worth 2.38 UAR points. \textbf{Exploratory development.}
 The design of \model{} was informed by analyses on the same development episodes used for cross-validation.
-\textbf{Responder oracle.} The true responder is approximated by the dominant face of clip IV matched by face
+\textbf{Late listener frames.} About half of the listener frames fall in the last fifth of clip III, close to
+the target turn; they are valid inputs under the benchmark protocol, but part of the gain may come from recognising
+the responder's early reaction rather than from forecasting further ahead. \textbf{Responder oracle.} The true responder is approximated by the dominant face of clip IV matched by face
 identity; matching errors would blur the proxy--oracle comparison. \textbf{Features.} Text and audio come from
 general-purpose encoders (CLIP, AudioCLIP sound events), not from emotion- or prosody-specific models; conclusions
 about which evidence matters are conditional on them. \textbf{Domain.} Hi-EF and MELD consist of scripted TV series

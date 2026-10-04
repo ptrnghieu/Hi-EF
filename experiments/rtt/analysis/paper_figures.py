@@ -42,16 +42,21 @@ def confusion(p, y):
 
 
 def draw_cm(ax, C, title, n):
-    ax.imshow(C, cmap=SEQ, vmin=0, vmax=100)
+    im = ax.imshow(C, cmap=SEQ, vmin=0, vmax=100)
     for i in range(7):
         for j in range(7):
-            ax.text(j, i, f"{C[i, j]:.0f}", ha='center', va='center', fontsize=6.5,
-                    color='#ffffff' if C[i, j] > 55 else INK)
-    ax.set_xticks(range(7)); ax.set_xticklabels([e[:4] for e in EMO], rotation=45)
-    ax.set_yticks(range(7)); ax.set_yticklabels([f"{e[:4]} ({k})" for e, k in zip(EMO, n)])
-    ax.set_title(title); ax.set_xlabel('predicted')
+            v = C[i, j]
+            ax.text(j, i, f"{v:.0f}", ha='center', va='center', fontsize=6.5,
+                    color='#ffffff' if v > 55 else (INK if v >= 0.5 else '#b5b4af'),
+                    weight='bold' if i == j and v >= 0.5 else 'normal')
+    ax.set_xticks(range(7)); ax.set_xticklabels(EMO, rotation=40, ha='right', rotation_mode='anchor', fontsize=6.8)
+    ax.set_yticks(range(7)); ax.set_yticklabels([f"{e} ({k})" for e, k in zip(EMO, n)], fontsize=6.8)
+    ax.set_xticks(np.arange(-.5, 7), minor=True); ax.set_yticks(np.arange(-.5, 7), minor=True)
+    ax.grid(which='minor', color='white', lw=1.2); ax.tick_params(which='both', length=0)
+    ax.set_title(title, fontsize=8, pad=4); ax.set_xlabel('predicted', fontsize=7)
     for s in ax.spines.values():
         s.set_visible(False)
+    return im
 
 
 # ---------------- test (saved G10 predictions; descriptive)
@@ -70,11 +75,14 @@ if G36 and os.path.exists(os.path.join(G36, 'g36_test_probs.npz')):
 else:
     NUM['final_model'] = 'RoleNet (G10, uniform sampling)'
 PT = {'Baseline': g('PaperBest').mean(0).argmax(1), 'RoleNet': ours_test.argmax(1)}
-fig, axs = plt.subplots(1, 2, figsize=(7.2, 3.4))
+fig, axs = plt.subplots(1, 2, figsize=(6.3, 2.75))
 for ax, (k, p) in zip(axs, PT.items()):
-    draw_cm(ax, confusion(p, yt), f"{k} (UAR {uar(p, yt):.1f})", nt)
-axs[0].set_ylabel('true (test count)')
-fig.tight_layout(); fig.savefig(f"{OUT}/confusion_test.pdf"); plt.close(fig)
+    im = draw_cm(ax, confusion(p, yt), f"{k} (UAR {uar(p, yt):.1f})", nt)
+axs[0].set_ylabel('true (test count)', fontsize=7)
+fig.tight_layout(w_pad=1.0)
+cb = fig.colorbar(im, ax=axs, fraction=0.025, pad=0.015); cb.outline.set_visible(False)
+cb.ax.tick_params(labelsize=6, length=0); cb.set_label('row %', fontsize=6.5)
+fig.savefig(f"{OUT}/confusion_test.pdf", bbox_inches='tight', pad_inches=0.02); plt.close(fig)
 NUM['test_recall'] = {k: dict(zip(EMO, np.round(recalls(p, yt), 1))) for k, p in PT.items()}
 NUM['test_counts'] = dict(zip(EMO, nt.tolist()))
 
@@ -137,18 +145,21 @@ groups = [('mirror', mir), ('shift', ~mir), ('listener visible', vis), ('listene
           ('certain label', cert == '1'), ('uncertain label', cert == '3')]
 rows = [(n, m.sum(), *acc_ci(m)) for n, m in groups]
 NUM['cv_accuracy_by_group'] = {n: {'n': int(c), 'acc': round(a, 1), 'ci': [round(l, 1), round(h, 1)]} for n, c, a, l, h in rows}
-fig, ax = plt.subplots(figsize=(4.6, 2.2))
-cols = [BLUE, '#86b6ef'] * 3
-for i, (n, c, a, l, h) in enumerate(rows):
-    ax.barh(i, a, color=cols[i], height=0.62)
-    ax.plot([l, h], [i, i], color=INK, lw=1)
-    ax.text(h + 1, i, f"{a:.1f}%  (n={c})", va='center', fontsize=6.5, color=INK2)
-ax.set_yticks(range(len(rows))); ax.set_yticklabels([r[0] for r in rows]); ax.invert_yaxis()
-ax.set_xlabel('accuracy of RoleNet (%), development CV'); ax.set_xlim(0, 80)
+fig, ax = plt.subplots(figsize=(3.15, 2.0))
+cols = [BLUE, '#9cc3f2'] * 3
+ypos = [0, 1, 2.5, 3.5, 5, 6]
+for yi, (n, c, a, l, h), col in zip(ypos, rows, cols):
+    ax.barh(yi, a, color=col, height=0.7)
+    ax.plot([l, h], [yi, yi], color=INK, lw=0.9)
+    ax.text(h + 1.5, yi, f"{a:.1f}", va='center', fontsize=6.5, color=INK)
+ax.set_yticks(ypos); ax.set_yticklabels([f"{r[0]} ({r[1]:,})" for r in rows], fontsize=6.8, color=INK)
+ax.invert_yaxis()
+ax.set_xlabel('accuracy (%), development CV', fontsize=7); ax.set_xlim(0, 75)
+ax.tick_params(axis='x', labelsize=6.5, length=0); ax.tick_params(axis='y', length=0)
 ax.xaxis.grid(True, color=GRID, lw=0.6); ax.set_axisbelow(True)
-for s in ('top', 'right'):
+for s in ('top', 'right', 'left'):
     ax.spines[s].set_visible(False)
-fig.tight_layout(); fig.savefig(f"{OUT}/errors_by_group_cv.pdf"); plt.close(fig)
+fig.tight_layout(); fig.savefig(f"{OUT}/errors_by_group_cv.pdf", bbox_inches='tight', pad_inches=0.02); plt.close(fig)
 
 # CV confusion: RoleNet vs without roles; recall on shifts
 nc = np.bincount(y, minlength=7)

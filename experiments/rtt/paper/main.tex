@@ -14,6 +14,10 @@
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{array}
+\usepackage[export]{adjustbox}
 
 \newcommand{\ci}[2]{\,[{#1},\,{#2}]}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
@@ -51,6 +55,17 @@ given three consecutive clips of a TV conversation (I--III), predict the emotion
 Two properties make the task unusual. The target clip is never observed, and the identity of the future speaker
 (the \emph{responder}, B) is not given.
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figs/motivation.pdf}
+\caption{A Hi-EF test sample with several people on screen. Top: the roles that \model{} assigns without future
+information, i.e.\ the speaker A of clip III, the listener L chosen as responder proxy and the others O; clip IV is
+never an input. Bottom: summarising each clip around the speaker forecasts \emph{neutral}; \model{}, built around the
+listener, forecasts B's \emph{happy} response.}
+\label{fig:motivation}
+\end{figure}
+
+
 Existing systems for this setting process each clip as a whole and fuse the clips over time
 \citep{wang2026hief}. The clip III speaker (A) dominates such summaries, because the camera, the transcript and the
 audio follow whoever talks. Yet the person who will answer is often visible already, listening to A (Figure~\ref{fig:motivation}).
@@ -59,43 +74,28 @@ of their interlocutor \citep[emotional contagion;][]{hatfield1994contagion}, and
 own recent emotional state \citep[emotional inertia;][]{kuppens2010inertia}. Both pass through the responder: the
 first is visible as a reaction while listening, the second as the responder's own earlier expressions.
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{figs/motivation.pdf}
-\caption{A Hi-EF test sample with several people on screen. Boxes mark the roles that \model{} assigns without any
-future information: the speaker A of clip III (orange), the listener L chosen as responder proxy (blue) and the
-others O (grey). TV editing alternates between the speaker shot and the listener's reaction shot within clip III.
-The listener, already visible in the crowded context clips, is the person who answers in clip IV. A forecaster built
-around the listener predicts B's \emph{happy} response; the baseline, which summarises each clip around the speaker,
-predicts \emph{neutral}.}
-\label{fig:motivation}
-\end{figure*}
+We therefore build the forecaster around the responder, although the responder is unknown. Our contributions are:
+\begin{itemize}[leftmargin=*,itemsep=1pt,topsep=2pt]
+\item An \textbf{identity-free responder proxy}: within the current turn, the second most visible person (after the
+speaker) is taken as the listener, and all evidence is organised around this listener, the speaker and everyone else.
+No future information, speaker label or identity annotation is used.
+\item A \textbf{participant-centric evidence set}: each participant in each preceding turn contributes one token built
+from their face frames, alongside one speech and one scene token per turn. A small set encoder reads the tokens jointly
+and a query token pools them into a forecast. We call the model \model{}; it has 0.71M parameters.
+\item A \textbf{strict evaluation}: all design decisions use episode-level cross-validation, and the locked test split
+was read once under a preregistered plan. \model{} improves unweighted average recall (UAR) over the strongest
+configuration of \citet{wang2026hief}, retrained on the same split, by 3.84 points \ci{1.24}{6.76} and wins seven of
+eight test episodes; we report openly why the preregistered logit-adjusted metric did not confirm this contrast.
+\item \textbf{Controlled analyses} that explain the gain: the proxy loses nothing against the true responder, the
+listener's face and the preceding context are each worth about two UAR points, the encoder needs no explicit temporal
+order or relation biases, and the remaining errors lie in recognising conversational states before a shift.
+\end{itemize}
 
-We build the forecaster around the responder. The difficulty is that the responder is unknown. Our first
-contribution is an \textbf{identity-free responder proxy}: within the current turn, the second most visible person
-(after the speaker) is taken as the listener, and all evidence is organised around this listener, the speaker and
-everyone else. No future information, speaker label or identity annotation is used. Our second contribution is a
-\textbf{participant-centric evidence set}: each participant in each preceding turn contributes one token built from
-their face frames, alongside one speech token and one scene token per turn. A small set encoder reads these tokens
-jointly and a query token pools them into a forecast. We call the model \model{}.
-
-We evaluate under a strict protocol. All design decisions were made with episode-level cross-validation on the
-training and validation episodes; the locked test split was then read once under a preregistered plan
-(Section~\ref{sec:protocol}). On test, \model{} improves unweighted average recall (UAR) over the strongest
-configuration of \citet{wang2026hief}, retrained on the same split, by 3.84 points \ci{1.24}{6.76}, and wins
-seven of eight test episodes. We report openly that the preregistered primary metric, logit-adjusted UAR, did not
-confirm this contrast, and why.
-
-Controlled experiments then explain the gain. The proxy loses nothing against the true responder identity. The
-listener's face and the immediately preceding context are each worth about two UAR points, while the encoder needs
-no explicit temporal order, relation biases or role labels. Finally, an analysis of the remaining errors shows that
-forecasts succeed mostly when the responder mirrors the speaker and fail when the responder shifts to a different
-emotion, and that the missing information lies in recognising conversational states rather than in combining them.
 
 % ======================================================================================================
 \section{Related Work}
 
-\paragraph{Emotion recognition and forecasting in conversation.}
+\subsection{Emotion Recognition and Forecasting in Conversation}
 Emotion recognition in conversation labels utterances that are observed, typically with speaker-aware memory or
 graph models \citep{hazarika2018icon,majumder2019dialoguernn,ghosal2019dialoguegcn} and multimodal transformers
 \citep{tsai2019mult}; multi-party benchmarks such as MELD provide speaker names \citep{poria2019meld}.
@@ -103,32 +103,34 @@ Forecasting the sentiment or emotion of a turn that has not happened yet has bee
 \citep{wang2020sentiment}. Hi-EF \citep{wang2026hief} brings the task to multimodal video with an unidentified
 responder, which removes the speaker-tracking machinery that recognition models rely on.
 
-\paragraph{Responders and listeners.}
+\subsection{Responders and Listeners}
 DialogueRNN keeps a state per party, updated by utterances \citep{majumder2019dialoguernn}; it assumes that party
 identities are known. We instead select the prospective responder from what is visible in the current turn, and
 show that knowing the true responder adds nothing on Hi-EF.
 
-\paragraph{Set models and interaction analysis.}
+\subsection{Set Models and Interaction Analysis}
 Attention over an unordered collection of elements with learned pooling seeds is formalised by the Set Transformer
 \citep{lee2019set}; see also \citet{zaheer2017deep}. We use this view to describe \model{} and to test which structure
 it needs. To measure whether a trained model uses cross-group interactions we follow EMAP \citep{hessel2020emap}.
 
 % ======================================================================================================
-\section{Task and Data}
+\section{Problem Formulation}
 \label{sec:task}
+
+\subsection{Task Definition}
 
 An MCIS (multilayered-contextual interaction sample) in Hi-EF \citep{wang2026hief} consists of four consecutive
 clips from a TV series, each clip one subtitle utterance. Clips I and II are context, clip III is a turn of speaker
 A, and clip IV is a turn of a different person B. The target is B's emotion in clip IV, one of seven classes
-(angry, disgust, fear, happy, neutral, sad, surprise). Only clips I--III are inputs.
+(angry, disgust, fear, happy, neutral, sad, surprise). Formally, given $X = (C_1, C_2, C_3)$, where each clip
+$C_k$ has video frames, audio and a transcript, a forecaster outputs $p(y_B \mid X)$ over the seven classes. Clip IV is
+never an input, B's identity is not given, and we do not assume that only two people take part.
 
-\paragraph{Split.} The released annotations give 2{,}830 MCIS from 53 episodes. To avoid shared clips between
-partitions we split by episode (37/8/8 episodes; 1{,}993/428/409 MCIS for train/validation/test). Our numbers are
-therefore not comparable to those printed in \citet{wang2026hief}, who used a different split; we retrain their
-strongest configuration on ours (Section~\ref{sec:protocol}). Classes are imbalanced: the 409 test MCIS contain
-six examples of \emph{fear}.
 
-\paragraph{Who is on screen?} We grouped the faces of each sample into identities (ArcFace clustering, no
+\subsection{Data Analysis: Who Is on Screen?}
+\label{sec:onscreen}
+
+We grouped the faces of each sample into identities (ArcFace clustering, no
 annotation) and matched voices with ECAPA, using clip IV for analysis only (Figure~\ref{fig:datastats}). Although
 the task is framed as a two-party interaction \citep{wang2026hief}, Hi-EF is multi-party in practice: 47\% of samples
 show three or more people. The responder is usually present before it speaks: B appears in
@@ -148,9 +150,6 @@ I--III and spoke in clip I/II: 2{,}421 (clip IV used for analysis only).}
 \label{fig:datastats}
 \end{figure}
 
-\paragraph{Constraints.} Clip IV is never an input at inference. B's identity is not given. We do not assume that
-only two people take part.
-
 % ======================================================================================================
 \section{Method}
 \label{sec:method}
@@ -167,7 +166,7 @@ token; each clip adds a speech and a scene token. A query token pools the jointl
 \label{fig:arch}
 \end{figure*}
 
-\subsection{Module 1: identities and the responder proxy}
+\subsection{Module 1: Identities and the Responder Proxy}
 
 \textbf{Input:} the frames of clips I--III, sampled at 4\,fps (at most 32 per clip).
 \textbf{Output:} a role $r(f) \in \{A, L, O\}$ for every detected face $f$.
@@ -182,7 +181,7 @@ person who listens and will answer. The second most visible person of the curren
 identity-free guess of the responder. The rule reads no clip IV, no speaker label and no identity annotation;
 Section~\ref{sec:proxy} shows that replacing it by the true responder brings nothing.
 
-\subsection{Module 2: face tokens}
+\subsection{Module 2: Face Tokens}
 
 \textbf{Input:} for role $r$ and clip $k$, the frames $F_{r,k}$ of the faces with that role (at most 24).
 \textbf{Output:} one token $x_{r,k} \in \mathbb{R}^{d}$, $d = 128$; 9 tokens per MCIS.
@@ -191,21 +190,23 @@ Each frame is described by $\phi(f) \in \mathbb{R}^{146}$: a 128-dimensional PCA
 \citep{savchenko2022hsemotion}, fitted on training faces only, its 8 expression probabilities and valence/arousal,
 head pose, face box position and size, mouth opening, and relative time in the clip. Frames are pooled by attention:
 \begin{equation}
-u_f = \mathrm{MLP}(\phi(f)),\quad
-\alpha_f = \operatorname{softmax}_{f \in F_{r,k}}\!\big(w^\top u_f\big),\quad
-x_{r,k} = \textstyle\sum_f \alpha_f u_f + e^{\text{role}}_r + e^{\text{clip}}_k .
+\begin{split}
+u_f &= \mathrm{MLP}(\phi(f)),\\
+\alpha_f &= \operatorname{softmax}_{f \in F_{r,k}}\!\big(w^\top u_f\big),\\
+x_{r,k} &= \textstyle\sum_f \alpha_f u_f + e^{\text{role}}_r + e^{\text{clip}}_k .
+\end{split}
 \end{equation}
 An empty cell receives a learned placeholder $a_{r,k}$ instead of the pooled vector.
 
 \emph{Intuition.} One token per person and turn keeps the set small (Hi-EF clips last about two seconds, and a
 listener is often visible in only one to three frames) while letting the pooling weight the most expressive frame.
 
-\subsection{Module 3: speech and scene tokens}
+\subsection{Module 3: Speech and Scene Tokens}
 
 \textbf{Input:} transcript, audio and frames of clip $k$. \textbf{Output:} a speech token $s_k$ and a scene token
 $g_k$; 6 tokens per MCIS.
 \begin{align}
-s_k &= W_t\,t_k + (W_a\,a_k)\,\delta_k + W_v\,v_k + e^{\text{speech}} + e^{\text{clip}}_k, \label{eq:sk}\\
+s_k &= W_t\,t_k + (W_a\,a_k)\,\delta_k + W_v\,v_k \nonumber\\ &\quad + e^{\text{speech}} + e^{\text{clip}}_k, \label{eq:sk}\\
 g_k &= W_s\,[\bar c^{\,\text{frame}}_k;\,\bar c^{\,\text{face}}_k] + e^{\text{scene}} + e^{\text{clip}}_k, \label{eq:gk}
 \end{align}
 with the CLIP text embedding $t_k$ \citep{radford2021clip}, the AudioCLIP sound-event vector $a_k$
@@ -216,7 +217,7 @@ CLIP embeddings of the whole frames and of all faces.
 \emph{Intuition.} What is said and the setting of the turn complement the faces; $v_k$ tells the model who is likely
 speaking in clips I and II without naming anyone.
 
-\subsection{Module 4: set encoder and query pooling}
+\subsection{Module 4: Set Encoder and Query Pooling}
 
 \textbf{Input:} the evidence set
 $\mathcal{S} = \{x_{r,k}\} \cup \{s_k\} \cup \{g_k\}$ of 15 typed tokens and a learned query $q$.
@@ -224,11 +225,12 @@ $\mathcal{S} = \{x_{r,k}\} \cup \{s_k\} \cup \{g_k\}$ of 15 typed tokens and a l
 
 The set is processed by two pre-norm set attention blocks \citep[SAB;][]{lee2019set}, i.e.\ transformer layers
 \citep{vaswani2017attention} without positional encoding, and read from the query position:
-\begin{gather}
-H^{(0)} = [q;\,\mathcal{S}],\qquad
-Z = H + \mathrm{MHA}(\mathrm{LN}(H)),\qquad H' = Z + \mathrm{FFN}(\mathrm{LN}(Z)),\\
-p(y_B \mid \mathcal{S}) = \operatorname{softmax}\!\big(W\,\mathrm{LN}(h^{(2)}_q)\big),
-\end{gather}
+\begin{align}
+H^{(0)} &= [q;\,\mathcal{S}], \nonumber\\
+Z &= H^{(\ell-1)} + \mathrm{MHA}\big(\mathrm{LN}(H^{(\ell-1)})\big), \nonumber\\
+H^{(\ell)} &= Z + \mathrm{FFN}(\mathrm{LN}(Z)),\quad \ell = 1, 2, \\
+p(y_B \mid \mathcal{S}) &= \operatorname{softmax}\!\big(W\,\mathrm{LN}(h^{(2)}_q)\big),
+\end{align}
 with 4 heads, a 512-dimensional FFN and dropout 0.2. Because $q$ takes part in self-attention, it acts as a pooling
 seed in the sense of PMA \citep{lee2019set}.
 
@@ -247,10 +249,11 @@ token interactions in every layer, and a group-level EMAP shows that the trained
 \State Detect faces at 4\,fps; embed with ArcFace; cluster all faces of the MCIS into identities
 \State $A \gets$ identity with most frames in clip III; $L \gets$ second most (or none); others $\to O$
 \For{$r \in \{A, L, O\}$, $k \in \{1,2,3\}$}
-  \State $x_{r,k} \gets$ \textsc{AttnPool}$(\{\phi(f) : f \in F_{r,k}\})$ or $a_{r,k}$ if empty; add $e^{\text{role}}_r + e^{\text{clip}}_k$
+  \State $x_{r,k} \gets \textsc{AttnPool}(F_{r,k})$, or $a_{r,k}$ if $F_{r,k} = \emptyset$
+  \State $x_{r,k} \gets x_{r,k} + e^{\text{role}}_r + e^{\text{clip}}_k$
 \EndFor
 \For{$k \in \{1,2,3\}$} \State build $s_k$ and $g_k$ (Eqs.~\ref{eq:sk}--\ref{eq:gk}) \EndFor
-\State $H \gets [q;\, x_{1,1}, \dots, x_{3,3};\, s_1, s_2, s_3;\, g_1, g_2, g_3]$ \Comment{16 tokens}
+\State $H \gets [q;\, \{x_{r,k}\};\, s_{1:3};\, g_{1:3}]$ \Comment{16 tokens}
 \For{$\ell = 1, 2$} \State $H \gets \mathrm{SAB}(H)$ \EndFor
 \State \Return $\operatorname{softmax}(W\,\mathrm{LN}(H_q))$
 \end{algorithmic}
@@ -269,19 +272,21 @@ five held-out training episodes (patience 12), and average the predicted probabi
 
 \begin{table}[t]
 \centering\small
+\begin{adjustbox}{max width=\columnwidth}
 \begin{tabular}{lcc}
 \toprule
  & Baseline & \model{} \\
 \midrule
 Unit of fusion & frame, then clip & person $\times$ turn \\
-Tokens fused & $3 \times 2 \times 16$ frames, then 3 clips & 16 \\
+Tokens fused & 96 frames, 3 clips & 16 \\
 Width $d$ & 512 & 128 \\
-Trainable parameters & 27.7M & 0.71M \\
-FLOPs per MCIS (fusion only) & $\approx$1.3G & 17--29M \\
+Parameters & 27.7M & 0.71M \\
+Fusion FLOPs / MCIS & $\approx$1.3G & 17--29M \\
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Fusion cost on precomputed features (measured with the PyTorch FLOP counter; \model{}'s range depends on the
-number of face frames). \model{} additionally runs face detection, ArcFace, HSEmotion and ECAPA once per clip.}
+number of face frames; the baseline fuses $3 \times 2 \times 16$ frame tokens, then 3 clips). \model{} additionally runs face detection, ArcFace, HSEmotion and ECAPA once per clip.}
 \label{tab:complexity}
 \end{table}
 
@@ -294,13 +299,29 @@ pre-processing: face detection, identity and expression embeddings, and a speake
 clip and shared by every MCIS that contains it.
 
 % ======================================================================================================
-\section{Experimental Protocol}
+\section{Experiments}
 \label{sec:protocol}
 
-\paragraph{Baseline.} Our baseline is the strongest configuration of \citet{wang2026hief}: per-clip temporal transformers
+\subsection{Datasets}
+
+\paragraph{Hi-EF.} The released annotations give 2{,}830 MCIS from 53 episodes. To avoid shared clips between
+partitions we split by episode (37/8/8 episodes; 1{,}993/428/409 MCIS for train/validation/test). Our numbers are
+therefore not comparable to those printed in \citet{wang2026hief}, who used a different split; we retrain their
+strongest configuration on ours (Section~\ref{sec:baseline}). Classes are imbalanced: the 409 test MCIS contain
+six examples of \emph{fear}.
+
+\paragraph{MELD.} To test generalisation we rebuild Hi-EF-style windows from MELD \citep{poria2019meld}
+(Section~\ref{sec:meld}).
+
+\subsection{Baseline}
+\label{sec:baseline}
+
+ Our baseline is the strongest configuration of \citet{wang2026hief}: per-clip temporal transformers
 over face and frame features, cross-attention fusion with text and audio, and LSTM plus transformer fusion across
 clips. We retrain it on our split as re-implemented from the released code (AdamW, learning rate $10^{-4}$, batch
 32, 50 epochs, checkpoint by selection UAR). As the best configuration reported for Hi-EF, it is our reference.
+
+\subsection{Evaluation Protocol}
 
 \paragraph{Development.} All design decisions use 5-fold cross-validation over the 45 training and validation
 episodes (2{,}421 MCIS), with folds balanced by MCIS count. Unless stated otherwise we report seed ensembles of 10
@@ -313,32 +334,36 @@ episodes with five seeds. The preregistered primary metric was 7-class UAR after
 \citet{wang2026hief}, was preregistered as descriptive. Intervals resample the 8 test episodes. Earlier,
 unrelated model families had been evaluated on the same test split; Appendix~\ref{app:test} lists every access.
 
-\paragraph{Metrics.} UAR (macro recall) and WAR (accuracy); for controlled comparisons on development data we also
-report negative log-likelihood after temperature scaling \citep{guo2017calibration} on held-out training episodes.
+\paragraph{Metrics.} UAR (macro recall, our main metric) and WAR (accuracy); for controlled comparisons on development data we also
+report negative log-likelihood after temperature scaling \citep{guo2017calibration} on held-out training episodes. Implementation details and hyper-parameters are given in Section~\ref{sec:method} and
+Appendix~\ref{app:hparams}.
 
-% ======================================================================================================
-\section{Results}
-
-\subsection{Main result}
+\subsection{Main Results}
 \label{sec:main}
 
 \begin{table}[t]
 \centering\small
+\setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\columnwidth}
 \begin{tabular}{lcc}
 \toprule
-Model (test, seed ensemble) & UAR & WAR \\
+Test, seed ensemble & UAR & WAR \\
 \midrule
-Baseline \citep{wang2026hief}, retrained & 21.40 & 32.52 \\
+Baseline (retrained) & 21.40 & 32.52 \\
 \model{} (preregistered) & 25.24 & \textbf{36.43} \\
-\model{} + class resampling$^\dagger$ & \textbf{25.64} & 33.74 \\
+\model{} + resampling$^\dagger$ & \textbf{25.64} & 33.74 \\
 \midrule
-$\Delta$ plain, preregistered (descriptive) & $+3.84$\ci{1.24}{6.76} & $+3.91$\ci{0.40}{7.79} \\
-$\Delta$ plain, resampling$^\dagger$ & $+4.24$\ci{2.02}{6.81} & $+1.22$\ci{-1.69}{4.66} \\
-$\Delta$ logit-adjusted (primary) & $+3.77$\ci{-7.49}{10.12} & -- \\
-$\Delta$ logit-adj., 6 classes & $+9.95$\ci{6.6}{13.6} & -- \\
+\multicolumn{3}{l}{\emph{$\Delta$ vs.\ baseline, plain scoring}} \\
+\quad \model{} & $+3.84$\ci{1.24}{6.76} & $+3.91$\ci{0.40}{7.79} \\
+\quad + resampling$^\dagger$ & $+4.24$\ci{2.02}{6.81} & $+1.22$\ci{-1.69}{4.66} \\
+\multicolumn{3}{l}{\emph{$\Delta$ vs.\ baseline, logit-adjusted}} \\
+\quad 7 classes (primary) & $+3.77$\ci{-7.49}{10.12} & -- \\
+\quad 6 classes & $+9.95$\ci{6.6}{13.6} & -- \\
 \bottomrule
 \end{tabular}
-\caption{Hi-EF test (409 MCIS, 8 episodes). $\Delta$ is relative to the baseline; intervals: 95\% bootstrap over
+\end{adjustbox}
+\caption{Hi-EF test (409 MCIS, 8 episodes). Baseline: \citet{wang2026hief}. Plain scoring of \model{} was
+preregistered as descriptive, logit adjustment as primary. Intervals: 95\% bootstrap over
 test episodes. The preregistered \model{} wins 7 of 8 episodes, the resampled one 6 of 8 (plain UAR). The 6-class row
 excludes \emph{fear} (6 test examples). $^\dagger$Selected on development CV, then evaluated in a second, disclosed
 test read (Appendix~\ref{app:test}).}
@@ -377,42 +402,16 @@ for 58\% of \emph{sad} responses and recalls only 3\% of them. \model{} reduces 
 Neither model forecasts \emph{fear} or \emph{surprise} correctly, and \emph{disgust} only rarely; we return to this
 limitation in Sections~\ref{sec:analysis} and~\ref{sec:conclusion}.
 
-\subsection{Does the forecaster need to know who responds?}
-\label{sec:proxy}
-
-To test the responder proxy we construct an oracle that replaces the listener by the true responder. B is found as
-the dominant face of clip IV and matched to an identity of clips I--III (possible for 88\% of MCIS); this uses clip
-IV and is available only for analysis. The proxy's listener equals the matched responder in 68\% of the MCIS where
-the proxy assigns a listener.
-
-\begin{table}[t]
-\centering\small
-\begin{tabular}{lrcc}
-\toprule
-Subset (development CV) & $n$ & Proxy & Oracle \\
-\midrule
-All MCIS & 2{,}421 & 26.24 & 26.20 \\
-B seen in clips I--III & 2{,}107 & 26.98 & 26.90 \\
-\quad proxy picked another person or none & 390 & 28.33 & 28.15 \\
-B not seen in clips I--III & 314 & 21.20 & 21.29 \\
-\bottomrule
-\end{tabular}
-\caption{UAR with the identity-free listener proxy vs.\ the true responder (oracle, uses clip IV). 10 seeds.
-Oracle $-$ proxy: $-0.04$ \ci{-1.50}{1.85}.}
-\label{tab:proxy}
-\end{table}
-
-Table~\ref{tab:proxy} shows no difference, also on the 390 MCIS where the proxy picks the wrong person.
-The model uses \emph{what the visible faces show}; an identity-free selection of the evidence suffices.
-
-\subsection{Ablation study}
+\subsection{Ablation Study}
 \label{sec:evidence}
 
 \begin{table}[t]
 \centering\small
+\setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\columnwidth}
 \begin{tabular}{lcc}
 \toprule
-Variant (development CV, retrained) & UAR & $\Delta$ \\
+Variant (dev.\ CV) & UAR & $\Delta$ \\
 \midrule
 \model{} (10 seeds) & \textbf{26.24} & -- \\
 \quad w/o listener tokens & 24.20 & $-2.04$\ci{-3.46}{-0.21} \\
@@ -420,13 +419,14 @@ Variant (development CV, retrained) & UAR & $\Delta$ \\
 \midrule
 \model{} (3 seeds) & \textbf{25.92} & -- \\
 \quad w/o face tokens & 22.03 & $-3.90$\ci{-5.41}{-2.20} \\
-\quad w/o joint encoder (separate role paths) & 23.78 & $-2.14$\ci{-3.79}{-0.29} \\
-\quad w/o speech and scene tokens & 25.01 & $-0.92$ \\
-\quad w/o auxiliary heads and modality dropout & 25.15 & $-0.78$ \\
+\quad w/o joint encoder & 23.78 & $-2.14$\ci{-3.79}{-0.29} \\
+\quad w/o speech/scene tokens & 25.01 & $-0.92$ \\
+\quad w/o aux.\ heads, mod.\ drop & 25.15 & $-0.78$ \\
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Ablations of \model{}, each variant retrained on the development folds and compared with the full model of
-the same run. Intervals resample seeds and episodes (top) or episodes (bottom). Further variants in
+the same run. ``W/o joint encoder'': separate role paths combined additively. Intervals resample seeds and episodes (top) or episodes (bottom). Further variants in
 Appendix~\ref{app:ablations}.}
 \label{tab:evidence}
 \end{table}
@@ -438,25 +438,59 @@ preceding context matters as much: keeping only clip III costs 2.13, most of it 
 jointly matters too: replacing the shared encoder by separate role paths that are combined additively costs 2.14.
 Speech and scene tokens and the auxiliary training signals add smaller gains.
 
-\subsection{Does the encoder need more structure?}
+\subsection{Does the Forecaster Need to Know Who Responds?}
+\label{sec:proxy}
+
+To test the responder proxy we construct an oracle that replaces the listener by the true responder. B is found as
+the dominant face of clip IV and matched to an identity of clips I--III (possible for 88\% of MCIS); this uses clip
+IV and is available only for analysis. The proxy's listener equals the matched responder in 68\% of the MCIS where
+the proxy assigns a listener.
+
+\begin{table}[t]
+\centering\small
+\begin{adjustbox}{max width=\columnwidth}
+\begin{tabular}{lrcc}
+\toprule
+Subset (dev.\ CV) & $n$ & Proxy & Oracle \\
+\midrule
+All MCIS & 2{,}421 & 26.24 & 26.20 \\
+B seen in clips I--III & 2{,}107 & 26.98 & 26.90 \\
+\quad proxy $L \neq$ B & 390 & 28.33 & 28.15 \\
+B not seen in I--III & 314 & 21.20 & 21.29 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{UAR with the identity-free listener proxy vs.\ the true responder (oracle, uses clip IV). 10 seeds.
+Oracle $-$ proxy: $-0.04$ \ci{-1.50}{1.85}. ``Proxy $L \neq$ B'': the proxy picked another person or no
+listener.}
+\label{tab:proxy}
+\end{table}
+
+Table~\ref{tab:proxy} shows no difference, also on the 390 MCIS where the proxy picks the wrong person.
+The model uses \emph{what the visible faces show}; an identity-free selection of the evidence suffices.
+
+\subsection{Does the Encoder Need More Structure?}
 \label{sec:structure}
 
 \begin{table}[t]
 \centering\small
-\begin{tabular}{lc}
+\setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\columnwidth}
+\begin{tabular}{ll}
 \toprule
-Change to \model{} (development CV) & Effect \\
+Change to \model{} (dev.\ CV) & Effect \\
 \midrule
 Clips I/II unordered & NLL $+0.006$\ci{-0.010}{0.022} \\
 Clips I--III unordered & NLL $+0.008$ \\
-Relation biases (time, person, evidence) & NLL $+0.001$\ci{-0.014}{0.017} \\
-Readout variants (4 kinds) & UAR within seed noise \\
-Additive projection over L / history / event & NLL $+0.011$\ci{0.005}{0.016} \\
+Relation biases & NLL $+0.001$\ci{-0.014}{0.017} \\
+Readout variants (4) & UAR within seed noise \\
+Additive projection & NLL $+0.011$\ci{0.005}{0.016} \\
 \bottomrule
 \end{tabular}
-\caption{Structural variants. Order and relation biases: 10 seeds, temperature-scaled
+\end{adjustbox}
+\caption{Structural variants. Relation biases: time, person and evidence type. Order and relation biases: 10 seeds, temperature-scaled
 NLL relative to \model{} (positive = worse). Readouts: mean pooling, listener token, read-only query, three queries.
-Additive projection: group-level EMAP of the trained model, 5 seeds $\times$ 3 folds.}
+Additive projection: group-level EMAP (listener / history / event) of the trained model, 5 seeds $\times$ 3 folds.}
 \label{tab:structure}
 \end{table}
 
@@ -472,6 +506,7 @@ intervals above zero). The interactions are modest, about 5\% of the logit varia
 transcript: an additive split of text versus everything else loses nothing ($-0.002$ \ci{-0.004}{0.000}).
 
 \subsection{Generalisation to MELD}
+\label{sec:meld}
 
 We rebuilt Hi-EF-style windows from MELD \citep{poria2019meld} (three turns, then a turn of a different speaker;
 5{,}405/595/1{,}341 windows for train/dev/test), without speaker names as input, and trained \model{} and the baseline
@@ -479,16 +514,19 @@ with three seeds (train for fitting, dev for early stopping, test for the compar
 
 \begin{table}[t]
 \centering\small
+\begin{adjustbox}{max width=\columnwidth}
 \begin{tabular}{lcccc}
 \toprule
  & \multicolumn{2}{c}{UAR} & \multicolumn{2}{c}{WAR} \\
-MELD test & seed mean & ensemble & seed mean & ensemble \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+MELD test & mean & ens. & mean & ens. \\
 \midrule
 Baseline & 15.56 & 15.50 & \textbf{43.35} & \textbf{46.09} \\
 \model{} & \textbf{16.72} & \textbf{16.85} & 35.84 & 39.30 \\
 \bottomrule
 \end{tabular}
-\caption{MELD test (1{,}341 windows, 3 seeds; chance UAR 14.29).
+\end{adjustbox}
+\caption{MELD test (1{,}341 windows, 3 seeds; chance UAR 14.29). Mean: average over seeds; ens.: seed ensemble.
 Dev UAR (best epoch per seed, selection-biased): \model{} 20.88, baseline 17.66.}
 \label{tab:meld}
 \end{table}
@@ -500,7 +538,7 @@ recall), but \emph{disgust}, \emph{sad}, \emph{fear} and \emph{surprise} stay ne
 \emph{neutral} (48\% of test windows), so WAR rewards the majority-class collapse that UAR penalises.
 
 % ======================================================================================================
-\section{Analysis: Where Forecasts Fail}
+\section{Analysis: Where Do Forecasts Fail?}
 \label{sec:analysis}
 
 \paragraph{Mirroring and shifts.} B's emotion equals A's clip III emotion in 35.5\% of development MCIS (34.7\% in
@@ -532,7 +570,7 @@ participants' current emotional states, which the fixed feature extractors recog
 combining the same tokens cannot recover it.
 
 % ======================================================================================================
-\section{Conclusion}
+\section{Conclusion and Future Work}
 \label{sec:conclusion}
 
 Forecasting a responder's emotion on Hi-EF is mostly a matter of looking at the right person. An identity-free
@@ -582,9 +620,9 @@ classes) and should not be used to make decisions about individuals.
 \section{Test-Split Accesses}
 \label{app:test}
 
-\begin{table}[h]
-\centering\small
-\begin{tabular}{p{0.16\columnwidth}p{0.42\columnwidth}p{0.3\columnwidth}}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{0.44\columnwidth}>{\raggedright\arraybackslash}p{0.36\columnwidth}@{}}
 \toprule
 Access & Models & Status \\
 \midrule
@@ -603,9 +641,9 @@ single preregistered run; invalid for the trajectory arms (caching bug) \\
 \section{Hyper-parameters and Implementation}
 \label{app:hparams}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering\small
-\begin{tabular}{ll}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.32\columnwidth}>{\raggedright\arraybackslash}p{0.62\columnwidth}@{}}
 \toprule
 Face sampling & 4\,fps, $\le$ 32 frames per clip, $\le$ 24 per role cell \\
 Identity clustering & ArcFace, average linkage, cosine 0.45 \\
@@ -622,26 +660,31 @@ Baseline & AdamW lr $10^{-4}$, wd $10^{-5}$, batch 32, 50 epochs \\
 \bottomrule
 \end{tabular}
 \caption{Hyper-parameters (fixed before the test run; none tuned on test).}
+\label{tab:hparams}
 \end{table}
 
 \section{Full Ablation Tables}
 \label{app:ablations}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering\small
+\setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\columnwidth}
 \begin{tabular}{lcc}
 \toprule
-Variant (development CV, retrained) & UAR & $\Delta$ \\
+Variant (dev.\ CV) & UAR & $\Delta$ \\
 \midrule
 \model{} (10 seeds) & 26.24 & -- \\
-\quad faces pooled without role labels & 25.80 & $-0.44$\ci{-2.16}{1.21} \\
-\quad mean pooling instead of the query & 26.42 & $+0.18$\ci{-1.62}{1.55} \\
+\quad no role labels on faces & 25.80 & $-0.44$\ci{-2.16}{1.21} \\
+\quad mean pooling, no query & 26.42 & $+0.18$\ci{-1.62}{1.55} \\
 \midrule
 \model{} (3 seeds) & 25.92 & -- \\
-\quad separate role paths + interaction term & 24.60 & $-1.32$\ci{-2.80}{0.34} \\
+\quad role paths + interaction & 24.60 & $-1.32$\ci{-2.80}{0.34} \\
 \bottomrule
 \end{tabular}
-\caption{Additional variants. Run-to-run noise: three-seed ensembles of the same model vary with a standard
+\end{adjustbox}
+\caption{Additional variants: faces pooled without role labels; mean pooling instead of the query; separate role paths
+plus an interaction term. Run-to-run noise: three-seed ensembles of the same model vary with a standard
 deviation of 0.40 UAR (220 ensembles, range 24.59--26.42).}
 \end{table}
 

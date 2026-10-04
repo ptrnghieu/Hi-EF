@@ -10,7 +10,7 @@ E2I = {e: i for i, e in enumerate(EMO)}
 D = os.environ.get('G10_DIR', '.')
 ld = lambda n: np.load(os.path.join(D, f'{n}.npy'), allow_pickle=True)
 sid = ld('sample_id')
-P = {k: ld(f).mean(0) for k, f in (('RoleNet', 'RoleNet'), ('PaperBest', 'PaperBest'), ('noRole', 'RoleNet_noRole'))}
+P = {k: ld(f).mean(0) for k, f in (('RoleNet', 'RoleNet'), ('Baseline', 'PaperBest'), ('noRole', 'RoleNet_noRole'))}
 ann = pd.read_csv(os.environ['ANNOT'], header=None, dtype=str).set_index(0)
 sp = pd.read_csv(os.environ['SPLIT'], dtype=str).set_index('sample_id').loc[sid]
 yB, yA = sp.clip4_emotion.map(E2I).values, sp.clip3_emotion.map(E2I).values
@@ -21,20 +21,20 @@ r = np.arange(len(sid))
 df = pd.DataFrame({
     'sample_id': sid, 'episode': sp.source_folder.values, 'A_III': [EMO[i] for i in yA], 'B_IV': [EMO[i] for i in yB],
     'mirror': yA == yB, 'certainty_IV': cert,
-    'RoleNet': [EMO[i] for i in pred['RoleNet']], 'PaperBest': [EMO[i] for i in pred['PaperBest']],
+    'RoleNet': [EMO[i] for i in pred['RoleNet']], 'Baseline': [EMO[i] for i in pred['Baseline']],
     'noRole': [EMO[i] for i in pred['noRole']],
-    'p_true_RoleNet': P['RoleNet'][r, yB].round(3), 'p_true_PaperBest': P['PaperBest'][r, yB].round(3),
+    'p_true_RoleNet': P['RoleNet'][r, yB].round(3), 'p_true_Baseline': P['Baseline'][r, yB].round(3),
     'text_I': sp.clip1.map(txt).values, 'text_II': sp.clip2.map(txt).values, 'text_III': sp.clip3.map(txt).values,
     'text_IV': sp.clip4.map(txt).values, 'clip1': sp.clip1.values, 'clip2': sp.clip2.values, 'clip3': sp.clip3.values,
     'clip4': sp.clip4.values})
-df['margin'] = (df.p_true_RoleNet - df.p_true_PaperBest).round(3)
-rn_ok, pb_ok = pred['RoleNet'] == yB, pred['PaperBest'] == yB
+df['margin'] = (df.p_true_RoleNet - df.p_true_Baseline).round(3)
+rn_ok, pb_ok = pred['RoleNet'] == yB, pred['Baseline'] == yB
 df['category'] = np.select(
     [rn_ok & ~pb_ok & ~df.mirror, rn_ok & ~pb_ok & df.mirror, ~rn_ok & ~df.mirror & np.isin(yB, [1, 2, 6]), ~rn_ok & pb_ok],
     ['win_shift', 'win_mirror', 'fail_shift_rare', 'loss'], 'other')
 print("counts:", df.category.value_counts().to_dict(), "| test MCIS", len(df))
-print("RoleNet right & PaperBest wrong:", int((rn_ok & ~pb_ok).sum()), "| PaperBest right & RoleNet wrong:", int((~rn_ok & pb_ok).sum()))
-cols = ['sample_id', 'A_III', 'B_IV', 'RoleNet', 'PaperBest', 'p_true_RoleNet', 'p_true_PaperBest', 'certainty_IV',
+print("RoleNet right & baseline wrong:", int((rn_ok & ~pb_ok).sum()), "| baseline right & RoleNet wrong:", int((~rn_ok & pb_ok).sum()))
+cols = ['sample_id', 'A_III', 'B_IV', 'RoleNet', 'Baseline', 'p_true_RoleNet', 'p_true_Baseline', 'certainty_IV',
         'text_II', 'text_III', 'text_IV']
 for cat in ('win_shift', 'win_mirror', 'fail_shift_rare'):
     sub = df[df.category == cat].sort_values(['certainty_IV', 'margin'], ascending=[True, cat.startswith('fail')])

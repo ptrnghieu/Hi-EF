@@ -11657,7 +11657,7 @@ for s in PICK:
             ax[j, k].imshow(F[k][j]); ax[j, k].axis('off')
         ax[0, k].set_title(names[k] + "\n" + "\n".join(textwrap.wrap('"' + text(clips[k]) + '"', 38)[:2]), fontsize=8)
     fig.suptitle(f"{s['sample_id']} [{s['category']}]  RoleNet: {s['RoleNet']} (p_true {s['p_true_RoleNet']})   "
-                 f"PaperBest: {s['PaperBest']} (p_true {s['p_true_PaperBest']})", fontsize=9)
+                 f"baseline: {s['PaperBest']} (p_true {s['p_true_PaperBest']})", fontsize=9)
     fig.tight_layout(); fig.savefig(f"{OUT_DIR}/{s['sample_id']}_grid.png", dpi=130); plt.close(fig)
     fig, ax = plt.subplots(1, 4, figsize=(13, 2.6))
     for k in range(4):

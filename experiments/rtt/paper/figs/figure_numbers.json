@@ -1,6 +1,7 @@
 {
+ "final_model": "RoleNet (G10, uniform sampling)",
  "test_recall": {
-  "PaperBest": {
+  "Baseline": {
    "angry": 44.2,
    "disgust": 0.0,
    "fear": 0.0,
@@ -17,15 +18,6 @@
    "neutral": 52.8,
    "sad": 23.3,
    "surprise": 0.0
-  },
-  "RoleNet w/o roles": {
-   "angry": 35.1,
-   "disgust": 2.5,
-   "fear": 0.0,
-   "happy": 55.0,
-   "neutral": 48.3,
-   "sad": 21.7,
-   "surprise": 2.7
   }
  },
  "test_counts": {

@@ -1,7 +1,9 @@
 # Paper figures and numbers from saved predictions (no training).
-#   test (descriptive): saved G10 seed-averaged predictions of RoleNet, RoleNet-noRole, PaperBest
+#   test (descriptive): saved G10 seed-averaged predictions of RoleNet, RoleNet-noRole and the baseline (saved as 'PaperBest')
 #   development (train+val): G14 OOF (Full, noRole), A's clip-III label from G23, clip-IV certainty from annotation.csv
-# Usage: ARTIFACTS=<dir with g10/, g14/, g23/> ANNOT=<annotation.csv> SPLIT=<split csv> OUT=<figs dir> python paper_figures.py
+#   final model: if G36_DIR holds g36_test_probs.npz / g36_cv_oof.npz, the selected resampled arm replaces RoleNet
+# Usage: ARTIFACTS=<dir with g10/, g14/, g23/> [G36_DIR=<G36 output>] ANNOT=<annotation.csv> SPLIT=<split csv>
+#        OUT=<figs dir> python paper_figures.py
 import os, json
 import numpy as np, pandas as pd
 import matplotlib
@@ -57,9 +59,18 @@ g = lambda f: np.load(os.path.join(A, 'g10', f + '.npy'), allow_pickle=True)
 sid = g('sample_id')
 yt = sp.loc[sid].clip4_emotion.map(E2I).values
 nt = np.bincount(yt, minlength=7)
-PT = {'PaperBest': g('PaperBest').mean(0).argmax(1), 'RoleNet': g('RoleNet').mean(0).argmax(1),
-      'RoleNet w/o roles': g('RoleNet_noRole').mean(0).argmax(1)}
-fig, axs = plt.subplots(1, 3, figsize=(10.5, 3.4))
+G36 = os.environ.get('G36_DIR')
+ours_test = g('RoleNet').mean(0)
+if G36 and os.path.exists(os.path.join(G36, 'g36_test_probs.npz')):
+    t36 = np.load(os.path.join(G36, 'g36_test_probs.npz'), allow_pickle=True)
+    pos = {s_: i for i, s_ in enumerate(t36['sample_id'])}
+    sel = str(t36['selected']).replace('-', '_')
+    ours_test = t36[sel][:, [pos[s_] for s_ in sid]].mean(0)
+    NUM['final_model'] = str(t36['selected'])
+else:
+    NUM['final_model'] = 'RoleNet (G10, uniform sampling)'
+PT = {'Baseline': g('PaperBest').mean(0).argmax(1), 'RoleNet': ours_test.argmax(1)}
+fig, axs = plt.subplots(1, 2, figsize=(7.2, 3.4))
 for ax, (k, p) in zip(axs, PT.items()):
     draw_cm(ax, confusion(p, yt), f"{k} (UAR {uar(p, yt):.1f})", nt)
 axs[0].set_ylabel('true (test count)')
@@ -67,8 +78,8 @@ fig.tight_layout(); fig.savefig(f"{OUT}/confusion_test.pdf"); plt.close(fig)
 NUM['test_recall'] = {k: dict(zip(EMO, np.round(recalls(p, yt), 1))) for k, p in PT.items()}
 NUM['test_counts'] = dict(zip(EMO, nt.tolist()))
 
-# difference RoleNet - PaperBest (row-normalised)
-D = confusion(PT['RoleNet'], yt) - confusion(PT['PaperBest'], yt)
+# difference RoleNet - baseline (row-normalised)
+D = confusion(PT['RoleNet'], yt) - confusion(PT['Baseline'], yt)
 fig, ax = plt.subplots(figsize=(3.6, 3.3))
 ax.imshow(D, cmap=DIV, norm=TwoSlopeNorm(0, -40, 40))
 for i in range(7):
@@ -77,7 +88,7 @@ for i in range(7):
             ax.text(j, i, f"{D[i, j]:+.0f}", ha='center', va='center', fontsize=6.5, color=INK)
 ax.set_xticks(range(7)); ax.set_xticklabels([e[:4] for e in EMO], rotation=45)
 ax.set_yticks(range(7)); ax.set_yticklabels([e[:4] for e in EMO])
-ax.set_title('RoleNet − PaperBest (test, row %)'); ax.set_xlabel('predicted'); ax.set_ylabel('true')
+ax.set_title('RoleNet − baseline (test, row %)'); ax.set_xlabel('predicted'); ax.set_ylabel('true')
 for s in ax.spines.values():
     s.set_visible(False)
 fig.tight_layout(); fig.savefig(f"{OUT}/confusion_diff_test.pdf"); plt.close(fig)
@@ -85,7 +96,7 @@ fig.tight_layout(); fig.savefig(f"{OUT}/confusion_diff_test.pdf"); plt.close(fig
 # per-class recall, test
 fig, ax = plt.subplots(figsize=(4.6, 2.3))
 x = np.arange(7); w = 0.38
-for k, (name, col) in enumerate((('PaperBest', ORANGE), ('RoleNet', BLUE))):
+for k, (name, col) in enumerate((('Baseline', ORANGE), ('RoleNet', BLUE))):
     r = recalls(PT[name], yt)
     ax.bar(x + (k - 0.5) * w * 1.06, r, w, color=col, label=name)
 ax.set_xticks(x); ax.set_xticklabels([f"{e}\n(n={c})" for e, c in zip(EMO, nt)], fontsize=6.5)
@@ -102,6 +113,11 @@ assert (a23['sample_id'] == z['sample_id']).all()
 y, src = z['y'], z['src']
 yA = a23['yA']
 P = z['Full'].mean(0).argmax(1); Pn = z['noRole'].mean(0).argmax(1)
+if G36 and os.path.exists(os.path.join(G36, 'g36_cv_oof.npz')):
+    c36 = np.load(os.path.join(G36, 'g36_cv_oof.npz'), allow_pickle=True)
+    pos = {s_: i for i, s_ in enumerate(c36['sample_id'])}
+    key = NUM['final_model'].replace('-', '_') if NUM['final_model'] in ('Up-sqrt', 'Up-bal') else 'RoleNet'
+    P = c36[key][:, [pos[s_] for s_ in z['sample_id']]].mean(0).argmax(1)
 vis = z['listener_in_III'].astype(bool)
 cert = sp.loc[z['sample_id']].clip4.map(lambda c: ann.at[c, 8] if c in ann.index else 'nan').astype(str).values
 mir = yA == y

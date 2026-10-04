@@ -18,7 +18,6 @@
 \newcommand{\ci}[2]{\,[{#1},\,{#2}]}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\model}{RoleNet}
-\newcommand{\pb}{PaperBest}
 
 \title{Watch the Listener: Identity-Free Responder Modeling\\for Emotion Forecasting in Multi-Party Video}
 
@@ -63,7 +62,7 @@ first is visible as a reaction while listening, the second as the responder's ow
 \begin{figure}[t]
 \centering
 \fbox{\parbox{0.95\columnwidth}{\centering\vspace{0.8cm}\todo{motivation strip from G37 (one test MCIS: clips I--IV,
-transcripts, A's and B's labels; \model{} vs \pb{} forecast)}\vspace{0.8cm}}}
+transcripts, A's and B's labels; \model{} vs.\ baseline forecast)}\vspace{0.8cm}}}
 \caption{\todo{caption after choosing the sample}: the responder is already on screen while A speaks in clip III.}
 \label{fig:motivation}
 \end{figure}
@@ -250,7 +249,7 @@ five held-out training episodes (patience 12), and average the predicted probabi
 \centering\small
 \begin{tabular}{lcc}
 \toprule
- & \pb{} & \model{} \\
+ & Baseline & \model{} \\
 \midrule
 Unit of fusion & frame, then clip & person $\times$ turn \\
 Tokens fused & $3 \times 2 \times 16$ frames, then 3 clips & 16 \\
@@ -266,7 +265,7 @@ number of face frames). \model{} additionally runs face detection, ArcFace, HSEm
 
 For a set of $n$ tokens of width $d$, an SAB costs $O(n^2 d + n d^2)$. \model{} fuses a fixed $n = 16$ tokens at
 $d = 128$, so the encoder cost is constant per MCIS; attention pooling over faces is linear in the number of face
-frames. \pb{} runs two temporal transformers over 16 frames at $d = 512$ in each of the three clips, followed by
+frames. The baseline runs two temporal transformers over 16 frames at $d = 512$ in each of the three clips, followed by
 cross-attention fusion, a three-layer LSTM and a transformer over the clips. Table~\ref{tab:complexity} shows that
 \model{} uses about 40 times fewer parameters and 40--75 times fewer fusion FLOPs. The price is a richer
 pre-processing: face detection, identity and expression embeddings, and a speaker embedding, all computed once per
@@ -276,7 +275,7 @@ clip and shared by every MCIS that contains it.
 \section{Experimental Protocol}
 \label{sec:protocol}
 
-\paragraph{Baseline.} \pb{} is the strongest configuration of \citet{wang2026hief}: per-clip temporal transformers
+\paragraph{Baseline.} Our baseline is the strongest configuration of \citet{wang2026hief}: per-clip temporal transformers
 over face and frame features, cross-attention fusion with text and audio, and LSTM plus transformer fusion across
 clips. We retrain it on our split as re-implemented from the released code (AdamW, learning rate $10^{-4}$, batch
 32, 50 epochs, checkpoint by selection UAR). As the best configuration reported for Hi-EF, it is our reference.
@@ -285,7 +284,7 @@ clips. We retrain it on our split as re-implemented from the released code (Adam
 episodes (2{,}421 MCIS), with folds balanced by MCIS count. Unless stated otherwise we report seed ensembles of 10
 seeds and 95\% intervals from a bootstrap that resamples seeds and episodes (2{,}000 draws).
 
-\paragraph{Test.} The test split was read once for \model{} and \pb{}, under a plan committed before the run
+\paragraph{Test.} The test split was read once for \model{} and the baseline, under a plan committed before the run
 (models, seeds, metrics and the order of confirmatory contrasts). Models were trained on the 45 development
 episodes with five seeds. The preregistered primary metric was 7-class UAR after logit adjustment
 \citep{menon2021logit} of the seed-averaged probabilities; plain argmax scoring, the metric of
@@ -306,7 +305,7 @@ report negative log-likelihood after temperature scaling \citep{guo2017calibrati
 \toprule
 Model (test, seed ensemble) & UAR & WAR \\
 \midrule
-\pb{} \citep{wang2026hief}, retrained & 21.40 & 32.52 \\
+Baseline \citep{wang2026hief}, retrained & 21.40 & 32.52 \\
 \model{} (ours) & \textbf{25.24} & \textbf{36.43} \\
 \midrule
 $\Delta$ plain (descriptive) & $+3.84$\ci{1.24}{6.76} & $+3.91$\ci{0.40}{7.79} \\
@@ -318,11 +317,12 @@ $\Delta$ logit-adj., 6 classes & $+9.95$\ci{6.6}{13.6} & -- \\
 \model{} wins 7 of 8 episodes (plain). The 6-class row excludes \emph{fear} (6 test examples).}
 \label{tab:main}
 \end{table}
+% TODO(G36): add the final class-resampled model as a row if the selection rule reads the test.
 
 Table~\ref{tab:main} shows the test results. Under plain scoring, \model{} improves UAR by 3.84 points and WAR by
-3.91 points over \pb{}. The preregistered primary contrast, UAR after logit adjustment, has a similar point estimate
+3.91 points over the baseline. The preregistered primary contrast, UAR after logit adjustment, has a similar point estimate
 ($+3.77$) but an interval that includes zero. The cause is the \emph{fear} class: with six test examples, one
-correct \emph{fear} prediction is worth 2.38 UAR points, and logit adjustment pushes \pb{} to predict \emph{fear}
+correct \emph{fear} prediction is worth 2.38 UAR points, and logit adjustment pushes the baseline to predict \emph{fear}
 for 27.6\% of test MCIS (true rate 1.5\%), gaining two \emph{fear} hits while its \emph{angry} recall falls to
 1.3\%. Without \emph{fear}, the adjusted contrast is $+9.95$ \ci{6.6}{13.6}. We therefore regard the test result as
 consistent with, but not a confirmation of, the development-set evidence, and we flag the choice of an adjusted
@@ -331,16 +331,17 @@ consistent with, but not a confirmation of, the development-set evidence, and we
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figs/confusion_test.pdf}
-\caption{Row-normalised confusion matrices on the test split (saved seed-ensemble predictions; descriptive). Row
-labels give the number of test MCIS per class.}
+\caption{Row-normalised confusion matrices of the baseline and \model{} on the test split (seed ensembles;
+descriptive). Row labels give the number of test MCIS per class.}
 \label{fig:confusion}
 \end{figure*}
 
-Figure~\ref{fig:confusion} shows where the gain comes from. \pb{} confuses polarity: it forecasts \emph{happy} for
+Figure~\ref{fig:confusion} shows where the gain comes from. The baseline confuses polarity: it forecasts \emph{happy} for
 58\% of \emph{sad} responses and recalls only 3\% of them. \model{} reduces this confusion to 18\% and raises
 \emph{sad} recall to 23\%, while keeping \emph{angry}, \emph{happy} and \emph{neutral} at a similar level. Both models
 almost never predict \emph{disgust}, \emph{fear} or \emph{surprise}, which we analyse in Section~\ref{sec:analysis}.
-Dropping the role labels lowers \emph{angry} recall from 48\% to 35\%.
+\todo{numbers of this paragraph and Figures~\ref{fig:confusion},~\ref{fig:groups} are from the uniformly sampled
+model; regenerate with analysis/paper\_figures.py (G36\_DIR) after G36 and update.}
 
 \subsection{Does the forecaster need to know who responds?}
 \label{sec:proxy}
@@ -437,9 +438,9 @@ transcript: an additive split of text versus everything else loses nothing ($-0.
 \subsection{Generalisation to MELD}
 
 We rebuilt Hi-EF-style windows from MELD \citep{poria2019meld} (three turns, then a turn of a different speaker;
-5{,}406/595/1{,}341 windows), without speaker names as input, and trained \model{} and \pb{} with three seeds
+5{,}406/595/1{,}341 windows), without speaker names as input, and trained \model{} and the baseline with three seeds
 (train for fitting, dev for early stopping, test read once for the comparison). \model{} reaches 16.85 UAR vs.\
-15.50 for \pb{} ($+1.35$ \ci{-1.02}{4.24}; chance 14.29). \pb{} predicts \emph{neutral} for most windows (recall
+15.50 for the baseline ($+1.35$ \ci{-1.02}{4.24}; chance 14.29). The baseline predicts \emph{neutral} for most windows (recall
 93\%), which gives it a higher WAR (46.09 vs.\ 39.30) and a lower NLL (1.543 vs.\ 1.695). The advantage on MELD is
 therefore small and not confirmed.
 
@@ -524,7 +525,7 @@ Access & Models & Status \\
 1 & recognise-then-transition and trajectory forecasters, a benchmark-style forecaster (earlier model family) &
 single preregistered run; invalid for the trajectory arms (caching bug) \\
 2, 3 & same family: re-run after the fix; 5-fold CV over all 53 episodes & announced; execution not verified \\
-4 & \model{}, \pb{} and baselines (this paper, Table~\ref{tab:main}) & single preregistered run \\
+4 & \model{}, the baseline and internal variants (this paper, Table~\ref{tab:main}) & single preregistered run \\
 5 & class-resampled \model{} (Section~\ref{sec:analysis}) & \todo{G36: run / not run} \\
 \bottomrule
 \end{tabular}
@@ -550,7 +551,7 @@ Modality dropout & context 0.3, else faces 0.15 \\
 Optimiser & AdamW, lr $3\cdot10^{-4}$, wd $10^{-2}$, batch 64 \\
 Schedule & $\le$ 80 epochs, patience 12 on held-out UAR \\
 Seeds & 10 (development CV), 5 (test) \\
-\pb{} & AdamW lr $10^{-4}$, wd $10^{-5}$, batch 32, 50 epochs \\
+Baseline & AdamW lr $10^{-4}$, wd $10^{-5}$, batch 32, 50 epochs \\
 \bottomrule
 \end{tabular}
 \caption{Hyper-parameters (fixed before the test run; none tuned on test).}

@@ -11380,7 +11380,9 @@ json.dump({'verdict': verdict, 'D_int': point['D_int = NLL(EMAP3) - NLL(full)'],
 # ---------------------------------------------------------------- G36: class-balanced resampling (CV selection, then a second test read)
 _G36_CFG = G10[2][1].replace(
     "UNLOCK_TEST = False          # set to True for the single preregistered run",
-    "UNLOCK_TEST = True           # G36: second, disclosed test read (authors' decision); part A never uses test rows") + """
+    "UNLOCK_TEST = True           # G36: second, disclosed test read (authors' decision); part A never uses test rows").replace(
+    """    ("B1",             'b1',   None),\n""", "").replace(
+    """    ("RoleNet-noRole", 'role', {**FULL, 'role': False}),\n""", "") + """
 # ---- G36
 CV_SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]     # development CV, as G14
 N_OUTER = 5
@@ -11390,7 +11392,7 @@ G10_PROBS_GLOBS = ["/kaggle/input/**/g10_test_probs.npz", "/kaggle/working/g10_t
 G10_NPY_GLOBS = ["/kaggle/input/**/PaperBest.npy"]          # or the unpacked G10 output: a folder of .npy files
 CV_REUSE_GLOBS = ["/kaggle/input/**/g36_cv_oof.npz"]       # reuse part A of an earlier G36 run (same folds and seeds)
 """
-assert "UNLOCK_TEST = True" in _G36_CFG
+assert "UNLOCK_TEST = True" in _G36_CFG and '"B1"' not in _G36_CFG
 
 G36 = [
     ("markdown", r"""

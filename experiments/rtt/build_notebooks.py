@@ -9321,6 +9321,390 @@ print("saved g29_summary.csv and g29_estimands.csv")
 ]
 
 
+# ---------------------------------------------------------------- G30: context-conditioned auxiliary supervision with gradient routing
+G30 = [
+    ("markdown", r"""
+# G30 — Auxiliary face supervision of RoleNet: whole-face head vs L-only vs L + context, with and without gradient routing (5-fold CV, train+val, 10 seeds; test untouched)
+
+**Question.** RoleNet's face auxiliary head predicts B from the mean of all 9 face tokens (absent tokens included), so
+the auxiliary loss sends the same token-level gradient to every cell. Does supervising the listener representation
+**in the presence of the context** forecast better than supervising the mean of all faces, and does it matter whether
+the auxiliary loss may also update the context path?
+
+Hypothesis: supervising the L representation conditioned on the context forecasts better than supervising the mean of
+all face tokens. This is context-conditioned auxiliary supervision with gradient routing. It is **not** claimed to
+learn "L's residual information" or to reduce mirroring bias; the MLP head has no additive (product-of-experts)
+decomposition, and the context path keeps changing through the main and other losses.
+
+**Arms** (only the face auxiliary head changes; the A head (Y_A) and the context head stay as in RoleNet; weight 0.3):
+
+| Arm | Face auxiliary head |
+|---|---|
+| `S0` | original: CE(h_face(mean of 9 face tokens), Y_B), all MCIS |
+| `S1` | none |
+| `S2` | L only: h_ψ(z_L, 0, 0, 0, 0) |
+| `S3` | L + context: h_ψ(z_L, z_AO, z_speech, z_scene, m_AO) |
+| `S4` | L + stop-gradient(context): h_ψ(z_L, sg(z_AO), sg(z_speech), sg(z_scene), m_AO) |
+
+* z_L = mean of the **observed** L face tokens (clips I–III, before the Transformer, absent tokens excluded). MCIS
+  without any L observation get no auxiliary loss in S2–S4 (target ignored); S2–S4 use the same MCIS set and the same
+  normalisation (mean over valid MCIS of the batch). S0 keeps its original behaviour on all MCIS.
+* z_AO = mean of the observed A/O face tokens (zero vector and m_AO = 0 if none); z_speech, z_scene = means of the three
+  speech / scene tokens. z_C is **not** "everything except L": scene and voice cues may still carry L information.
+* h_ψ: per-group LayerNorm, concatenation with m_AO, Linear(4d + 1 → 128), GELU, Linear(128 → 7). S2–S4 use the same
+  module; S2 feeds zeros (and m_AO = 0) instead of the context groups; S4 detaches the context vectors **before** the
+  head's LayerNorms (so the head's own LayerNorm parameters still learn).
+* The auxiliary heads read the tokens **before** modality dropout (as in RoleNet); modality dropout only masks the main
+  Transformer's input. Same rule in every arm.
+* All modules are created in every arm (same initialisation per seed); active parameter counts are reported.
+
+**Checkpoint selection and estimand (fixed before running).** Every arm selects the epoch by **NLL on the inner-dev
+episodes** (same patience and maximum epochs as G14). Deciding metric: NLL_{s,a} = mean NLL of seed s's out-of-fold
+probabilities of arm a over all 2,421 MCIS; quantities are means of per-seed NLL. Interval: 2,000 bootstrap draws over
+the 10 seeds and the 45 episodes, the same draws for all arms.
+
+**Reading rules (fixed before running).**
+* **Method (gradient routing) supported** iff the CI of NLL(S3) − NLL(S4) is entirely above 0.
+* **Worth adding to RoleNet** iff, in addition, the CIs of NLL(S0) − NLL(S4) **and** NLL(S1) − NLL(S4) are entirely above 0.
+  Beating S0 but not S1 only shows that fixing or removing the old head helps.
+* Always reported: NLL(S2) − NLL(S4) (context in the routed design), NLL(S1) − NLL(S0), per-arm UAR and ensemble NLL
+  (descriptive). S4 − S0 is not an isolation of gradient routing (input sources and the set of supervised MCIS differ).
+
+**Mechanism diagnostic (not a gate).** For each frozen outer model: probes on its own pre-Transformer embeddings,
+fitted (with C chosen by grouped inner CV) on the outer-fold training rows with an L observation and scored on the
+outer fold: q_C reads z_C = [z_AO, z_speech, z_scene, m_AO], q_LC reads [z_L, z_C]. Δ_probe = NLL(q_C) − NLL(q_LC) is
+the probe's conditional predictive gain from z_L; it depends on the probe family and is not I(Y_B; z_L | z_C). Probes
+are never fitted across encoders.
+
+Saved for later analyses: every selected checkpoint, inner-dev and outer logits (for e.g. temperature scaling).
+"""),
+    ("code", G13[1][1]
+        .replace("SEEDS = [42, 123, 456]                       # as G8b / G11 / G12",
+                 "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14")
+        .split("ARMS = [")[0] + """ARMS = ['S0', 'S1', 'S2', 'S3', 'S4']
+EXPERIMENTS = [("RoleNet", 'role', FULL)]    # only used by the shared model cell's parameter print
+N_BOOT = 2000
+AUX_HIDDEN = 128
+RUN_PROBE = True
+PROBE_C = [0.01, 0.1, 1.0]
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## RoleNet with the face auxiliary head chosen by arm"),
+    ("code", r"""
+class RoleNetAux(RoleNet):
+    def __init__(self, arm, d=RN['D']):
+        super().__init__(FULL, d)
+        self.arm = arm
+        self.ln = nn.ModuleList([nn.LayerNorm(d) for _ in range(4)])          # z_L, z_AO, z_speech, z_scene
+        self.aux_mlp = nn.Sequential(nn.Linear(4 * d + 1, AUX_HIDDEN), nn.GELU(), nn.Linear(AUX_HIDDEN, 7))
+        self.unused = {'S0': ['ln', 'aux_mlp'], 'S1': ['ln', 'aux_mlp', 'head_face'],
+                       'S2': ['head_face'], 'S3': ['head_face'], 'S4': ['head_face']}[arm]
+
+    def active_params(self):
+        return sum(p.numel() for n, p in self.named_parameters() if not any(n.startswith(u + '.') for u in self.unused))
+
+    def tokens(self, ix):
+        B = len(ix)
+        h, present = self.pool(FACE[ix], FMASK[ix])                           # [B, 3, 3, d], [B, 3, 3]
+        h = torch.where(present.unsqueeze(-1), h, self.absent.unsqueeze(0).expand(B, -1, -1, -1))
+        h = h + self.face_role[None, :, None] + self.clip_emb[None, None]
+        spk_ = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
+        scn = self.scene(SCN[ix]) + self.ctx_role[1]
+        ct = torch.cat([spk_ + self.clip_emb, scn + self.clip_emb], 1)         # [B, 6, d]
+        return h, present, ct
+
+    @staticmethod
+    def groups(h, present, ct):
+        mL = present[:, 1].float().unsqueeze(-1)                              # [B, 3, 1]
+        zL = (h[:, 1] * mL).sum(1) / mL.sum(1).clamp(min=1)
+        validL = present[:, 1].any(-1)
+        hAO, mAO = h[:, [0, 2]].reshape(len(h), 6, -1), present[:, [0, 2]].reshape(len(h), 6).float().unsqueeze(-1)
+        zAO = (hAO * mAO).sum(1) / mAO.sum(1).clamp(min=1)
+        fAO = (mAO.sum(1) > 0).float()                                         # [B, 1]
+        zAO = zAO * fAO
+        return zL, validL, zAO, fAO, ct[:, :3].mean(1), ct[:, 3:].mean(1)
+
+    def forward(self, ix, train=False):
+        B, arm, aux = len(ix), self.arm, {}
+        h, present, ct = self.tokens(ix)
+        ft = h.reshape(B, 9, -1)
+        if arm == 'S0':
+            aux['face'] = (self.head_face(ft.mean(1)), YB[ix], RN['aux_w'])
+        elif arm in ('S2', 'S3', 'S4'):
+            zL, validL, zAO, fAO, zsp, zsc = self.groups(h, present, ct)
+            ctx = [zAO, zsp, zsc]
+            if arm == 'S2':
+                ctx, fAO = [torch.zeros_like(c) for c in ctx], torch.zeros_like(fAO)
+            elif arm == 'S4':
+                ctx = [c.detach() for c in ctx]                               # stop-gradient before the head's LayerNorm
+            inp = torch.cat([self.ln[0](zL)] + [self.ln[i + 1](c) for i, c in enumerate(ctx)] + [fAO], -1)
+            aux['face'] = (self.aux_mlp(inp), torch.where(validL, YB[ix], torch.full_like(YB[ix], -100)), RN['aux_w'])
+        tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+        aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
+        aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
+        toks = torch.cat([self.query.expand(B, -1, -1), ft, ct], 1)
+        valid = torch.ones(toks.shape[:2], dtype=torch.bool, device=toks.device)
+        if train:
+            u = torch.rand(B, device=toks.device)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+            valid[:, 1:10] &= ~drop_face.unsqueeze(1)
+            valid[:, 10:] &= ~drop_ctx.unsqueeze(1)
+        out = self.enc(toks, src_key_padding_mask=~valid)
+        return self.head(out[:, 0]), aux
+
+    @torch.no_grad()
+    def embed(self, ix, bs=512):
+        self.eval()
+        out = []
+        for i in range(0, len(ix), bs):
+            zL, validL, zAO, fAO, zsp, zsc = self.groups(*self.tokens(ix[i:i + bs]))
+            out.append(torch.cat([zL, zAO, zsp, zsc, fAO, validL.float().unsqueeze(-1)], -1).cpu())
+        return torch.cat(out).numpy()                                         # [n, 4d + 2]: zL | zC (zAO, sp, sc, fAO) | validL
+
+
+def logits_of(model, ix, bs=256):
+    model.eval()
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(ix), bs):
+            out.append(model(ix[i:i + bs])[0].float().cpu())
+    return torch.cat(out).numpy()
+
+
+def nll_logits(z, y):
+    z = z - z.max(1, keepdims=True)
+    return float((np.log(np.exp(z).sum(1)) - z[np.arange(len(y)), y]).mean())
+
+
+def train_eval_g30(arm, tr, dev, te, seed, ckpt_path):
+    seed_all(seed)
+    hp = HP['role']
+    model = RoleNetAux(arm).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    best, best_state, bad, best_ep = np.inf, None, 0, -1
+    for ep in range(hp['epochs']):
+        model.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm), hp['batch']):
+            j = perm[i:i + hp['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, w in aux.values():
+                if (t >= 0).any():
+                    loss = loss + w * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        J = nll_logits(logits_of(model, dev), y_dev)
+        if J < best:
+            best, bad, best_ep = J, 0, ep
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    torch.save(best_state, ckpt_path)
+    return model, logits_of(model, dev), logits_of(model, te), best, best_ep
+
+
+for a in ARMS:
+    print(a, "active parameters:", f"{RoleNetAux(a).active_params() / 1e6:.4f}M")
+"""),
+    ("markdown", "## Probe helper (mechanism diagnostic)"),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+
+D_ = RN['D']
+
+
+def probe_losses(E_tr, y_tr, g_tr, E_te, y_te):
+    # per-row NLL on the evaluation rows for q_C (z_C) and q_LC ([z_L, z_C]); C by grouped inner CV on training rows
+    out = []
+    for cols in (slice(D_, 4 * D_ + 1), slice(0, 4 * D_ + 1)):
+        Xtr, Xte = E_tr[:, cols], E_te[:, cols]
+        sc = StandardScaler().fit(Xtr)
+        Xtr, Xte = sc.transform(Xtr), sc.transform(Xte)
+        score = {}
+        for C in PROBE_C:
+            s = []
+            for a, b in GroupKFold(3).split(Xtr, y_tr, g_tr):
+                m = LogisticRegression(C=C, max_iter=500).fit(Xtr[a], y_tr[a])
+                p = np.full((len(b), 7), 1e-6); p[:, m.classes_] = m.predict_proba(Xtr[b])
+                s.append(-np.log(np.clip(p[np.arange(len(b)), y_tr[b]] / p.sum(1), 1e-7, None)).mean())
+            score[C] = np.mean(s)
+        m = LogisticRegression(C=min(score, key=score.get), max_iter=500).fit(Xtr, y_tr)
+        p = np.full((len(Xte), 7), 1e-6); p[:, m.classes_] = m.predict_proba(Xte)
+        out.append(-np.log(np.clip(p[np.arange(len(y_te)), y_te] / p.sum(1), 1e-7, None)))
+    return np.stack(out, 1)                                                  # [n_te, 2]: q_C, q_LC
+"""),
+    ("markdown", "## 5-fold episode cross-validation (same folds, early-stop episodes and seeds as G14)"),
+    ("code", r"""
+import re
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+print("fold sizes (MCIS):", load_, "| MCIS with an L observation:", int(FMASK[:, 1].any(-1).any(-1).sum()))
+
+os.makedirs(f"{OUT_DIR}/g30_ckpt", exist_ok=True)
+LOGIT = {a: np.full((len(SEEDS), N, 7), np.nan, np.float32) for a in ARMS}
+PROBE = {a: np.full((len(SEEDS), N, 2), np.nan, np.float32) for a in ARMS}
+DEVLOG, DEVROWS = {}, {}
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    DEVROWS[f] = dev_rows
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for a in ARMS:
+        DEVLOG[(a, f)] = np.zeros((len(SEEDS), len(dev_rows), 7), np.float32)
+        for si, seed in enumerate(SEEDS):
+            t1 = time.time()
+            model, zd, zt, J, ep = train_eval_g30(a, tr, dev, te, seed + 1000 * f,
+                                                  f"{OUT_DIR}/g30_ckpt/{a}_fold{f}_seed{seed}.pt")
+            LOGIT[a][si, te_rows] = zt
+            DEVLOG[(a, f)][si] = zd
+            yt = y_all[te_rows]
+            p = np.exp(zt - zt.max(1, keepdims=True)); p /= p.sum(1, keepdims=True)
+            w, u = war_uar(p.argmax(1), yt, 7)
+            rec = {'fold': f, 'arm': a, 'seed': seed, 'dev_NLL': J, 'best_epoch': ep, 'NLL': nll_logits(zt, yt),
+                   'UAR': u, 'WAR': w, 'train_s': time.time() - t1}
+            if RUN_PROBE:
+                t2 = time.time()
+                E_tr, E_te = model.embed(T(trr)), model.embed(te)
+                ktr, kte = E_tr[:, -1] > 0, E_te[:, -1] > 0
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore', ConvergenceWarning)
+                    pl = probe_losses(E_tr[ktr, :-1], y_all[trr][ktr], src[trr][ktr], E_te[kte, :-1], yt[kte])
+                PROBE[a][si, te_rows[kte]] = pl
+                rec.update({'probe_qC': pl[:, 0].mean(), 'probe_qLC': pl[:, 1].mean(), 'probe_s': time.time() - t2})
+            log.append(rec)
+            print(f"fold {f} {a} seed {seed:>3}: dev NLL {J:.4f} (epoch {ep}) | NLL {rec['NLL']:.4f} UAR {u:5.2f}"
+                  + (f" | probe Δ {rec['probe_qC'] - rec['probe_qLC']:+.4f}" if RUN_PROBE else "")
+                  + f" | {(time.time() - t0) / 60:.1f} min", flush=True)
+            del model
+            torch.cuda.empty_cache()
+
+assert all(not np.isnan(v).any() for v in LOGIT.values())
+LOG = pd.DataFrame(log)
+LOG.to_csv(f"{OUT_DIR}/g30_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g30_logits.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
+         validL=FMASK[:, 1].any(-1).any(-1).cpu().numpy(),
+         **{f"outer_{a}": v for a, v in LOGIT.items()}, **{f"probe_{a}": v for a, v in PROBE.items()},
+         **{f"dev_{a}_fold{f}": v for (a, f), v in DEVLOG.items()}, **{f"devrows_fold{f}": r for f, r in DEVROWS.items()})
+print("saved g30_logits.npz (outer logits [seed, MCIS, 7], inner-dev logits per fold, probe losses), "
+      "g30_fold_seed_log.csv and the checkpoints in g30_ckpt/")
+"""),
+    ("markdown", "## Results (fixed estimand: mean of per-seed NLL; two-level bootstrap with shared draws)"),
+    ("code", r"""
+S = len(SEEDS)
+
+
+def row_nll(z):
+    z = z - z.max(-1, keepdims=True)
+    return np.log(np.exp(z).sum(-1)) - np.take_along_axis(z, y_all[None, :, None], -1)[..., 0]
+
+
+LOSS = {a: row_nll(LOGIT[a]) for a in ARMS}                                # [S, N]
+PAIRS = {'NLL(S3) - NLL(S4)': ('S3', 'S4'), 'NLL(S0) - NLL(S4)': ('S0', 'S4'), 'NLL(S1) - NLL(S4)': ('S1', 'S4'),
+         'NLL(S2) - NLL(S4)': ('S2', 'S4'), 'NLL(S1) - NLL(S0)': ('S1', 'S0')}
+VL = FMASK[:, 1].any(-1).any(-1).cpu().numpy()
+
+
+def quantities(sidx, w):
+    nl = {a: float((LOSS[a][sidx].mean(0) * w).sum() / w.sum()) for a in ARMS}
+    q = {f'NLL {a}': nl[a] for a in ARMS}
+    q.update({k: nl[x] - nl[y] for k, (x, y) in PAIRS.items()})
+    if RUN_PROBE:
+        for a in ARMS:
+            P = PROBE[a][sidx].mean(0)                                         # [N, 2], NaN where no L
+            wv = w * VL
+            q[f'probe gain {a}'] = float(((P[:, 0] - P[:, 1]) * wv)[VL].sum() / wv.sum())
+        q['probe gain S4 - S3'] = q['probe gain S4'] - q['probe gain S3']
+        q['probe gain S4 - S0'] = q['probe gain S4'] - q['probe gain S0']
+    return q
+
+
+point = quantities(np.arange(S), np.ones(N))
+rng = np.random.default_rng(0)
+gidx = [np.where(src == e)[0] for e in np.unique(src)]
+draws = []
+for _ in range(N_BOOT):
+    w = np.zeros(N)
+    for i in rng.integers(0, len(gidx), len(gidx)):
+        w[gidx[i]] += 1
+    draws.append(quantities(rng.integers(0, S, S), w))
+D = pd.DataFrame(draws)
+CI = {k: np.percentile(D[k], [2.5, 97.5]) for k in D}
+show = lambda k: print(f"  {k:<24} {point[k]:+.4f} [{CI[k][0]:+.4f}, {CI[k][1]:+.4f}]")
+
+print("mean per-seed NLL (all MCIS):", {a: round(point[f'NLL {a}'], 4) for a in ARMS})
+print("best epoch (mean):", LOG.groupby('arm').best_epoch.mean().round(1).to_dict())
+print("\n== primary: gradient routing ==")
+show('NLL(S3) - NLL(S4)')
+print("\n== practical value (with the primary) ==")
+show('NLL(S0) - NLL(S4)'); show('NLL(S1) - NLL(S4)')
+print("\n== always reported ==")
+show('NLL(S2) - NLL(S4)'); show('NLL(S1) - NLL(S0)')
+
+lo = {k: CI[k][0] for k in PAIRS}
+method = lo['NLL(S3) - NLL(S4)'] > 0
+print("\n== G30 reading (fixed rules) ==")
+print("  method (gradient routing): " + ("SUPPORTED" if method else "NOT SUPPORTED (CI of NLL(S3) − NLL(S4) not above 0)"))
+if method and lo['NLL(S0) - NLL(S4)'] > 0 and lo['NLL(S1) - NLL(S4)'] > 0:
+    print("  worth adding to RoleNet: YES (S4 also beats S0 and S1)")
+else:
+    print("  worth adding to RoleNet: NO")
+if lo['NLL(S0) - NLL(S4)'] > 0 and not lo['NLL(S1) - NLL(S4)'] > 0:
+    print("  note: S4 beats S0 but not S1 → fixing or removing the old head helps; no evidence for the new head itself")
+
+if RUN_PROBE:
+    print("\n== mechanism diagnostic (probe conditional gain from z_L, NLL(q_C) − NLL(q_LC); not a gate) ==")
+    for a in ARMS:
+        show(f'probe gain {a}')
+    show('probe gain S4 - S3'); show('probe gain S4 - S0')
+
+rows = []
+for a in ARMS:
+    P = np.exp(LOGIT[a] - LOGIT[a].max(-1, keepdims=True)); P /= P.sum(-1, keepdims=True)
+    per = [war_uar(P[s].argmax(1), y_all, 7)[1] for s in range(S)]
+    ens = P.mean(0)
+    rows.append({'arm': a, 'NLL_seed_mean': point[f'NLL {a}'],
+                 'NLL_ensemble': float(-np.log(np.clip(ens[np.arange(N), y_all], 1e-7, None)).mean()),
+                 'UAR_seed_mean': np.mean(per), 'UAR_seed_sd': np.std(per), 'UAR_ensemble': war_uar(ens.argmax(1), y_all, 7)[1],
+                 'best_epoch_mean': LOG[LOG.arm == a].best_epoch.mean(), 'active_params': RoleNetAux(a).active_params()})
+SUM = pd.DataFrame(rows)
+print("\n== per arm (UAR descriptive) ==")
+print(SUM.round(4).to_string(index=False))
+SUM.to_csv(f"{OUT_DIR}/g30_summary.csv", index=False)
+pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point', 'lo', 'hi']).T.to_csv(
+    f"{OUT_DIR}/g30_estimands.csv")
+print("saved g30_summary.csv and g30_estimands.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -9347,6 +9731,7 @@ if __name__ == "__main__":
                         ("g27_mention_aggregation_pilot.ipynb", G27),
                         ("g28_masked_listener_training_cv.ipynb", G28),
                         ("g29_context_pooling_cv.ipynb", G29),
+                        ("g30_aux_supervision_cv.ipynb", G30),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

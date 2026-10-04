@@ -1,49 +1,17 @@
-# RoleNet architecture figure (paper Figure 3), drawn with matplotlib at the final text width (6.3 in), so font sizes
-# are the printed sizes. Optional G37_PNG (G37 <id>_paper.png) adds real input thumbnails; otherwise grey placeholders.
+# RoleNet architecture figure (paper Figure 2), drawn at the final text width (6.3 in) in the shared paper style.
+# Optional G37_PNG (G37 <id>_paper.png) adds real frame thumbnails; otherwise grey placeholders.
 #   G37_PNG=.../sample01305_paper.png OUT=paper/figs python analysis/architecture_figure.py
 import os
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from figstyle import (plt, Circle, Rectangle, FILL, ACC, ROLE, box, token, container, arrow, line, INK)
 
 OUT = os.environ.get('OUT', 'figs')
 SRC = os.environ.get('G37_PNG')
-INK, INK2, LINE = '#1a1a1a', '#5b5a56', '#a9a8a3'
-A, L, O, SP, SC, Q = '#eb6834', '#2a78d6', '#8a8984', '#1baf7a', '#d99100', '#4a3aa7'
-FILL = {A: '#fbe1d6', L: '#d6e6fa', O: '#e7e6e3', SP: '#d1efe4', SC: '#fbecc8', Q: '#e3dff6'}
-STAGE = ['#f6f5f2', '#f6f5f2', '#f6f5f2', '#f6f5f2']
-plt.rcParams.update({'font.family': 'DejaVu Sans', 'font.size': 7})
-
-fig = plt.figure(figsize=(6.3, 2.25))
-ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 126); ax.set_ylim(0, 45); ax.axis('off')
 
 
-def rbox(x, y, w, h, ec=LINE, fc='white', lw=0.9, ls='-', r=1.0, z=1):
-    ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle=f'round,pad=0.2,rounding_size={r}', ec=ec, fc=fc, lw=lw,
-                                ls=ls, zorder=z))
-
-
-def text(x, y, s, fs=7, c=INK, **kw):
-    ax.text(x, y, s, fontsize=fs, color=c, ha=kw.pop('ha', 'center'), va=kw.pop('va', 'center'), zorder=5, **kw)
-
-
-def arrow(x1, y1, x2, y2, c=INK2):
-    ax.add_patch(FancyArrowPatch((x1, y1), (x2, y2), arrowstyle='-|>', mutation_scale=8, color=c, lw=0.9, zorder=4))
-
-
-def stage(x, w, label):
-    rbox(x, 5.5, w, 38.5, ec='#c9c8c3', fc='#faf9f7', lw=0.8, ls=(0, (4, 2)), r=1.6, z=0)
-    text(x + w / 2, 2.4, label, fs=7.0, c=INK, weight='bold')
-
-
-# ---------------- stage (a): inputs
-stage(1, 19, '(a) Clips I–III')
-panels = None
-if SRC and os.path.exists(SRC):
+def panels_from(src):
     from PIL import Image
-    img = np.asarray(Image.open(SRC).convert('RGB'))
+    img = np.asarray(Image.open(src).convert('RGB'))
     g = img.mean(2) < 235
     col = g[img.shape[0] // 5: img.shape[0] * 7 // 10].mean(0) > 0.5
     e = np.flatnonzero(np.diff(col.astype(int)))
@@ -51,73 +19,119 @@ if SRC and os.path.exists(SRC):
     row = g[:, xs[0][0]:xs[0][1]].mean(1) > 0.5
     y0, y1 = np.flatnonzero(np.diff(row.astype(int)))[:2] + 1
     y1 = y0 + int(0.80 * (y1 - y0))
-    panels = [img[y0:y1, a:b] for a, b in xs[:3]]
-for k, name in enumerate(['I', 'II', 'III']):
-    y = 33.5 - 10.6 * k
-    if panels is not None:
-        ax.imshow(panels[k], extent=(3, 15, y, y + 7.5), zorder=3, aspect='auto')
-        ax.add_patch(plt.Rectangle((3, y), 12, 7.5, fill=False, ec=LINE, lw=0.6, zorder=4))
+    return [img[y0:y1, a:b] for a, b in xs]
+
+
+def enc_box(x, y, w, h, title, sub, fill):
+    box(ax, x, y, w, h, '', fill=fill)
+    ax.text(x + w / 2, y + h * 0.66, title, ha='center', va='center', fontsize=7.2, zorder=4)
+    ax.text(x + w / 2, y + h * 0.28, sub, ha='center', va='center', fontsize=6.0, style='italic', zorder=4)
+
+
+def center_crop(p, aspect=4 / 3):
+    h, w = p.shape[:2]
+    cw = int(h * aspect)
+    x0 = (w - cw) // 2
+    return p[:, x0:x0 + cw]
+
+
+fig = plt.figure(figsize=(6.3, 2.62))
+ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, 100); ax.set_ylim(0, 41.6); ax.set_aspect('equal'); ax.axis('off')
+
+# ============ (1) feature extraction
+container(ax, 0.4, 5.0, 26.6, 36.2, 'Feature Extraction')
+rows = {'face': 34.6, 'scene': 26.6, 'text': 18.4, 'audio': 10.4}
+# frame strip (clips I-III)
+P = panels_from(SRC) if SRC and os.path.exists(SRC) else None
+for k in range(3):
+    x = 1.4 + 3.6 * k
+    if P is not None:
+        ax.imshow(center_crop(P[k]), extent=(x, x + 3.5, 32.6, 36.6), zorder=3, aspect='auto')
     else:
-        rbox(3, y, 12, 7.5, fc='#dddcd8')
-    text(17.4, y + 3.75, name, fs=7.2, weight='bold')
-text(10.5, 9.0, 'frames · audio · text', fs=6.2, c=INK2)
+        ax.add_patch(Rectangle((x, 32.6), 3.5, 4.0, fc='#cccccc', ec='white', zorder=3))
+    ax.text(x + 1.75, 37.0, ['I', 'II', 'III'][k], ha='center', va='bottom', fontsize=7)
+enc_box(13.2, 32.2, 12.4, 4.8, 'Face Encoder', 'ArcFace, HSEmotion', FILL['blue'])
+arrow(ax, 12.2, rows['face'], 13.2, rows['face'])
+enc_box(13.2, 24.2, 12.4, 4.8, 'Scene Encoder', 'CLIP image', FILL['green'])
+line(ax, [6.6, 6.6], [32.6, rows['scene']]); arrow(ax, 6.6, rows['scene'], 13.2, rows['scene'])
+# transcript
+box(ax, 1.4, 15.7, 10.4, 5.4, '“Well… I’ll\nhold my\ntongue.”', fill='#f2f2f2', ec='#7f7f7f',
+    fs=6.4)
+enc_box(13.2, 16.0, 12.4, 4.8, 'Text Encoder', 'CLIP text', FILL['yellow'])
+arrow(ax, 11.8, rows['text'], 13.2, rows['text'])
+# waveform
+rng = np.random.default_rng(3)
+xw = np.linspace(2.0, 11.0, 22)
+amp = np.abs(np.sin(np.linspace(0, 6, 22))) * 1.1 + rng.uniform(0.15, 0.6, 22)
+for xv, a in zip(xw, amp):
+    ax.add_patch(Rectangle((xv - 0.14, rows['audio'] - a), 0.28, 2 * a, fc=INK, ec='none', zorder=3))
+enc_box(13.2, 8.0, 12.4, 4.8, 'Audio Encoder', 'AudioCLIP, ECAPA', FILL['purple'])
+arrow(ax, 11.8, rows['audio'], 13.2, rows['audio'])
 
-# ---------------- stage (b): role assignment
-stage(23, 22, '(b) Role assignment')
-rbox(25.5, 34, 17, 7, ec=LINE, fc='white')
-text(34, 37.5, 'faces → ArcFace\n→ identities', fs=6.6)
-arrow(34, 33.6, 34, 30.6)
-for j, (n, c, rule) in enumerate([('A', A, 'most frames\nin clip III'), ('L', L, '2nd most\nin clip III'),
-                                  ('O', O, 'all others')]):
-    y = 24.2 - 6.6 * j
-    rbox(25.5, y, 5, 5.0, ec=c, fc=FILL[c])
-    text(28, y + 2.5, n, fs=7.5, c=c, weight='bold')
-    text(32.3, y + 2.5, rule, fs=6.0, c=INK2, ha='left')
-text(34, 8.4, 'no clip IV, no names', fs=6.2, c=INK2, style='italic')
-arrow(20.6, 24, 22.6, 24)
+# ============ (2) role-based evidence set
+container(ax, 28.2, 5.0, 29.6, 36.2, 'Role-Based Evidence Set')
+# identity clusters -> roles
+box(ax, 29.5, 29.4, 4.6, 10.4, '', fill='none', ec=INK, ls=(0, (2, 1.5)), lw=0.7, r=0.8)
+ycl = {'A': 37.6, 'L': 34.6, 'O': 31.6}
+for r_, yc in ycl.items():
+    fn, c = ROLE[r_]
+    ax.add_patch(Circle((31.8, yc), 1.25, fc=FILL[fn], ec=c, lw=0.9, zorder=3))
+    ax.text(31.8, yc, r_, ha='center', va='center', fontsize=7.5, color=c, weight='bold', zorder=4)
+arrow(ax, 25.6, rows['face'], 29.5, rows['face'])
+for r_, yc in ycl.items():
+    fn, c = ROLE[r_]
+    ax.plot([33.05, 34.6, 34.6, 36.0], [yc, yc, yc, yc], color=INK, lw=0.6, zorder=3)
+    box(ax, 36.0, yc - 1.2, 11.2, 2.4, 'Attention Pool', fill=FILL[fn], fs=6.8)
+    arrow(ax, 47.2, yc, 49.6, yc)
+    token(ax, 49.6, yc - 1.2, 4.4, 2.4, rf'$x_{{{r_},k}}$', FILL[fn], fs=7.5)
+# scene
+box(ax, 36.0, rows['scene'] - 1.2, 11.2, 2.4, 'Scene Projector', fill=FILL['green'], fs=6.8)
+arrow(ax, 25.6, rows['scene'], 36.0, rows['scene'])
+arrow(ax, 47.2, rows['scene'], 49.6, rows['scene'])
+token(ax, 49.6, rows['scene'] - 1.2, 4.4, 2.4, r'$g_k$', FILL['green'], fs=7.5)
+# speech: text + audio (+ turn descriptor)
+ysp = (rows['text'] + rows['audio']) / 2
+box(ax, 36.0, ysp - 1.2, 11.2, 2.4, 'Speech Projector', fill=FILL['yellow'], fs=6.8)
+line(ax, [25.6, 31.0], [rows['text'], rows['text']]); line(ax, [25.6, 31.0], [rows['audio'], rows['audio']])
+line(ax, [31.0, 31.0], [rows['audio'], rows['text']]); arrow(ax, 31.0, ysp, 36.0, ysp)
+arrow(ax, 47.2, ysp, 49.6, ysp)
+token(ax, 49.6, ysp - 1.2, 4.4, 2.4, r'$s_k$', FILL['yellow'], fs=7.5)
+ax.text(42.9, 7.4, r'for each clip $k \in \{$I, II, III$\}$: 15 tokens', ha='center', va='center', fontsize=6.8)
+# token bracket
+box(ax, 48.9, 12.0, 5.8, 28.2, '', fill='none', ec=INK, ls=(0, (2, 1.5)), lw=0.7, r=0.8)
 
-# ---------------- stage (c): evidence set
-stage(48, 33, '(c) Evidence set (15 tokens)')
-rows = [('A', A), ('L', L), ('O', O), ('speech', SP), ('scene', SC)]
-for r, (name, c) in enumerate(rows):
-    y = 36 - 5.9 * r
-    text(57.6, y + 2.0, name, fs=6.8, c=c, ha='right', weight='bold')
-    for k in range(3):
-        rbox(58.8 + 7.0 * k, y, 5.6, 4.0, ec=c, fc=FILL[c])
-        text(61.6 + 7.0 * k, y + 2.0, ['I', 'II', 'III'][k], fs=6.4)
-ax.plot([50, 80], [17.1, 17.1], color='#d6d5d0', lw=0.6, ls=(0, (2, 2)), zorder=2)
-text(64.5, 9.6, 'face token = attention pooling over\nthe role’s frames + role/clip embedding', fs=5.8, c=INK2)
-arrow(45.6, 24, 47.6, 24)
+# ============ (3) set encoder (transformer-style block)
+container(ax, 59.4, 5.0, 26.0, 36.2, 'Set Encoder')
+xs_tok = [61.2 + 4.0 * i for i in range(6)]
+labs = [(r'$q$', 'lavender'), (r'$x_{A}$', 'orange'), (r'$x_{L}$', 'blue'), (r'$x_{O}$', 'grey'),
+        (r'$s$', 'yellow'), (r'$g$', 'green')]
+for xt, (lab, fn) in zip(xs_tok, labs):
+    token(ax, xt, 7.6, 3.0, 2.4, lab, FILL[fn], fs=7.5)
+ax.add_patch(plt.matplotlib.patches.FancyBboxPatch((60.6, 13.4), 23.4, 17.6, boxstyle='round,pad=0,rounding_size=2.2',
+                                                    fc='#d9d9d9', ec='#bfbfbf', lw=0.6, zorder=2))
+ny = [16.6, 27.6]
+cx = [xt + 1.5 for xt in xs_tok]
+for i in range(6):                                       # fan connections: tokens -> layer 1 -> layer 2
+    for j in range(6):
+        ax.plot([cx[i], cx[j]], [10.0, ny[0] - 0.9], color='#b0b0b0', lw=0.35, zorder=2.5)
+        ax.plot([cx[i], cx[j]], [ny[0] + 0.9, ny[1] - 0.9], color='#b0b0b0', lw=0.35, zorder=2.5)
+for yy in ny:
+    for c_ in cx:
+        ax.add_patch(Circle((c_, yy), 0.9, fc='#e8e8e8', ec='#a6a6a6', lw=0.5, zorder=3))
+ax.text(72.3, 22.1, 'Transformer Encoder\n(2 × SAB, no positions)', ha='center', va='center', fontsize=8,
+        zorder=4)
+arrow(ax, cx[0], ny[1] + 0.9, cx[0], 34.4)
+token(ax, cx[0] - 1.7, 34.4, 3.4, 2.4, r'$h_q$', FILL['lavender'], fs=7.5)
+ax.text(cx[0] + 2.2, 32.6, 'read at the query', ha='left', va='center', fontsize=6.6, style='italic')
+line(ax, [54.7, 57.0], [26.0, 26.0]); line(ax, [57.0, 57.0], [26.0, 8.8]); arrow(ax, 57.0, 8.8, 61.2, 8.8)
 
-# ---------------- stage (d): set encoder
-stage(84, 25, '(d) Set encoder')
-rbox(86.5, 15, 4.6, 18, ec=Q, fc=FILL[Q])
-text(88.8, 24, 'q', fs=9, c=Q, weight='bold')
-text(88.8, 12.3, 'query', fs=6.0, c=INK2)
-rbox(93.5, 12, 13.5, 24, ec=Q, fc='white', lw=1.0)
-text(100.25, 33.2, 'SAB × 2', fs=7.2, c=Q, weight='bold')
-for j, (s, fc) in enumerate([('LN → MHA', '#efedf9'), ('+', 'white'), ('LN → FFN', '#efedf9'), ('+', 'white')]):
-    y = 27.5 - 4.4 * j
-    if s == '+':
-        ax.add_patch(plt.Circle((100.25, y + 1.6), 1.25, ec=Q, fc='white', lw=0.8, zorder=4))
-        text(100.25, y + 1.65, '+', fs=7, c=Q)
-    else:
-        rbox(95.2, y, 10.1, 3.3, ec='#b9b2e3', fc=fc)
-        text(100.25, y + 1.65, s, fs=6.2)
-text(96.5, 8.6, 'no positional encoding;\nread at q', fs=6.0, c=INK2)
-arrow(81.6, 24, 83.6, 24)
-
-# ---------------- output: forecast distribution
-x0 = 112
-text(118.5, 41, r'$p(y_B)$, clip IV', fs=7.2, weight='bold')
-emos = ['ang', 'dis', 'fea', 'hap', 'neu', 'sad', 'sur']
-vals = [0.08, 0.03, 0.01, 0.59, 0.18, 0.08, 0.03]
-for i, (e, v) in enumerate(zip(emos, vals)):
-    y = 35 - 4.0 * i
-    text(x0 + 2.6, y + 1.2, e, fs=6.0, c=INK2, ha='right')
-    ax.add_patch(plt.Rectangle((x0 + 3.3, y), 9.5 * v / 0.59, 2.4, fc=Q if e == 'hap' else '#c9c4ea', ec='none',
-                               zorder=3))
-arrow(107.4, 24, 111.2, 24)
+# ============ (4) forecast
+container(ax, 86.8, 5.0, 12.8, 36.2, 'Forecast')
+line(ax, [cx[0] + 1.7, 85.6], [35.6, 35.6])
+box(ax, 88.0, 21.0, 10.4, 4.4, 'Linear +\nSoftmax', fill=FILL['grey'], fs=7.2)
+line(ax, [85.6, 93.2], [35.6, 35.6]); arrow(ax, 93.2, 35.6, 93.2, 25.4)
+box(ax, 88.0, 10.6, 10.4, 6.0, "B's emotion\nin clip IV", fill='white', ec=INK, ls='-', fs=7.4)
+arrow(ax, 93.2, 21.0, 93.2, 16.6)
 
 os.makedirs(OUT, exist_ok=True)
 fig.savefig(os.path.join(OUT, 'architecture.pdf'), bbox_inches='tight', pad_inches=0.02)

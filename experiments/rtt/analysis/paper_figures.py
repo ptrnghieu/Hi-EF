@@ -6,21 +6,17 @@
 #        OUT=<figs dir> python paper_figures.py
 import os, json
 import numpy as np, pandas as pd
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+from figstyle import plt, BAR, frame_axes
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 
 A, OUT = os.environ.get('ARTIFACTS', '.'), os.environ.get('OUT', 'figs')
 os.makedirs(OUT, exist_ok=True)
 EMO = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
 E2I = {e: i for i, e in enumerate(EMO)}
-INK, INK2, GRID = '#0b0b0b', '#52514e', '#d9d8d4'
-BLUE, ORANGE = '#2a78d6', '#eb6834'
-SEQ = LinearSegmentedColormap.from_list('seq', ['#fcfcfb', '#cde2fb', '#86b6ef', '#3987e5', '#1c5cab', '#0d366b'])
-DIV = LinearSegmentedColormap.from_list('div', [ORANGE, '#f3c2ad', '#ececea', '#b7d3f6', BLUE])
-plt.rcParams.update({'font.size': 8, 'axes.edgecolor': GRID, 'axes.labelcolor': INK2, 'xtick.color': INK2,
-                     'ytick.color': INK2, 'axes.titlesize': 9, 'axes.titlecolor': INK, 'font.family': 'DejaVu Sans'})
+INK, INK2, GRID = '#000000', '#000000', '#d9d9d9'
+BLUE, ORANGE = BAR['main'], BAR['orange']
+SEQ = plt.get_cmap('Blues')
+DIV = LinearSegmentedColormap.from_list('div', [ORANGE, '#f8cbad', '#f2f2f2', '#b4c7e7', BLUE])
 ann = pd.read_csv(os.environ['ANNOT'], header=None, dtype=str).set_index(0)
 sp = pd.read_csv(os.environ['SPLIT'], dtype=str).set_index('sample_id')
 NUM = {}
@@ -46,16 +42,14 @@ def draw_cm(ax, C, title, n):
     for i in range(7):
         for j in range(7):
             v = C[i, j]
-            ax.text(j, i, f"{v:.0f}", ha='center', va='center', fontsize=6.5,
-                    color='#ffffff' if v > 55 else (INK if v >= 0.5 else '#b5b4af'),
+            ax.text(j, i, f"{v:.0f}", ha='center', va='center', fontsize=7,
+                    color='#ffffff' if v > 55 else (INK if v >= 0.5 else '#a6a6a6'),
                     weight='bold' if i == j and v >= 0.5 else 'normal')
-    ax.set_xticks(range(7)); ax.set_xticklabels(EMO, rotation=40, ha='right', rotation_mode='anchor', fontsize=6.8)
-    ax.set_yticks(range(7)); ax.set_yticklabels([f"{e} ({k})" for e, k in zip(EMO, n)], fontsize=6.8)
-    ax.set_xticks(np.arange(-.5, 7), minor=True); ax.set_yticks(np.arange(-.5, 7), minor=True)
-    ax.grid(which='minor', color='white', lw=1.2); ax.tick_params(which='both', length=0)
-    ax.set_title(title, fontsize=8, pad=4); ax.set_xlabel('predicted', fontsize=7)
-    for s in ax.spines.values():
-        s.set_visible(False)
+    ax.set_xticks(range(7)); ax.set_xticklabels(EMO, rotation=40, ha='right', rotation_mode='anchor', fontsize=7.5)
+    ax.set_yticks(range(7)); ax.set_yticklabels([f"{e} ({k})" for e, k in zip(EMO, n)], fontsize=7.5)
+    ax.tick_params(which='both', length=0)
+    ax.set_xlabel(f'predicted\n\n{title}', fontsize=8, linespacing=1.0)
+    frame_axes(ax)
     return im
 
 
@@ -77,11 +71,11 @@ else:
 PT = {'Baseline': g('PaperBest').mean(0).argmax(1), 'RoleNet': ours_test.argmax(1)}
 fig, axs = plt.subplots(1, 2, figsize=(6.3, 2.75))
 for ax, (k, p) in zip(axs, PT.items()):
-    im = draw_cm(ax, confusion(p, yt), f"{k} (UAR {uar(p, yt):.1f})", nt)
-axs[0].set_ylabel('true (test count)', fontsize=7)
+    im = draw_cm(ax, confusion(p, yt), f"({'ab'[list(PT).index(k)]}) {k} (UAR {uar(p, yt):.1f})", nt)
+axs[0].set_ylabel('true (test count)', fontsize=8)
 fig.tight_layout(w_pad=1.0)
-cb = fig.colorbar(im, ax=axs, fraction=0.025, pad=0.015); cb.outline.set_visible(False)
-cb.ax.tick_params(labelsize=6, length=0); cb.set_label('row %', fontsize=6.5)
+cb = fig.colorbar(im, ax=axs, fraction=0.025, pad=0.015); cb.outline.set_linewidth(0.6)
+cb.ax.tick_params(labelsize=7, length=2); cb.set_label('row %', fontsize=7.5)
 fig.savefig(f"{OUT}/confusion_test.pdf", bbox_inches='tight', pad_inches=0.02); plt.close(fig)
 NUM['test_recall'] = {k: dict(zip(EMO, np.round(recalls(p, yt), 1))) for k, p in PT.items()}
 NUM['test_counts'] = dict(zip(EMO, nt.tolist()))
@@ -97,8 +91,7 @@ for i in range(7):
 ax.set_xticks(range(7)); ax.set_xticklabels([e[:4] for e in EMO], rotation=45)
 ax.set_yticks(range(7)); ax.set_yticklabels([e[:4] for e in EMO])
 ax.set_title('RoleNet − baseline (test, row %)'); ax.set_xlabel('predicted'); ax.set_ylabel('true')
-for s in ax.spines.values():
-    s.set_visible(False)
+frame_axes(ax)
 fig.tight_layout(); fig.savefig(f"{OUT}/confusion_diff_test.pdf"); plt.close(fig)
 
 # per-class recall, test
@@ -106,11 +99,10 @@ fig, ax = plt.subplots(figsize=(4.6, 2.3))
 x = np.arange(7); w = 0.38
 for k, (name, col) in enumerate((('Baseline', ORANGE), ('RoleNet', BLUE))):
     r = recalls(PT[name], yt)
-    ax.bar(x + (k - 0.5) * w * 1.06, r, w, color=col, label=name)
+    ax.bar(x + (k - 0.5) * w * 1.06, r, w, color=col, label=name, edgecolor='black', linewidth=0.4)
 ax.set_xticks(x); ax.set_xticklabels([f"{e}\n(n={c})" for e, c in zip(EMO, nt)], fontsize=6.5)
-ax.set_ylabel('recall (%)'); ax.yaxis.grid(True, color=GRID, lw=0.6); ax.set_axisbelow(True)
-for s in ('top', 'right'):
-    ax.spines[s].set_visible(False)
+ax.set_ylabel('recall (%)')
+frame_axes(ax)
 ax.legend(frameon=False, fontsize=7)
 fig.tight_layout(); fig.savefig(f"{OUT}/recall_test.pdf"); plt.close(fig)
 
@@ -146,19 +138,17 @@ groups = [('mirror', mir), ('shift', ~mir), ('listener visible', vis), ('listene
 rows = [(n, m.sum(), *acc_ci(m)) for n, m in groups]
 NUM['cv_accuracy_by_group'] = {n: {'n': int(c), 'acc': round(a, 1), 'ci': [round(l, 1), round(h, 1)]} for n, c, a, l, h in rows}
 fig, ax = plt.subplots(figsize=(3.15, 2.0))
-cols = [BLUE, '#9cc3f2'] * 3
+cols = [BLUE, BAR['light']] * 3
 ypos = [0, 1, 2.5, 3.5, 5, 6]
 for yi, (n, c, a, l, h), col in zip(ypos, rows, cols):
-    ax.barh(yi, a, color=col, height=0.7)
-    ax.plot([l, h], [yi, yi], color=INK, lw=0.9)
-    ax.text(h + 1.5, yi, f"{a:.1f}", va='center', fontsize=6.5, color=INK)
-ax.set_yticks(ypos); ax.set_yticklabels([f"{r[0]} ({r[1]:,})" for r in rows], fontsize=6.8, color=INK)
-ax.invert_yaxis()
-ax.set_xlabel('accuracy (%), development CV', fontsize=7); ax.set_xlim(0, 75)
-ax.tick_params(axis='x', labelsize=6.5, length=0); ax.tick_params(axis='y', length=0)
-ax.xaxis.grid(True, color=GRID, lw=0.6); ax.set_axisbelow(True)
-for s in ('top', 'right', 'left'):
-    ax.spines[s].set_visible(False)
+    ax.barh(yi, a, color=col, height=0.7, edgecolor='black', linewidth=0.4)
+    ax.errorbar(a, yi, xerr=[[a - l], [h - a]], fmt='none', ecolor=INK, elinewidth=0.8, capsize=1.8, capthick=0.8)
+    ax.text(h + 1.5, yi, f"{a:.1f}", va='center', fontsize=7, color=INK)
+ax.set_yticks(ypos); ax.set_yticklabels([f"{r[0]} ({r[1]:,})" for r in rows], fontsize=7.5, color=INK)
+ax.set_ylim(6.7, -0.7)
+ax.set_xlabel('accuracy (%), development CV', fontsize=8); ax.set_xlim(0, 75)
+ax.tick_params(axis='x', labelsize=7); ax.tick_params(axis='y', length=0)
+frame_axes(ax)
 fig.tight_layout(); fig.savefig(f"{OUT}/errors_by_group_cv.pdf", bbox_inches='tight', pad_inches=0.02); plt.close(fig)
 
 # CV confusion: RoleNet vs without roles; recall on shifts

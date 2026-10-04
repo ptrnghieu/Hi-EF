@@ -11830,6 +11830,229 @@ print("saved g36_test_summary.csv and g36_test_contrasts.csv")
 ]
 
 
+# ---------------------------------------------------------------- G38: class resampling that protects every class (CV with a no-regression rule, then a third disclosed test read)
+_G38_CFG = _G36_CFG.replace("""ARMS = {'RoleNet': 0.0, 'Up-sqrt': 0.5, 'Up-bal': 1.0}    # sampling weight of an MCIS = n_class ** -beta""",
+                            """ARMS = ['RoleNet', 'Up-quarter', 'Tail-median']           # see the header
+TAIL_CAP = 3.0                                            # Tail-median: at most 3x oversampling of a class
+MAX_DROP = 5.0                                            # no-regression rule: no class may lose > 5 recall points on CV""")
+assert "ARMS = ['RoleNet', 'Up-quarter', 'Tail-median']" in _G38_CFG
+
+G38 = [
+    ("markdown", r"""
+# G38 — Class resampling that protects every class (development CV with a no-regression rule, then a third, disclosed test read)
+
+**Why.** G36's square-root resampling raised *disgust* / *surprise* / *sad* recall but cut *angry* (CV 46 → 38, test
+48 → 21). G38 looks for a resampling that helps the rare classes **without** hurting any class, and makes that a rule.
+
+**Arms** (identical RoleNet; only how each epoch draws the training MCIS changes; draws with replacement, |train| per
+epoch, probability of an MCIS of class c ∝ f_c):
+
+| Arm | f_c | Effect |
+|---|---|---|
+| `RoleNet` | 1 (uniform order, no replacement) | reference |
+| `Up-quarter` | n_c^(−0.25) | milder than G36's square root |
+| `Tail-median` | max(1, min(median_n / n_c, 3)) | only classes below the median count are oversampled (×3 at most); head classes, *angry* included, keep weight 1 |
+
+**Part A — development CV** (45 episodes, 5 folds, 10 seeds, plain scoring), as G36.
+
+**Selection rule (fixed before running).** A resampling arm is *eligible* only if, on CV, **no class loses more than
+5 recall points** against `RoleNet`. Among eligible arms the one with the higher CV UAR is selected, and the test is
+read only if its CV ΔUAR vs `RoleNet` is > 0. Otherwise no test read; the paper keeps the preregistered RoleNet.
+
+**Part B — third, disclosed test read** (only if selected): G10 protocol (45 episodes, 5 seeds), compared with the
+saved G10 predictions of the baseline and RoleNet. Reported whatever the sign.
+
+**Inputs:** the four G10 inputs and the dataset with `g10_test_probs.npz`. GPU. The first code cell checks all inputs.
+"""),
+    G10[1],
+    ("code", _G38_CFG),
+    G36B[3],
+    G10[3], G10[4], G10[5], G10[6], G10[7], G10[8], G10[9],
+    ("markdown", "## Resampled training and the development folds"),
+    ("code", r"""
+def class_factor(arm, counts):
+    # per-class sampling factor f_c (numpy, length 7); None = uniform order without replacement
+    c = np.maximum(counts.astype(float), 1.0)
+    if arm == 'RoleNet':
+        return None
+    if arm == 'Up-quarter':
+        return c ** -0.25
+    if arm == 'Tail-median':
+        return np.clip(np.median(c) / c, 1.0, TAIL_CAP)
+    raise ValueError(arm)
+
+
+def train_eval_cw(arm, tr, dev, te, seed):
+    seed_all(seed)
+    hp = HP['role']
+    model = MAKE['role'](FULL).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    f = class_factor(arm, torch.bincount(YB[tr], minlength=7).cpu().numpy())
+    w = None if f is None else torch.tensor(f, dtype=torch.float32, device=DEVICE)[YB[tr]]
+    best, best_state, bad = -1, None, 0
+    for ep in range(hp['epochs']):
+        model.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)] if w is None else tr[torch.multinomial(w, len(tr), replacement=True)]
+        for i in range(0, len(perm), hp['batch']):
+            j = perm[i:i + hp['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, wt in aux.values():
+                if (t >= 0).any():
+                    loss = loss + wt * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(predict(model, dev).argmax(1), y_dev, 7)[1]
+        if u > best:
+            best, bad = u, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    return predict(model, te), best
+
+
+def recalls(p, y):
+    return np.array([(p[y == c] == c).mean() * 100 if (y == c).any() else np.nan for c in range(7)])
+
+
+y_all = DEV.yB.values
+DEVR = np.where(~IS_TEST)[0]
+sizes = pd.Series(src[DEVR]).value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = np.array([FOLD.get(e, -1) for e in src])
+assert (fold_of_row[IS_TEST] == -1).all() and (fold_of_row[DEVR] >= 0).all()
+cnt_all = np.bincount(y_all[DEVR], minlength=7)
+print("development folds (MCIS):", load_)
+print("class factors on all development MCIS:", {a: (None if class_factor(a, cnt_all) is None else
+      dict(zip(EMO, np.round(class_factor(a, cnt_all) / class_factor(a, cnt_all).min(), 2)))) for a in ARMS})
+"""),
+    ("markdown", "## Part A — development CV (train+val only)"),
+    ("code", r"""
+OOF = {a: np.full((len(CV_SEEDS), N, 7), np.nan, np.float32) for a in ARMS}
+cvlog = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, 5))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows_f = np.where(fold_of_row == f)[0]
+    assert not IS_TEST[trr].any() and not IS_TEST[te_rows_f].any()
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows_f)
+    for a in ARMS:
+        for si, seed in enumerate(CV_SEEDS):
+            p, sel = train_eval_cw(a, tr, dev, te, seed + 1000 * f)
+            OOF[a][si, te_rows_f] = p
+            w_, u_ = war_uar(p.argmax(1), y_all[te_rows_f], 7)
+            cvlog.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'UAR': u_, 'WAR': w_})
+            print(f"fold {f} {a:<11} seed {seed:>3}: sel {sel:5.2f} | UAR {u_:5.2f} | {(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+pd.DataFrame(cvlog).to_csv(f"{OUT_DIR}/g38_cv_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g38_cv_oof.npz", sample_id=DEV.sample_id.values[DEVR], y=y_all[DEVR], src=src[DEVR],
+         **{a.replace('-', '_'): v[:, DEVR] for a, v in OOF.items()})
+
+yd, sd_ = y_all[DEVR], src[DEVR]
+ENS = {a: v[:, DEVR].mean(0).argmax(1) for a, v in OOF.items()}
+rng = np.random.default_rng(0)
+gidx = [np.where(sd_ == e)[0] for e in np.unique(sd_)]
+
+
+def cv_delta(a, b):
+    d0 = war_uar(ENS[a], yd, 7)[1] - war_uar(ENS[b], yd, 7)[1]
+    ds = []
+    for _ in range(N_BOOT_CV):
+        s_ = rng.integers(0, len(CV_SEEDS), len(CV_SEEDS))
+        i = np.concatenate([gidx[j] for j in rng.integers(0, len(gidx), len(gidx))])
+        pa, pb = OOF[a][s_][:, DEVR].mean(0).argmax(1), OOF[b][s_][:, DEVR].mean(0).argmax(1)
+        ds.append(war_uar(pa[i], yd[i], 7)[1] - war_uar(pb[i], yd[i], 7)[1])
+    return d0, *np.percentile(ds, [2.5, 97.5])
+
+
+REC = {a: recalls(ENS[a], yd) for a in ARMS}
+CVT = pd.DataFrame([{'arm': a, 'UAR': war_uar(ENS[a], yd, 7)[1], 'WAR': war_uar(ENS[a], yd, 7)[0], **dict(zip(EMO, REC[a]))}
+                    for a in ARMS])
+print("== Part A: development CV, 10-seed ensembles, plain ==")
+print(CVT.round(2).to_string(index=False))
+CVT.to_csv(f"{OUT_DIR}/g38_cv_summary.csv", index=False)
+CVD, ELIG = {}, []
+for a in ARMS[1:]:
+    CVD[a] = cv_delta(a, 'RoleNet')
+    drop = REC['RoleNet'] - REC[a]
+    worst = int(np.nanargmax(drop))
+    ok = np.nanmax(drop) <= MAX_DROP
+    if ok:
+        ELIG.append(a)
+    print(f"  {a} - RoleNet: dUAR {CVD[a][0]:+.2f} [{CVD[a][1]:+.2f}, {CVD[a][2]:+.2f}] | largest class drop "
+          f"{np.nanmax(drop):+.1f} ({EMO[worst]}) -> {'eligible' if ok else 'NOT eligible (no-regression rule)'}")
+SELECTED = max(ELIG, key=lambda a: CVT.set_index('arm').at[a, 'UAR']) if ELIG else None
+RUN_TEST = SELECTED is not None and CVD[SELECTED][0] > 0
+print(f"\n== selection (fixed rule): {SELECTED} -> "
+      f"{'read the test (third, disclosed read)' if RUN_TEST else 'NO test read; the paper keeps the preregistered RoleNet'} ==")
+"""),
+    ("markdown", "## Part B — third test read of the selected arm (only if the rule says so)"),
+    ("code", r"""
+if RUN_TEST:
+    sel_eps = sorted(random.Random(SELECT_SEED).sample(list(EPS), N_INNER_DEV))
+    trr = np.where(~IS_TEST)[0]
+    fit_rows = np.where(~IS_TEST & ~np.isin(src, sel_eps))[0]
+    dev_rows = np.where(np.isin(src, sel_eps))[0]
+    te_rows = np.where(IS_TEST)[0]
+    pos = {s: i for i, s in enumerate(G10P['sample_id'])}
+    take = np.array([pos[s] for s in DEV.sample_id.values[te_rows]])
+    SAVED = {'Baseline': G10P['PaperBest'][:, take], 'RoleNet (G10)': G10P['RoleNet'][:, take]}
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    P_new, tlog = [], []
+    for seed in SEEDS:
+        p, sel = train_eval_cw(SELECTED, tr, dev, te, seed)
+        P_new.append(p)
+        w_, u_ = war_uar(p.argmax(1), y_all[te_rows], 7)
+        tlog.append({'seed': seed, 'sel_UAR': sel, 'test_UAR': u_, 'test_WAR': w_})
+        print(f"{SELECTED} seed {seed}: sel {sel:5.2f} | test UAR {u_:5.2f} WAR {w_:5.2f}", flush=True)
+    PT = {SELECTED: np.stack(P_new), **SAVED}
+    yt, st = y_all[te_rows], src[te_rows]
+    PRED = {k: v.mean(0).argmax(1) for k, v in PT.items()}
+    G_ = [np.where(st == e)[0] for e in np.unique(st)]
+    rng = np.random.default_rng(0)
+    BOOT = [np.concatenate([G_[j] for j in rng.integers(0, len(G_), len(G_))]) for _ in range(2000)]
+    TT = pd.DataFrame([{'model': k, 'UAR': war_uar(v, yt, 7)[1], 'WAR': war_uar(v, yt, 7)[0], **dict(zip(EMO, recalls(v, yt)))}
+                       for k, v in PRED.items()])
+    print("\n== Part B: test (third read), seed ensembles, plain ==")
+    print(TT.round(2).to_string(index=False))
+    rows = []
+    for b in SAVED:
+        for metric, fn in (('UAR', lambda p, y: war_uar(p, y, 7)[1]), ('WAR', lambda p, y: war_uar(p, y, 7)[0])):
+            d0 = fn(PRED[SELECTED], yt) - fn(PRED[b], yt)
+            ds = [fn(PRED[SELECTED][i], yt[i]) - fn(PRED[b][i], yt[i]) for i in BOOT]
+            lo, hi = np.percentile(ds, [2.5, 97.5])
+            rows.append({'contrast': f"{SELECTED} - {b}", 'metric': metric, 'delta': d0, 'lo': lo, 'hi': hi})
+        wins = sum(war_uar(PRED[SELECTED][g], yt[g], 7)[1] > war_uar(PRED[b][g], yt[g], 7)[1] for g in G_)
+        rows[-2]['episodes_won'] = f"{wins}/{len(G_)}"
+    CT = pd.DataFrame(rows)
+    print(CT.round(2).to_string(index=False))
+    TT.to_csv(f"{OUT_DIR}/g38_test_summary.csv", index=False)
+    CT.to_csv(f"{OUT_DIR}/g38_test_contrasts.csv", index=False)
+    pd.DataFrame(tlog).to_csv(f"{OUT_DIR}/g38_test_per_seed.csv", index=False)
+    np.savez(f"{OUT_DIR}/g38_test_probs.npz", sample_id=DEV.sample_id.values[te_rows], selected=SELECTED,
+             **{k.replace(' ', '_').replace('(', '').replace(')', '').replace('-', '_'): v for k, v in PT.items()})
+    print("saved g38_test_summary.csv, g38_test_contrasts.csv, g38_test_per_seed.csv, g38_test_probs.npz")
+else:
+    print("test not read (selection rule)")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -11867,6 +12090,7 @@ if __name__ == "__main__":
                         ("g36_resampling_cv_test.ipynb", G36),
                         ("g36b_test_upsqrt.ipynb", G36B),
                         ("g37_case_frames.ipynb", G37),
+                        ("g38_resampling_noregress.ipynb", G38),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

@@ -860,3 +860,34 @@ order of the past clips nor an explicit current-vs-past designation is shown to 
 barely relies on I/II order. Conclusions concern explicit clip identity only (roles defined from clip III remain an
 implicit marker). The CI of U_order spans about 0.032 NLL, so order effects below roughly 0.016 NLL cannot be
 detected with this design.
+
+## G33b results: relational bias study (5-fold CV, train+val, 10 seeds, R0 loaded from G33a; test untouched)
+
+This run used the original configuration (10 seeds × 5 folds; R0 = G33a `ordered`, manifest identical).
+
+| Arm | calibrated NLL | raw NLL | UAR ensemble | UAR seed mean |
+|---|---|---|---|---|
+| R0 | 1.7018 | 1.8912 | 26.35 | 24.52 |
+| R-full | 1.7027 | 1.9269 | 26.35 | 24.71 |
+| R−time | 1.7073 | 1.9096 | 25.64 | 24.41 |
+| R−person | 1.7043 | 1.9070 | 26.40 | 24.57 |
+| R−evidence | 1.7047 | 1.9297 | 26.51 | 24.67 |
+| R-random | 1.7083 | 1.9201 | 26.36 | 24.58 |
+
+| Contrast (calibrated NLL; seeds × episodes bootstrap) | Estimate [95% CI] |
+|---|---|
+| **NLL(R0) − NLL(R-full)** | **−0.0009 [−0.0165, +0.0136]** |
+| **NLL(R-random) − NLL(R-full)** | **+0.0056 [−0.0067, +0.0185]** |
+| NLL(R−time / R−person / R−evidence) − NLL(R-full) (descriptive) | +0.0047 / +0.0017 / +0.0021, all CIs contain 0 |
+
+**Reading (fixed rule): not unlocked — no evidence for relational inductive bias; no method claim.**
+
+Optimisation diagnostics: bias gradients stayed non-zero (R-full grad norm 0.012 → 0.036); the learned biases are small
+(|b| mean ≈ 0.025–0.03, max ≈ 0.12–0.15; median maximum within-head spread 0.22, below the ≈ 0.3 reading aid).
+**Layer-2 biases are exactly zero, by construction, not by an implementation error.** Verified on the code: they are
+in the forward pass and in the optimiser, but the prediction reads only the query token after the last layer, and the
+query row carries a single type per family (query-involved / non-face / other), which softmax cancels. Their gradient is
+≈ 1e-8 and setting them to large values changes the logits by < 1e-6. The relational biases therefore act in layer 1
+only (layer-1 means are about twice the reported layer-averaged |b| and spread means). This is a property of the
+pre-registered ontology (no query-specific relation types), so G33b remains a valid test of that design; a version with
+query-target relations would be a new hypothesis.

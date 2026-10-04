@@ -12174,6 +12174,189 @@ else:
 ]
 
 
+# ---------------------------------------------------------------- G39: data statistics that motivate RoleNet (train+val; figures only)
+G39 = [
+    ("markdown", r"""
+# G39 — Who is on screen? Party statistics of Hi-EF that motivate RoleNet (train+val only; no model)
+
+For the 2,421 development MCIS (45 train+val episodes; the test split is not read), from the G8a face/voice
+extraction of clips I–III and the G26a extraction of clip IV (analysis only, as in G26):
+
+1. **How many people** appear in clips I–III and in clip III (ArcFace identities clustered as in RoleNet; a person =
+   an identity seen in ≥ 2 sampled frames).
+2. **Where the responder B is** before the target turn: listening in clip III, only in clips I/II, or never seen.
+   B = dominant face of clip IV, matched to a clip I–III identity (centroid cosine ≥ 0.45, B ≠ A), as in G26.
+3. **B's visibility rank in clip III** (1 = most frames). RoleNet's listener proxy takes rank 2; A takes rank 1.
+4. Whether **B spoke** in clip I or II (ECAPA voice of clip I/II vs clip IV, cosine ≥ 0.35, as in G15–G16).
+
+Outputs: `g39_per_mcis.csv`, `g39_numbers.json`, `g39_people.pdf`, `g39_responder.pdf`. Inputs: `hi-ef-dataset`,
+`hi-ef-split`, `g8a-features`, and the G26a output (`c4shard_*.pkl`). CPU is enough.
+"""),
+    ("code", r"""
+import os, glob, json, pickle
+from collections import defaultdict
+import numpy as np, pandas as pd
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from sklearn.cluster import AgglomerativeClustering
+
+
+def first(*gl):
+    for g in gl:
+        h = glob.glob(g, recursive=True)
+        if h:
+            return h[0]
+    return None
+
+
+SPLIT_CSV = first("/kaggle/input/**/source_folder_split_seed42.csv")
+ANNOT = first("/kaggle/input/**/Hi-EF/annotation.csv")
+G8A_DIR = first("/kaggle/input/datasets/ptrnghieu/g8a-features", "/kaggle/input/g8a-features")
+C4 = sorted(p for p in glob.glob("/kaggle/input/**/c4shard_*.pkl", recursive=True))
+OUT_DIR = "/kaggle/working"
+SAME_PERSON_COS, DOMINANT_MIN_FRAC, VOICE_SAME_COS, MIN_FRAMES = 0.45, 0.25, 0.35, 2
+for n_, v_ in (('split file', SPLIT_CSV), ('annotation.csv', ANNOT), ('g8a-features', G8A_DIR)):
+    assert v_, f"missing input: {n_}"
+assert C4, "missing input: G26a output (c4shard_*.pkl)"
+sp = pd.read_csv(SPLIT_CSV, dtype=str)
+DEV = sp[sp.split != 'test'].reset_index(drop=True)
+need = set(DEV[['clip1', 'clip2', 'clip3']].values.ravel())
+G8, G84 = {}, {}
+for f in sorted(glob.glob(os.path.join(G8A_DIR, '**', 'shard_*.pkl'), recursive=True)):
+    G8.update({k: v for k, v in pickle.load(open(f, 'rb')).items() if k in need})
+for f in C4:
+    G84.update(pickle.load(open(f, 'rb')))
+print(f"development MCIS {len(DEV)} | G8a clips {len(G8)} / {len(need)} | clip-IV records {len(G84)}")
+"""),
+    ("code", r"""
+unit = lambda v: v / (np.linalg.norm(v) + 1e-9)
+
+
+def cluster(E):
+    if len(E) < 2:
+        return np.zeros(len(E), int)
+    return AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
+                                   distance_threshold=1 - SAME_PERSON_COS).fit_predict(E)
+
+
+rows = []
+for n, r in enumerate(DEV.itertuples()):
+    cl = [r.clip1, r.clip2, r.clip3]
+    items = [(k, j) for k, c in enumerate(cl) for j in range(len(G8.get(c, {}).get('faces', [])))]
+    row = {'sample_id': r.sample_id}
+    if not items:
+        rows.append({**row, 'n_people': 0, 'n_people_III': 0, 'B_where': 'not matched', 'B_rank_III': np.nan,
+                     'B_spoke_I_II': False}); continue
+    E = np.stack([G8[cl[k]]['faces'][j]['arc'] for k, j in items]).astype(np.float32)
+    lab = cluster(E)
+    frames = defaultdict(set)
+    for (k, j), p in zip(items, lab):
+        frames[(k, p)].add(G8[cl[k]]['faces'][j]['frame'])
+    tot = defaultdict(int)
+    for (k, p), fr in frames.items():
+        tot[p] += len(fr)
+    people = {p for p, v in tot.items() if v >= MIN_FRAMES}
+    ids3 = sorted({p for (k, p) in frames if k == 2}, key=lambda p: -len(frames[(2, p)]))
+    A = ids3[0] if ids3 else None
+    row['n_people'] = len(people)
+    row['n_people_III'] = sum(len(frames[(2, p)]) >= MIN_FRAMES for p in ids3)
+    # responder B: dominant identity of clip IV matched to a clip I-III identity (analysis only)
+    bt, f4 = None, G84.get(r.clip4, {}).get('faces', [])
+    if f4:
+        E4 = np.stack([d['arc'] for d in f4]).astype(np.float32)
+        l4 = cluster(E4)
+        fr4 = defaultdict(set)
+        for d, p in zip(f4, l4):
+            fr4[p].add(d['frame'])
+        dom = max(fr4, key=lambda p: len(fr4[p]))
+        if len(fr4[dom]) / max(G84[r.clip4]['meta']['n_sampled'], 1) >= DOMINANT_MIN_FRAC:
+            c4 = unit(E4[l4 == dom].mean(0))
+            best, bp = SAME_PERSON_COS, None
+            for p in tot:
+                sim = float(unit(E[lab == p].mean(0)) @ c4)
+                if sim >= best:
+                    best, bp = sim, p
+            bt = bp if bp is not None and bp != A else None
+    if bt is None:
+        row['B_where'], row['B_rank_III'] = ('not matched' if not f4 else 'not seen in I-III'), np.nan
+    elif (2, bt) in frames:
+        row['B_where'], row['B_rank_III'] = 'listening in III', ids3.index(bt) + 1
+    else:
+        row['B_where'], row['B_rank_III'] = 'only in I/II', np.nan
+    # did B speak in clip I or II? (voice, analysis only)
+    a4 = G84.get(r.clip4, {}).get('audio') or {}
+    spoke = False
+    for c in cl[:2]:
+        a = (G8.get(c, {}) or {}).get('audio') or {}
+        if a.get('ecapa') is not None and a4.get('ecapa') is not None:
+            spoke |= float(a['ecapa'].astype(np.float32) @ a4['ecapa'].astype(np.float32)) >= VOICE_SAME_COS
+    row['B_spoke_I_II'] = bool(spoke)
+    rows.append(row)
+PER = pd.DataFrame(rows)
+PER.to_csv(f"{OUT_DIR}/g39_per_mcis.csv", index=False)
+"""),
+    ("code", r"""
+INK2, GRID, BLUE, LBLUE, ORANGE, GRAY = '#52514e', '#d9d8d4', '#2a78d6', '#86b6ef', '#eb6834', '#b9b8b3'
+plt.rcParams.update({'font.size': 8, 'axes.edgecolor': GRID, 'axes.labelcolor': INK2, 'xtick.color': INK2, 'ytick.color': INK2})
+N = len(PER)
+num = {'n_mcis': N}
+cap = lambda v: np.minimum(v, 5)
+num['people_I_III'] = {('5+' if k == 5 else str(k)): round(float((cap(PER.n_people) == k).mean() * 100), 1) for k in range(0, 6)}
+num['people_III'] = {('5+' if k == 5 else str(k)): round(float((cap(PER.n_people_III) == k).mean() * 100), 1) for k in range(0, 6)}
+num['share_3plus_people_I_III'] = round(float((PER.n_people >= 3).mean() * 100), 1)
+num['B_where'] = {k: round(float(v * 100), 1) for k, v in PER.B_where.value_counts(normalize=True).items()}
+vis = PER.B_where == 'listening in III'
+num['B_rank_III_given_listening'] = {str(int(k)): round(float(v * 100), 1) for k, v in PER.B_rank_III[vis].value_counts(normalize=True).sort_index().items()}
+num['B_spoke_I_II'] = round(float(PER.B_spoke_I_II.mean() * 100), 1)
+num['B_listening_or_spoke'] = round(float((vis | PER.B_spoke_I_II).mean() * 100), 1)
+json.dump(num, open(f"{OUT_DIR}/g39_numbers.json", 'w'), indent=1)
+print(json.dumps(num, indent=1))
+
+fig, ax = plt.subplots(1, 2, figsize=(6.4, 2.3), sharey=True)
+x = np.arange(6)
+for a_, key, title in ((ax[0], 'people_I_III', 'clips I–III'), (ax[1], 'people_III', 'clip III')):
+    v = [num[key][('5+' if k == 5 else str(k))] for k in range(6)]
+    a_.bar(x, v, 0.7, color=BLUE)
+    for xi, vi in zip(x, v):
+        if vi >= 1:
+            a_.text(xi, vi + 1, f"{vi:.0f}", ha='center', fontsize=7, color=INK2)
+    a_.set_xticks(x); a_.set_xticklabels(['0', '1', '2', '3', '4', '5+']); a_.set_title(f"people in {title}", fontsize=8)
+    a_.set_xlabel('number of people'); a_.yaxis.grid(True, color=GRID, lw=0.6); a_.set_axisbelow(True)
+    for s_ in ('top', 'right'):
+        a_.spines[s_].set_visible(False)
+ax[0].set_ylabel('% of MCIS')
+fig.tight_layout(); fig.savefig(f"{OUT_DIR}/g39_people.pdf"); fig.savefig(f"{OUT_DIR}/g39_people.png", dpi=200); plt.close(fig)
+
+order = ['listening in III', 'only in I/II', 'not seen in I-III', 'not matched']
+cols = [BLUE, LBLUE, GRAY, '#e3e2de']
+fig, ax = plt.subplots(1, 2, figsize=(6.4, 2.3), gridspec_kw={'width_ratios': [1.6, 1]})
+left = 0
+for k, c in zip(order, cols):
+    v = num['B_where'].get(k, 0.0)
+    ax[0].barh(0, v, left=left, color=c, height=0.5, edgecolor='white', linewidth=1.5)
+    if v >= 6:
+        ax[0].text(left + v / 2, 0, f"{v:.0f}%", ha='center', va='center', fontsize=7, color='white' if c == BLUE else '#0b0b0b')
+    left += v
+ax[0].set_xlim(0, 100); ax[0].set_yticks([]); ax[0].set_xlabel('% of MCIS')
+ax[0].set_title('where is the responder B before clip IV?', fontsize=8)
+fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for c in cols], labels=order, fontsize=6.5, frameon=False,
+           loc='lower left', bbox_to_anchor=(0.03, 0.0), ncol=4)
+rk = num['B_rank_III_given_listening']
+ks = sorted(rk, key=int)[:4]
+ax[1].bar(range(len(ks)), [rk[k] for k in ks], 0.6, color=[ORANGE if k == '2' else LBLUE for k in ks])
+ax[1].set_xticks(range(len(ks))); ax[1].set_xticklabels([f"rank {k}" for k in ks])
+ax[1].set_title("B's visibility rank in clip III\n(rank 1 = speaker A; proxy L = rank 2)", fontsize=8); ax[1].set_ylabel('% (B listening)')
+ax[1].yaxis.grid(True, color=GRID, lw=0.6); ax[1].set_axisbelow(True)
+for a_ in ax:
+    for s_ in ('top', 'right'):
+        a_.spines[s_].set_visible(False)
+fig.subplots_adjust(left=0.04, right=0.98, top=0.8, bottom=0.36, wspace=0.3); fig.savefig(f"{OUT_DIR}/g39_responder.pdf"); fig.savefig(f"{OUT_DIR}/g39_responder.png", dpi=200); plt.close(fig)
+print("saved g39_per_mcis.csv, g39_numbers.json, g39_people.pdf/.png, g39_responder.pdf/.png")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -12212,6 +12395,7 @@ if __name__ == "__main__":
                         ("g36b_test_upsqrt.ipynb", G36B),
                         ("g37_case_frames.ipynb", G37),
                         ("g38_resampling_noregress.ipynb", G38),
+                        ("g39_party_statistics.ipynb", G39),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

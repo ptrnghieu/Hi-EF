@@ -450,11 +450,32 @@ transcript: an additive split of text versus everything else loses nothing ($-0.
 \subsection{Generalisation to MELD}
 
 We rebuilt Hi-EF-style windows from MELD \citep{poria2019meld} (three turns, then a turn of a different speaker;
-5{,}406/595/1{,}341 windows), without speaker names as input, and trained \model{} and the baseline with three seeds
-(train for fitting, dev for early stopping, test read once for the comparison). \model{} reaches 16.85 UAR vs.\
-15.50 for the baseline ($+1.35$ \ci{-1.02}{4.24}; chance 14.29). The baseline predicts \emph{neutral} for most windows (recall
-93\%), which gives it a higher WAR (46.09 vs.\ 39.30) and a lower NLL (1.543 vs.\ 1.695). The advantage on MELD is
-therefore small and not confirmed.
+5{,}405/595/1{,}341 windows for train/dev/test), without speaker names as input, and trained \model{} and the baseline
+with three seeds (train for fitting, dev for early stopping, test for the comparison).
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{UAR} & \multicolumn{2}{c}{WAR} \\
+MELD test & seed mean & ensemble & seed mean & ensemble \\
+\midrule
+Baseline & 15.56 & 15.50 & \textbf{43.35} & \textbf{46.09} \\
+\model{} & \textbf{16.72} & \textbf{16.85} & 35.84 & 39.30 \\
+\midrule
+$\Delta$ (\model{} $-$ baseline) & $+1.16$ & $+1.35$\ci{-1.02}{4.24} & $-7.51$ & $-6.79$ \\
+\bottomrule
+\end{tabular}
+\caption{MELD test (1{,}341 windows, 3 seeds; chance UAR 14.29). The interval resamples seeds and dialogues.
+Dev UAR (best epoch per seed, selection-biased): \model{} 20.88, baseline 17.66.}
+\label{tab:meld}
+\end{table}
+
+Table~\ref{tab:meld} shows a small, unconfirmed UAR advantage for \model{} ($+1.35$ \ci{-1.02}{4.24}). The baseline
+reaches a higher WAR and a lower NLL (1.543 vs.\ 1.695) by predicting \emph{neutral} for most windows (recall 93\%,
+all other classes 0 except \emph{angry}); \model{} spreads its forecasts (\emph{happy} 17.9\%, \emph{angry} 17.6\%
+recall), but \emph{disgust}, \emph{sad}, \emph{fear} and \emph{surprise} stay near zero. MELD is dominated by
+\emph{neutral} (48\% of test windows), so WAR rewards the majority-class collapse that UAR penalises.
 
 % ======================================================================================================
 \section{Analysis: Where Forecasts Fail}

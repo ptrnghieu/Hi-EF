@@ -19,6 +19,11 @@ yet written into the README (marked **[chat]**).
   mathematical tool is not required if the method contribution is clear.
 - Constraints: no new human labels; clip IV is never an input at inference; B's identity is not given as an input;
   no assumption that only two people take part.
+- **Out of the chosen scope (not a gate failure):** supervised affective pretraining / fine-tuning of the text, audio
+  and face encoders on the ~5.5k labelled Hi-EF clips, with the resulting embeddings as RoleNet inputs. Proposed by the
+  assistant; declined by the user ("từ chối hướng pre-training này, tôi muốn tập chung vào toán và mô hình") to keep the
+  research on the mathematics and the forecasting model with a fixed feature front-end. Not evaluated experimentally;
+  no protocol was written. (The decision is recorded as reported by the user; it is not in this session's log.)
 
 ## 1. Protocol status: test access
 

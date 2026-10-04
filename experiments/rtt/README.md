@@ -730,3 +730,33 @@ faces themselves, not in knowing whose face it is.
 - Adding mention candidates does not help either way; both mention arms are slightly worse than the whole-context arm
   (CIs touch 0). With frozen RoBERTa-large, the whole-context arm reaches NLL 1.666 / UAR 24.5, close to RoleNet's CV
   level (G20 full RoleNet NLL 1.661 / UAR 26.0) with a far simpler audio-visual vector.
+
+## G28 results: masked-listener training (5-fold CV, train+val, 10 seeds; test untouched)
+
+Same RoleNet; `R-mask` masks L's face features (before tokenisation) with p = 0.5 among applicable conditions. Actual
+masked share of training draws 29.7% (C1 50.8%, C2 24.6%, C3 24.6% of masked draws); 15.0% of masked draws also had
+the whole face branch dropped. Both arms selected by J_dev (NLL); best epoch ≈ 3 in both (G13 selected by dev UAR).
+Eligible MCIS: C1 1,451; C2/C3 1,070. Role-rule checks 0/0.
+
+| Quantity (mean of per-seed NLL; two-level bootstrap, shared draws) | Estimate [95% CI] |
+|---|---|
+| **Δ_rec** = NLL_std − NLL_mask, mean over C1–C3 (primary) | **+0.0037 [−0.0066, +0.0153]** |
+| Δ_rec,1 (C1, no L) | +0.0127 [−0.0001, +0.0256] |
+| Δ_rec,2 (C2, no L-III) | −0.0002 [−0.0109, +0.0115] |
+| Δ_rec,3 (C3, no L history) | −0.0014 [−0.0113, +0.0096] |
+| Δ_clean = NLL_mask − NLL_std on C0 | −0.0010 [−0.0090, +0.0078] |
+| Sensitivity R-std (Ck − C0 on the Ck set): C1 / C2 / C3 | +0.0715 [+0.045, +0.099] / +0.0222 [+0.009, +0.036] / +0.0200 [+0.004, +0.038] |
+| Sensitivity R-mask: C1 / C2 / C3 | +0.0575 / +0.0191 / +0.0181 |
+| Recovery share Δ_rec,k / sensitivity_k: C1 / C2 / C3 | 0.18 [−0.00, 0.32] / −0.01 [−0.80, 0.49] / −0.07 [−1.22, 0.52] |
+
+UAR (10-seed ensemble, descriptive): C0 25.72 vs 25.36; C1 23.44 vs 24.33; C2 26.38 vs 26.73; C3 26.32 vs 25.83 (R-std vs R-mask).
+
+**Reading (fixed rule): CI of Δ_rec contains 0 → not shown that this policy helps; the data cannot tell whether the
+drop under masking is mostly lost evidence or lack of adaptation.** No cost on the data as they are (Δ_clean ≈ 0).
+Removing L's face features costs NLL in every condition (largest for all of L, C1), and masked training leaves most of
+that drop in place (R-mask sensitivity on C1 still +0.058). The only hint is C1 (lower bound −0.0001, not the primary
+estimand). Limitation: NLL-based selection stopped both arms at about epoch 3, which leaves masked training little
+time to adapt.
+
+**Auxiliary: presence flags.** 113 distinct presence patterns. Logistic on the 9 flags vs fold prior: ΔNLL −0.0047
+[−0.0112, +0.0011]; with pairwise interactions −0.0030 [−0.0131, +0.0069] → no association with B's label shown.

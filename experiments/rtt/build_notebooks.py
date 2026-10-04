@@ -10206,6 +10206,541 @@ print("saved g32_summary.csv")
 assert "BLK = {" in G32[10][1]
 
 
+# ---------------------------------------------------------------- G33 campaign: temporal audit (G33a) + relational bias study (G33b)
+_G33_CFG = G13[1][1].replace(
+    "SEEDS = [42, 123, 456]                       # as G8b / G11 / G12",
+    "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14").split("ARMS = [")[0] + """EXPERIMENTS = [("RoleNet", 'role', FULL)]    # only used by the shared model cell's parameter print
+N_BOOT = 2000
+G33_VERSION = "G33-v1"                         # shared manifest / preprocessing version of the campaign
+"""
+
+_G33_MODEL = r"""
+import json, hashlib, re
+from scipy.optimize import minimize_scalar
+
+# the eval fast path of nn.TransformerEncoderLayer mishandles per-head float attention masks (NaN once the relation
+# biases are non-zero); it is switched off for every G33 arm, R0 included, so all arms run the same code path
+if hasattr(torch.backends, 'mha') and hasattr(torch.backends.mha, 'set_fastpath_enabled'):
+    torch.backends.mha.set_fastpath_enabled(False)
+assert NVOICE == 9, "VOI layout changed: [sync r, sync sd] x 3 roles + [voice cos to clip III, voice ok, n identities]"
+VOI_CLIP3_COLS = [6, 7]                        # voice cosine to clip III and its availability flag
+
+# ---- folds (same construction as G8b-G32)
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+MANIFEST = {'version': G33_VERSION, 'seeds': SEEDS, 'n_outer': N_OUTER, 'n_inner_dev': N_INNER_DEV, 'RN': RN,
+            'PCA_DIM': PCA_DIM, 'MAXF': MAXF, 'MAXF_POOL': MAXF_POOL, 'SAME_PERSON_COS': SAME_PERSON_COS,
+            'DOMINANT_MIN_FRAC': DOMINANT_MIN_FRAC, 'VOICE_SAME_COS': VOICE_SAME_COS,
+            'sample_ids': hashlib.sha1(','.join(DEV.sample_id.astype(str)).encode()).hexdigest(),
+            'folds': hashlib.sha1(fold_of_row.astype(np.int64).tobytes()).hexdigest()}
+print("fold sizes (MCIS):", load_, "| manifest:", {k: v for k, v in MANIFEST.items() if k in ('version', 'sample_ids', 'folds')})
+
+# ---- token layout: 0 query | 1..9 faces (role r, clip k at 1 + 3r + k) | 10..12 speech (clip k) | 13..15 scene (clip k)
+TOK = [('query', None, None)] + [('face', r, k) for r in range(3) for k in range(3)] + \
+      [('speech', None, k) for k in range(3)] + [('scene', None, k) for k in range(3)]
+NT = len(TOK)
+
+
+def relation_index():
+    # for attention i <- j (row i attends to column j); three factorial families
+    T_ = np.zeros((NT, NT), int); P_ = np.zeros((NT, NT), int); E_ = np.zeros((NT, NT), int)
+    for i, (ti, ri, ki) in enumerate(TOK):
+        for j, (tj, rj, kj) in enumerate(TOK):
+            q = ti == 'query' or tj == 'query'
+            # TIME: 0 query-involved | 1 j same time as i | 2 j historically earlier than i | 3 j later than i
+            T_[i, j] = 0 if q else (1 if kj == ki else (2 if kj < ki else 3))
+            # PERSON: 0 same focal identity (A-A or L-L) | 1 A-L | 2 focal-O | 3 O-O (no identity claim) | 4 non-face pair
+            if ti == 'face' and tj == 'face':
+                if ri == rj and ri in (0, 1):
+                    P_[i, j] = 0
+                elif {ri, rj} == {0, 1}:
+                    P_[i, j] = 1
+                elif ri == 2 and rj == 2:
+                    P_[i, j] = 3
+                else:
+                    P_[i, j] = 2
+            else:
+                P_[i, j] = 4
+            # EVIDENCE: 0 face-speech | 1 face-scene | 2 speech-scene | 3 same evidence type | 4 other / query
+            if q:
+                E_[i, j] = 4
+            elif ti == tj:
+                E_[i, j] = 3
+            else:
+                E_[i, j] = {frozenset(('face', 'speech')): 0, frozenset(('face', 'scene')): 1,
+                            frozenset(('speech', 'scene')): 2}[frozenset((ti, tj))]
+    return {'time': T_, 'person': P_, 'evidence': E_}
+
+
+REL = relation_index()
+N_TYPES = {'time': 4, 'person': 5, 'evidence': 5}
+NONQ = np.array([[TOK[i][0] != 'query' and TOK[j][0] != 'query' for j in range(NT)] for i in range(NT)])
+
+
+def randomized_relations(seed):
+    # per family: permute the labels of the ordered non-query pairs (marginal counts kept), query pairs unchanged
+    rng = np.random.default_rng(seed)
+    out = {}
+    for f, M in REL.items():
+        M = M.copy()
+        M[NONQ] = rng.permutation(M[NONQ])
+        out[f] = M
+    return out
+
+
+class RoleNetX(RoleNet):
+    # RoleNet (G8b, all switches on) with (a) clip-identity mode ordered / bag12 / bag123, (b) optional factorial
+    # relation biases on the attention logits, and (c) an optional permutation of the clip axis of every clip-indexed input.
+    def __init__(self, clip='ordered', families=(), rel_index=None, d=RN['D']):
+        super().__init__(FULL, d)
+        self.clip_mode = clip
+        self.register_buffer('cmap', torch.tensor({'ordered': [0, 1, 2], 'bag12': [0, 0, 2], 'bag123': [0, 0, 0]}[clip]))
+        self.drop_clip3_voice = clip == 'bag123'
+        self.families = tuple(families)
+        if self.families:
+            idx = rel_index or REL
+            for f in self.families:
+                self.register_buffer(f'rel_idx_{f}', torch.tensor(idx[f], dtype=torch.long))
+            self.rel_b = nn.ParameterDict({f: nn.Parameter(torch.zeros(RN['layers'], RN['heads'], N_TYPES[f]))
+                                           for f in self.families})          # zero init: starts as plain RoleNet
+
+    def forward(self, ix, train=False, perm=None):
+        B, aux = len(ix), {}
+        p = torch.arange(3, device=DEVICE) if perm is None else torch.as_tensor(perm, device=DEVICE)
+        x, m = FACE[ix][:, :, p], FMASK[ix][:, :, p]
+        txt, aud, afd, scn, voi = TXT[ix][:, p], AUD[ix][:, p], AFD[ix][:, p], SCN[ix][:, p], VOI[ix][:, p]
+        if self.drop_clip3_voice:
+            voi = voi.clone(); voi[..., VOI_CLIP3_COLS] = 0
+        h, present = self.pool(x, m)                                          # [B, 3, 3, d]
+        absent = self.absent[:, self.cmap].unsqueeze(0).expand(B, -1, -1, -1)
+        clip_e = self.clip_emb[self.cmap]
+        h = torch.where(present.unsqueeze(-1), h, absent) + self.face_role[None, :, None] + clip_e[None, None]
+        ft = h.reshape(B, 9, -1)
+        aux['face'] = (self.head_face(ft.mean(1)), YB[ix], RN['aux_w'])
+        tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+        aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
+        spk_ = self.text(txt) + self.audio(aud) * afd.unsqueeze(-1) + self.voice(voi) + self.ctx_role[0]
+        sc_ = self.scene(scn) + self.ctx_role[1]
+        ct = torch.cat([spk_ + clip_e, sc_ + clip_e], 1)                     # [B, 6, d]
+        aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
+        toks = torch.cat([self.query.expand(B, -1, -1), ft, ct], 1)
+        valid = torch.ones(toks.shape[:2], dtype=torch.bool, device=toks.device)
+        if train:
+            u = torch.rand(B, device=toks.device)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+            valid[:, 1:10] &= ~drop_face.unsqueeze(1)
+            valid[:, 10:] &= ~drop_ctx.unsqueeze(1)
+        if not self.families:
+            out = self.enc(toks, src_key_padding_mask=~valid)
+        else:
+            Hh = RN['heads']
+            kmask = torch.zeros(B, 1, 1, NT, device=toks.device).masked_fill(~valid[:, None, None, :], -1e4)   # finite: no NaN grads
+            out = toks
+            for l, layer in enumerate(self.enc.layers):
+                bias = sum(self.rel_b[f][l][:, getattr(self, f'rel_idx_{f}')] for f in self.families)   # [H, T, T]
+                out = layer(out, src_mask=(bias.unsqueeze(0) + kmask).reshape(B * Hh, NT, NT))
+        return self.head(out[:, 0]), aux
+
+
+def logits_of(model, ix, perm=None, bs=256):
+    model.eval()
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(ix), bs):
+            out.append(model(ix[i:i + bs], perm=perm)[0].float().cpu())
+    return torch.cat(out).numpy().astype(np.float64)
+
+
+def nll_logits(z, y):
+    z = z - z.max(1, keepdims=True)
+    return float((np.log(np.exp(z).sum(1)) - z[np.arange(len(y)), y]).mean())
+
+
+def row_nll(z, y):
+    z = z - z.max(-1, keepdims=True)
+    return np.log(np.exp(z).sum(-1)) - np.take_along_axis(z, y[..., None], -1)[..., 0]
+
+
+def fit_temperature(z, y):
+    r = minimize_scalar(lambda lt: nll_logits(z / np.exp(lt), y), bounds=(np.log(0.05), np.log(20.0)), method='bounded')
+    return float(np.exp(r.x))
+
+
+def train_run(make, tr, dev, te, seed, ckpt_path):
+    # checkpoint by inner-dev UAR (G14 rule); temperature fitted on the same inner-dev rows; held-out fold scored after
+    seed_all(seed)
+    hp = HP['role']
+    model = make().to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    best, best_state, bad, best_ep = -1, None, 0, -1
+    for ep in range(hp['epochs']):
+        model.train()
+        perm_ = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm_), hp['batch']):
+            j = perm_[i:i + hp['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, w in aux.values():
+                if (t >= 0).any():
+                    loss = loss + w * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(logits_of(model, dev).argmax(1), y_dev, 7)[1]
+        if u > best:
+            best, bad, best_ep = u, 0, ep
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    torch.save(best_state, ckpt_path)
+    zd, zt = logits_of(model, dev), logits_of(model, te)
+    return model, zd, zt, fit_temperature(zd, y_dev), best, best_ep
+
+
+def fold_rows(f):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    return trr, fit_rows, dev_rows, te_rows
+
+
+def boot_pairs(LOSS, pairs, n_boot=N_BOOT, seed=0):
+    # mean of per-seed NLL; draws resample seeds and episodes, shared across all arms and pairs
+    S = next(iter(LOSS.values())).shape[0]
+    gidx = [np.where(src == e)[0] for e in np.unique(src)]
+    rng = np.random.default_rng(seed)
+
+    def q(sidx, w):
+        nl = {a: float((L[sidx].mean(0) * w).sum() / w.sum()) for a, L in LOSS.items()}
+        return {**{f'NLL {a}': v for a, v in nl.items()}, **{k: nl[x] - nl[y] for k, (x, y) in pairs.items()}}
+    point = q(np.arange(S), np.ones(N))
+    draws = []
+    for _ in range(n_boot):
+        w = np.zeros(N)
+        for i in rng.integers(0, len(gidx), len(gidx)):
+            w[gidx[i]] += 1
+        draws.append(q(rng.integers(0, S, S), w))
+    D = pd.DataFrame(draws)
+    return point, {k: np.percentile(D[k], [2.5, 97.5]) for k in D}
+"""
+
+G33A = [
+    ("markdown", r"""
+# G33a — Temporal structure audit: ordered vs swap I↔II vs bag12 vs bag123 (5-fold CV, train+val, 10 seeds; test untouched)
+
+Part of the **G33 campaign** with G33b (relational bias study). Both notebooks share the folds, seeds, preprocessing
+(manifest version `G33-v1`) and the **R0 = `ordered`** artifacts, which are trained **only here** and exported for G33b.
+
+**Where clip identity enters RoleNet (checked in the code).** Explicit: (1) the clip embedding on every token; (2) the
+absent token, which has its own parameters per (role, clip); (3) the voice feature "cosine to clip III" (≈ 1 at clip III)
+and its availability flag. Implicit, through the data: roles are defined from clip III (A = most frequent identity in
+III, L = second), so A is almost always present in III and L exists only if seen in III. Conclusions are about
+**explicit** clip identity only.
+
+**Bag, defined operationally.** A model is a *bag over clip set S* iff (a) for every permutation π of the clips in S,
+applied jointly to every clip-indexed input (faces of all roles, speech, scene, voice rows), f(πx) = f(x), checked
+numerically on every evaluation row (max |Δ logit| < 1e-5; otherwise the arm is invalid), and (b) the known explicit
+clip-identifying data feature is removed where S contains clip III (voice cosine to clip III and its flag, for bag123).
+Construction: one shared clip embedding and one shared absent token (per role) for the clips in S.
+
+| Arm | Training | Question |
+|---|---|---|
+| `ordered` (R0) | RoleNet as is | reference |
+| `ordered + swap I↔II` (test time only) | the `ordered` model, clip I and II inputs exchanged, embedding positions fixed | does the trained model **rely** on I/II order? |
+| `bag12` | I and II exchangeable, III distinct | is the order of the two past clips **useful** when the model is retrained? |
+| `bag123` | all three clips exchangeable | is the **explicit** designation of current vs past useful? |
+| swap on `bag12` / perms on `bag123` | validity check | must be 0 (invariance) |
+
+**Selection, calibration, metric (fixed before running).** Checkpoint by inner-dev UAR (G14 rule, every arm). A
+temperature T is fitted per arm × fold × seed on the inner-dev logits (same rows for all arms of a fold) and applied to
+the held-out fold; the selection/calibration rows never overlap the evaluation rows. **Primary metric: mean of per-seed
+temperature-calibrated NLL on the held-out folds.** Secondary: raw NLL, UAR, WAR. Intervals: 2,000 draws over seeds and
+episodes, shared across arms.
+* **D_reliance** = NLL(ordered + swap) − NLL(ordered) (same model, same T).
+* **U_order** = NLL(bag12) − NLL(ordered).
+* **U_boundary** = NLL(bag123) − NLL(bag12).
+* Diagnostics only: mean total-variation change of the predicted distribution and the argmax flip rate under swap.
+
+**Reading (fixed).**
+
+| Result | Allowed statement about WHEN |
+|---|---|
+| U_order CI > 0 | historical **order** has utility (trajectory) |
+| U_order CI ∋ 0, U_boundary CI > 0 | **explicit response-relative boundary information is useful**; no evidence for the order of past clips |
+| both CIs ∋ 0 | history helps as **context** (G14 +2.13); no claim of temporal modelling |
+| D_reliance CI > 0, U_order CI ∋ 0 | the trained model relies on order, but order is not shown to be needed |
+
+"CI contains 0" means *not shown*, reported with the CI width (the smallest effect this design could detect). Removing
+clip I alone cost only +0.30 UAR in G13, so an order effect may be small.
+"""),
+    ("code", _G33_CFG + """ARMS_A = {'ordered': 'ordered', 'bag12': 'bag12', 'bag123': 'bag123'}
+INV_TOL = 1e-5
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Shared G33 model, relation index, training and bootstrap helpers"),
+    ("code", _G33_MODEL),
+    ("markdown", "## 5-fold episode cross-validation"),
+    ("code", r"""
+os.makedirs(f"{OUT_DIR}/g33_ckpt", exist_ok=True)
+Z = {a: np.full((len(SEEDS), N, 7), np.nan) for a in list(ARMS_A) + ['ordered_swap']}
+TEMP = {a: np.zeros((N_OUTER, len(SEEDS))) for a in ARMS_A}
+DEVZ, DEVROWS, INV, log = {}, {}, [], []
+t0 = time.time()
+for f in range(N_OUTER):
+    trr, fit_rows, dev_rows, te_rows = fold_rows(f)
+    DEVROWS[f] = dev_rows
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for a, mode in ARMS_A.items():
+        DEVZ[(a, f)] = np.zeros((len(SEEDS), len(dev_rows), 7))
+        for si, seed in enumerate(SEEDS):
+            model, zd, zt, Tt, sel, ep = train_run(lambda: RoleNetX(clip=mode), tr, dev, te, seed + 1000 * f,
+                                                   f"{OUT_DIR}/g33_ckpt/{a}_fold{f}_seed{seed}.pt")
+            Z[a][si, te_rows], DEVZ[(a, f)][si], TEMP[a][f, si] = zt, zd, Tt
+            if a == 'ordered':
+                Z['ordered_swap'][si, te_rows] = logits_of(model, te, perm=[1, 0, 2])
+            perms = {'bag12': [[1, 0, 2]], 'bag123': [[1, 0, 2], [2, 1, 0], [1, 2, 0]]}.get(a, [])
+            for pm in perms:
+                INV.append({'arm': a, 'fold': f, 'seed': seed, 'perm': str(pm),
+                            'max_abs_dlogit': float(np.abs(logits_of(model, te, perm=pm) - zt).max())})
+            yt = y_all[te_rows]
+            log.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'best_epoch': ep, 'T': Tt,
+                        'NLL_raw': nll_logits(zt, yt), 'NLL_cal': nll_logits(zt / Tt, yt),
+                        'UAR': war_uar(zt.argmax(1), yt, 7)[1]})
+            print(f"fold {f} {a:<8} seed {seed:>3}: sel UAR {sel:5.2f} (epoch {ep}) | T {Tt:.2f} | NLL cal "
+                  f"{log[-1]['NLL_cal']:.4f} | UAR {log[-1]['UAR']:5.2f} | {(time.time() - t0) / 60:.1f} min", flush=True)
+            del model
+            torch.cuda.empty_cache()
+
+LOG, INVD = pd.DataFrame(log), pd.DataFrame(INV)
+LOG.to_csv(f"{OUT_DIR}/g33a_fold_seed_log.csv", index=False)
+INVD.to_csv(f"{OUT_DIR}/g33a_invariance.csv", index=False)
+np.savez(f"{OUT_DIR}/g33a_artifacts.npz", manifest=json.dumps(MANIFEST), sample_id=DEV.sample_id.values,
+         fold=fold_of_row, y=y_all, src=src, **{f"outer_{a}": v for a, v in Z.items()},
+         **{f"temp_{a}": v for a, v in TEMP.items()}, **{f"dev_{a}_fold{f}": v for (a, f), v in DEVZ.items()},
+         **{f"devrows_fold{f}": r for f, r in DEVROWS.items()})
+print("saved g33a_artifacts.npz (R0 = 'ordered' artifacts for G33b), logs, and g33_ckpt/")
+"""),
+    ("markdown", "## Invariance checks, estimands and the fixed reading"),
+    ("code", r"""
+print("== invariance (bag definition, part a): max |Δ logit| under clip permutations ==")
+VALID = {'ordered': True}
+for a in ('bag12', 'bag123'):
+    mx = INVD[INVD.arm == a].max_abs_dlogit.max()
+    VALID[a] = bool(mx < INV_TOL)
+    print(f"  {a:<7} max {mx:.2e} -> {'valid bag' if VALID[a] else 'NOT invariant: arm invalid for conclusions'}")
+
+foldT = lambda a: TEMP[a][fold_of_row]                                    # [N, S] temperature of each row's model
+CAL = {a: Z[a] / foldT(a).T[..., None] for a in ARMS_A}
+CAL['ordered_swap'] = Z['ordered_swap'] / foldT('ordered').T[..., None]
+LOSS = {a: row_nll(v, np.broadcast_to(y_all, v.shape[:2])) for a, v in CAL.items()}
+LOSS_RAW = {a: row_nll(v, np.broadcast_to(y_all, v.shape[:2])) for a, v in Z.items()}
+PAIRS = {'D_reliance = NLL(ordered+swap) - NLL(ordered)': ('ordered_swap', 'ordered'),
+         'U_order = NLL(bag12) - NLL(ordered)': ('bag12', 'ordered'),
+         'U_boundary = NLL(bag123) - NLL(bag12)': ('bag123', 'bag12')}
+point, CI = boot_pairs(LOSS, PAIRS)
+praw, CIraw = boot_pairs(LOSS_RAW, PAIRS, n_boot=500, seed=1)
+print("\nmean per-seed calibrated NLL:", {a: round(point[f'NLL {a}'], 4) for a in LOSS})
+print("temperature (median per arm):", {a: round(float(np.median(TEMP[a])), 2) for a in TEMP})
+print("best epoch (mean per arm):", LOG.groupby('arm').best_epoch.mean().round(1).to_dict())
+for k in PAIRS:
+    print(f"  {k:<46} {point[k]:+.4f} [{CI[k][0]:+.4f}, {CI[k][1]:+.4f}] (CI width {CI[k][1] - CI[k][0]:.4f}) | raw NLL "
+          f"{praw[k]:+.4f} [{CIraw[k][0]:+.4f}, {CIraw[k][1]:+.4f}]")
+
+sm = lambda z: np.exp(z - z.max(-1, keepdims=True)) / np.exp(z - z.max(-1, keepdims=True)).sum(-1, keepdims=True)
+P0, P1 = sm(CAL['ordered']), sm(CAL['ordered_swap'])
+tv = 0.5 * np.abs(P0 - P1).sum(-1)
+flip = (P0.argmax(-1) != P1.argmax(-1))
+print(f"\nswap diagnostics (not decision metrics): mean total-variation change {tv.mean():.4f} "
+      f"(95th percentile {np.percentile(tv, 95):.4f}) | argmax flip rate {flip.mean() * 100:.1f}%")
+both12 = FMASK[:, :, :2].any(-1).any(1).all(-1).cpu().numpy()
+for name_, m_ in (('faces in both clip I and II', both12), ('not both', ~both12)):
+    if m_.any():
+        print(f"  MCIS with {name_} ({m_.sum()}): TV {tv[:, m_].mean():.4f} | flips {flip[:, m_].mean() * 100:.1f}%")
+
+lo = lambda k: CI[k][0]
+ko, kb, kr = list(PAIRS)[1], list(PAIRS)[2], list(PAIRS)[0]
+print("\n== G33a reading (fixed rules; explicit clip identity only) ==")
+if not (VALID['bag12'] and VALID['bag123']):
+    print("  at least one bag arm failed the invariance check: the corresponding statements below are not allowed")
+if VALID['bag12'] and lo(ko) > 0:
+    print("  WHEN: historical ORDER has utility (trajectory)")
+elif VALID['bag123'] and lo(kb) > 0:
+    print("  WHEN: explicit response-relative boundary information is useful; no evidence for the order of past clips")
+else:
+    print("  WHEN: history helps as context (G14); no evidence for temporal modelling (order or explicit boundary)")
+if lo(kr) > 0 and not lo(ko) > 0:
+    print("  note: the trained model relies on I/II order, but order is not shown to be needed")
+SUM = pd.DataFrame([{'arm': a, 'NLL_cal': point[f'NLL {a}'], 'NLL_raw': praw[f'NLL {a}'],
+                     'UAR_ensemble': war_uar(sm(Z[a]).mean(0).argmax(1), y_all, 7)[1],
+                     'UAR_seed_mean': np.mean([war_uar(Z[a][s].argmax(1), y_all, 7)[1] for s in range(len(SEEDS))])}
+                    for a in LOSS])
+print(SUM.round(4).to_string(index=False))
+SUM.to_csv(f"{OUT_DIR}/g33a_summary.csv", index=False)
+pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point', 'lo', 'hi']).T.to_csv(
+    f"{OUT_DIR}/g33a_estimands.csv")
+"""),
+]
+
+G33B = [
+    ("markdown", r"""
+# G33b — Relational bias study: factorial TIME × PERSON × EVIDENCE attention biases (5-fold CV, train+val, 10 seeds; test untouched)
+
+Part of the **G33 campaign**. R0 (plain RoleNet = G33a `ordered`) is **not retrained**: its held-out logits, inner-dev
+logits and temperatures are loaded from G33a (`g33a_artifacts.npz`), after checking that the manifest (version, seeds,
+folds, sample ids, hyper-parameters) matches this notebook exactly.
+
+**Mechanism.** RoleNet unchanged (role and clip embeddings kept) plus additive biases on every attention logit, per
+layer and head: a_ij = Q_iK_jᵀ/√d + b_time[r^t_ij] + b_person[r^p_ij] + b_evidence[r^e_ij], zero-initialised (each arm starts
+as R0). Row i attends to column j. A pair's relation is the tuple (r^t, r^p, r^e):
+
+| Family | Types |
+|---|---|
+| TIME | query-involved · j same time as i · j historically earlier than i · j later than i |
+| PERSON | same focal identity (A–A or L–L across clips) · A–L · focal–O · O–O (no same-identity claim; O is a bucket) · non-face pair |
+| EVIDENCE | face–speech · face–scene · speech–scene · same evidence type · other/query |
+
+EVIDENCE does not encode time: "face–speech in the same clip" is (same time, face–speech); "face–speech across clips" is
+(earlier/later, face–speech). Added parameters: (4 + 5 + 5) × heads × layers = 112.
+
+| Arm | Biases |
+|---|---|
+| R0 | none (loaded from G33a) |
+| **R-full** | TIME + PERSON + EVIDENCE |
+| R−time / R−person / R−evidence | leave one family out |
+| **R-random** | same families, type counts, histograms and parameters; per family the labels of the ordered non-query pairs are permuted once with a fixed randomisation seed (same map for all seeds and folds); query pairs keep their labels |
+
+**Selection, calibration, metric:** as G33a (checkpoint by inner-dev UAR; T per arm × fold × seed fitted on the inner-dev
+logits, the same rows for every arm of a fold; primary = mean per-seed calibrated NLL on the held-out folds; 2,000 draws
+over seeds and episodes, shared).
+
+**Reading (fixed before running).** The relational-bias contribution is unlocked only if **both**
+NLL(R0) − NLL(R-full) **and** NLL(R-random) − NLL(R-full) have CIs entirely above 0 (utility **and** semantic
+specificity). Winning only against R0: the parameterisation helps, the ontology is not shown to matter. Winning only
+against R-random: not better than plain RoleNet. Neither case is claimed as a method contribution. Leave-one-family-out
+differences NLL(R−family) − NLL(R-full) are descriptive (which family the gain depends on); no gate per family.
+"""),
+    ("code", _G33_CFG + """R0_ARTIFACTS = "/kaggle/input/**/g33a_artifacts.npz"   # output of G33a (attach it as a dataset)
+RAND_SEED = 20261004                           # fixed randomisation seed of the R-random relation map
+ARMS_B = {'R-full': ('time', 'person', 'evidence'), 'R-time': ('person', 'evidence'),
+          'R-person': ('time', 'evidence'), 'R-evidence': ('time', 'person'), 'R-random': ('time', 'person', 'evidence')}
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Shared G33 model, relation index, training and bootstrap helpers"),
+    ("code", _G33_MODEL),
+    ("markdown", "## Relation maps and the R0 artifacts from G33a"),
+    ("code", r"""
+REL_RANDOM = randomized_relations(RAND_SEED)
+for f in REL:
+    h_true = np.bincount(REL[f][NONQ], minlength=N_TYPES[f]); h_rand = np.bincount(REL_RANDOM[f][NONQ], minlength=N_TYPES[f])
+    assert (h_true == h_rand).all() and (REL[f][~NONQ] == REL_RANDOM[f][~NONQ]).all()
+    print(f"{f:<9} type counts (non-query pairs) {h_true.tolist()} | pairs relabelled by R-random "
+          f"{(REL[f][NONQ] != REL_RANDOM[f][NONQ]).mean() * 100:.0f}%")
+
+hits = sorted(glob.glob(R0_ARTIFACTS, recursive=True))
+assert hits, f"attach the G33a output (g33a_artifacts.npz); pattern {R0_ARTIFACTS}"
+A0 = np.load(hits[0], allow_pickle=True)
+M0 = json.loads(str(A0['manifest']))
+bad = [k for k in MANIFEST if json.dumps(MANIFEST[k], sort_keys=True) != json.dumps(M0.get(k), sort_keys=True)]
+assert not bad, f"G33a manifest differs from this notebook in {bad}"
+assert (A0['sample_id'] == DEV.sample_id.values).all() and (A0['fold'] == fold_of_row).all()
+print("R0 artifacts loaded from", hits[0], "| manifest identical")
+"""),
+    ("markdown", "## 5-fold episode cross-validation of the relation arms"),
+    ("code", r"""
+os.makedirs(f"{OUT_DIR}/g33_ckpt", exist_ok=True)
+Z = {'R0': A0['outer_ordered'].astype(np.float64)}
+TEMP = {'R0': A0['temp_ordered']}
+Z.update({a: np.full((len(SEEDS), N, 7), np.nan) for a in ARMS_B})
+TEMP.update({a: np.zeros((N_OUTER, len(SEEDS))) for a in ARMS_B})
+DEVZ, BIAS, log = {}, {a: [] for a in ARMS_B}, []
+t0 = time.time()
+for f in range(N_OUTER):
+    trr, fit_rows, dev_rows, te_rows = fold_rows(f)
+    assert (A0[f'devrows_fold{f}'] == dev_rows).all(), "inner-dev rows differ from G33a"
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for a, fams in ARMS_B.items():
+        DEVZ[(a, f)] = np.zeros((len(SEEDS), len(dev_rows), 7))
+        idx = REL_RANDOM if a == 'R-random' else REL
+        for si, seed in enumerate(SEEDS):
+            model, zd, zt, Tt, sel, ep = train_run(lambda: RoleNetX('ordered', fams, idx), tr, dev, te, seed + 1000 * f,
+                                                   f"{OUT_DIR}/g33_ckpt/{a}_fold{f}_seed{seed}.pt")
+            Z[a][si, te_rows], DEVZ[(a, f)][si], TEMP[a][f, si] = zt, zd, Tt
+            BIAS[a].append({k: v.detach().cpu().numpy() for k, v in model.rel_b.items()})
+            yt = y_all[te_rows]
+            log.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'best_epoch': ep, 'T': Tt,
+                        'NLL_raw': nll_logits(zt, yt), 'NLL_cal': nll_logits(zt / Tt, yt), 'UAR': war_uar(zt.argmax(1), yt, 7)[1]})
+            print(f"fold {f} {a:<10} seed {seed:>3}: sel UAR {sel:5.2f} (epoch {ep}) | T {Tt:.2f} | NLL cal "
+                  f"{log[-1]['NLL_cal']:.4f} | UAR {log[-1]['UAR']:5.2f} | {(time.time() - t0) / 60:.1f} min", flush=True)
+            del model
+            torch.cuda.empty_cache()
+
+LOG = pd.DataFrame(log)
+LOG.to_csv(f"{OUT_DIR}/g33b_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g33b_artifacts.npz", manifest=json.dumps(MANIFEST), sample_id=DEV.sample_id.values, fold=fold_of_row,
+         y=y_all, src=src, **{f"outer_{a}": v for a, v in Z.items() if a != 'R0'},
+         **{f"temp_{a}": v for a, v in TEMP.items() if a != 'R0'}, **{f"dev_{a}_fold{f}": v for (a, f), v in DEVZ.items()},
+         **{f"bias_{a}_{fam}": np.stack([b[fam] for b in BIAS[a]]) for a in ARMS_B for fam in ARMS_B[a]})
+print("saved g33b_artifacts.npz, g33b_fold_seed_log.csv and g33_ckpt/")
+"""),
+    ("markdown", "## Estimands and the fixed reading"),
+    ("code", r"""
+foldT = lambda a: TEMP[a][fold_of_row]
+CAL = {a: Z[a] / foldT(a).T[..., None] for a in Z}
+LOSS = {a: row_nll(v, np.broadcast_to(y_all, v.shape[:2])) for a, v in CAL.items()}
+LOSS_RAW = {a: row_nll(v, np.broadcast_to(y_all, v.shape[:2])) for a, v in Z.items()}
+PAIRS = {'NLL(R0) - NLL(R-full)': ('R0', 'R-full'), 'NLL(R-random) - NLL(R-full)': ('R-random', 'R-full'),
+         'NLL(R-time) - NLL(R-full)': ('R-time', 'R-full'), 'NLL(R-person) - NLL(R-full)': ('R-person', 'R-full'),
+         'NLL(R-evidence) - NLL(R-full)': ('R-evidence', 'R-full'), 'NLL(R0) - NLL(R-random)': ('R0', 'R-random')}
+point, CI = boot_pairs(LOSS, PAIRS)
+praw, CIraw = boot_pairs(LOSS_RAW, PAIRS, n_boot=500, seed=1)
+print("mean per-seed calibrated NLL:", {a: round(point[f'NLL {a}'], 4) for a in LOSS})
+print("temperature (median per arm):", {a: round(float(np.median(TEMP[a])), 2) for a in TEMP})
+for i, k in enumerate(PAIRS):
+    if i == 2:
+        print("  -- leave-one-family-out (descriptive) --")
+    print(f"  {k:<32} {point[k]:+.4f} [{CI[k][0]:+.4f}, {CI[k][1]:+.4f}] | raw NLL {praw[k]:+.4f} "
+          f"[{CIraw[k][0]:+.4f}, {CIraw[k][1]:+.4f}]")
+u, s = CI['NLL(R0) - NLL(R-full)'][0] > 0, CI['NLL(R-random) - NLL(R-full)'][0] > 0
+print("\n== G33b reading (fixed rule) ==")
+print("  " + ("UNLOCKED: relational biases help (vs R0) and their semantics matter (vs R-random)" if u and s else
+              "beats R0 only: the parameterisation helps, the ontology is not shown to matter → no method claim" if u else
+              "beats R-random only: not better than plain RoleNet → no method claim" if s else
+              "neither: no evidence for relational inductive bias → no method claim"))
+print("\nlearned biases of R-full (mean over runs, per family, layer × head × type):")
+for fam in ARMS_B['R-full']:
+    print(f"  {fam}: mean over heads per layer {np.stack([b[fam] for b in BIAS['R-full']]).mean(0).mean(1).round(3).tolist()}")
+sm = lambda z: np.exp(z - z.max(-1, keepdims=True)) / np.exp(z - z.max(-1, keepdims=True)).sum(-1, keepdims=True)
+SUM = pd.DataFrame([{'arm': a, 'NLL_cal': point[f'NLL {a}'], 'NLL_raw': praw[f'NLL {a}'],
+                     'UAR_ensemble': war_uar(sm(Z[a]).mean(0).argmax(1), y_all, 7)[1],
+                     'UAR_seed_mean': np.mean([war_uar(Z[a][s_].argmax(1), y_all, 7)[1] for s_ in range(len(SEEDS))])}
+                    for a in Z])
+print(SUM.round(4).to_string(index=False))
+SUM.to_csv(f"{OUT_DIR}/g33b_summary.csv", index=False)
+pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point', 'lo', 'hi']).T.to_csv(
+    f"{OUT_DIR}/g33b_estimands.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -10235,6 +10770,8 @@ if __name__ == "__main__":
                         ("g30_aux_supervision_cv.ipynb", G30),
                         ("g31_mirror_mixture_linear_check.ipynb", G31),
                         ("g32_mirror_diagnostics.ipynb", G32),
+                        ("g33a_temporal_audit_cv.ipynb", G33A),
+                        ("g33b_relational_bias_cv.ipynb", G33B),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

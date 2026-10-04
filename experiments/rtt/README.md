@@ -945,3 +945,15 @@ Per-seed test UAR 22.84–24.27. Reading: resampling spreads the forecasts over 
 surprise 0 → 8.1, sad 23.3 → 31.7) at the cost of angry (48.1 → 20.8) and WAR; fear stays at 0. Against the
 baseline the gain is +4.24 UAR; against the preregistered RoleNet it is not significant. This is the second read of
 the test split for RoleNet and is reported as such. Files: `results/g36/`.
+
+## G38 results: class resampling with a no-regression rule (development CV; test not read)
+
+| Arm (CV, 10-seed ensembles) | UAR | WAR | angry | disgust | fear | happy | neutral | sad | surprise |
+|---|---|---|---|---|---|---|---|---|---|
+| RoleNet (uniform) | 26.10 | 38.29 | 46.2 | 0.9 | 0.0 | 60.0 | 54.0 | 21.2 | 0.4 |
+| Up-quarter (∝ n_c^−0.25) | 26.17 | 37.26 | 34.4 | 8.6 | 0.0 | 61.7 | 50.8 | 25.1 | 2.5 |
+| Tail-median (≤ 3×) | 25.96 | 36.27 | 39.3 | 16.4 | 0.0 | 58.0 | 48.8 | 15.9 | 3.4 |
+
+Fixed rule: no arm eligible (Up-quarter angry −11.8; Tail-median angry −6.9, sad −5.3) → **no test read**.
+Decision (authors): the paper keeps the **preregistered RoleNet (G10)**; G36b (Up-sqrt) is reported only as an analysis
+of the rare-class / angry trade-off; fear and surprise (test recall 0) are future work.

@@ -34,9 +34,8 @@ listening, and that a forecaster should be built around that person. We present 
 prospective responder without any future information and (ii) represents the preceding clips as a set of
 participant-by-turn evidence tokens read by a set encoder. On the locked Hi-EF test split, evaluated once under a
 preregistered plan, \model{} improves unweighted average recall over the strongest published configuration by
-3.84 points \ci{1.24}{6.76}; with class-resampled training, selected on development data and evaluated in a
-second, disclosed test read, the gain is 4.24 points \ci{2.02}{6.81}. The preregistered primary contrast under
-logit-adjusted scoring was not confirmed, which we trace to a test set with six examples of one class. Replacing our responder proxy by the true responder
+3.84 points \ci{1.24}{6.76}; the preregistered primary contrast under logit-adjusted scoring was not confirmed,
+which we trace to a test set with six examples of one class. Replacing our responder proxy by the true responder
 identity changes nothing ($-0.04$ \ci{-1.50}{1.85}), whereas removing the listener's face or the preceding
 context each costs about two points. Explicit temporal, relational or role structure in the encoder brings no
 measurable gain. Remaining errors concentrate on turns where the responder does not mirror the speaker's emotion.
@@ -242,10 +241,7 @@ tokens, $y_B$ from the mean of the speech and scene tokens, and A's clip III emo
 Modality dropout \citep{neverova2016moddrop} removes all speech and scene tokens with probability 0.3, or else all face
 tokens with probability 0.15, i.e.\ the model is trained on random subsets of $\mathcal{S}$. We use AdamW (learning
 rate $3\cdot10^{-4}$, weight decay $10^{-2}$, batch 64, at most 80 epochs), keep the checkpoint with the best UAR on
-five held-out training episodes (patience 12), and average the predicted probabilities of several seeds. The final model draws each
-training epoch with replacement, an MCIS of class $c$ with probability $\propto n_c^{-1/2}$ (square-root class
-resampling), chosen on development data among uniform, square-root and class-balanced resampling
-(Section~\ref{sec:main}).
+five held-out training episodes (patience 12), and average the predicted probabilities of several seeds.
 
 \subsection{Complexity}
 
@@ -336,13 +332,14 @@ for 27.6\% of test MCIS (true rate 1.5\%), gaining two \emph{fear} hits while it
 consistent with, but not a confirmation of, the development-set evidence, and we flag the choice of an adjusted
 7-class primary metric for a test set with six \emph{fear} examples as a design error of our preregistration.
 
-\paragraph{Class resampling.} The preregistered model almost never predicts the rarer classes (test recall 2.5\% for
-\emph{disgust}, 0\% for \emph{surprise}). We therefore compared uniform, square-root and class-balanced resampling of
-the training MCIS on development CV (10 seeds, 5 folds) under a selection rule fixed in advance. Square-root resampling
-(sampling probability $\propto n_c^{-1/2}$) was selected (CV UAR 26.95 vs.\ 26.10, $\Delta$ $+0.86$ \ci{-0.94}{2.18})
-and then read on test once: UAR 25.64, $+4.24$ \ci{2.02}{6.81} over the baseline, and $+0.40$ \ci{-1.98}{1.93} over
-the preregistered \model{}, at the cost of WAR ($-2.69$ \ci{-5.27}{0.01}). The figures and analyses below use this
-final model.
+\paragraph{Class resampling: a trade-off, not a fix.} \model{} recalls 0\% of \emph{fear} and \emph{surprise} and
+2.5\% of \emph{disgust} on test. Resampling the training MCIS by class moves recall towards these classes but takes it
+from \emph{angry}. Square-root resampling (probability $\propto n_c^{-1/2}$), selected on development CV, was read on
+test once more: UAR 25.64 ($+4.24$ \ci{2.02}{6.81} over the baseline, $+0.40$ \ci{-1.98}{1.93} over \model{}) with
+\emph{disgust} 22.5\% and \emph{surprise} 8.1\%, but \emph{angry} fell from 48.1\% to 20.8\% and WAR by 2.69 points
+(Table~\ref{tab:main}). Two milder schemes (probability $\propto n_c^{-1/4}$; oversampling only the classes below the
+median count) failed a no-regression rule fixed in advance (no class may lose more than 5 recall points on CV) and were
+not evaluated on test. We therefore keep the preregistered \model{}; all figures and analyses use it.
 
 \begin{figure*}[t]
 \centering
@@ -352,13 +349,11 @@ descriptive). Row labels give the number of test MCIS per class.}
 \label{fig:confusion}
 \end{figure*}
 
-Figure~\ref{fig:confusion} shows where the gain comes from. The baseline collapses onto three classes and confuses
-polarity: it forecasts \emph{happy} for 58\% of \emph{sad} responses, recalls 3\% of them, and never predicts
-\emph{disgust} or \emph{surprise}. \model{} spreads its forecasts over the label space: \emph{sad} recall rises to
-32\% (\emph{sad}$\rightarrow$\emph{happy} falls to 23\%), \emph{disgust} to 22.5\% and \emph{surprise} to 8\%,
-while \emph{happy} and \emph{neutral} stay close to the baseline. The price is \emph{angry}, whose recall drops
-from 44\% to 21\% as part of it moves to \emph{disgust} and \emph{sad}. \emph{Fear}, with six test examples, is
-never recognised by either model.
+Figure~\ref{fig:confusion} shows where the gain comes from. The baseline confuses polarity: it forecasts \emph{happy}
+for 58\% of \emph{sad} responses and recalls only 3\% of them. \model{} reduces this confusion to 18\% and raises
+\emph{sad} recall to 23\%, while keeping \emph{angry}, \emph{happy} and \emph{neutral} at a similar level.
+Neither model forecasts \emph{fear} or \emph{surprise} correctly, and \emph{disgust} only rarely; we return to this
+limitation in Sections~\ref{sec:analysis} and~\ref{sec:conclusion}.
 
 \subsection{Does the forecaster need to know who responds?}
 \label{sec:proxy}
@@ -466,10 +461,10 @@ therefore small and not confirmed.
 \label{sec:analysis}
 
 \paragraph{Mirroring and shifts.} B's emotion equals A's clip III emotion in 35.5\% of development MCIS (34.7\% in
-our MELD windows). On development CV, \model{} is correct on 56.3\% of these \emph{mirror} cases but on only
+our MELD windows). On development CV, \model{} is correct on 56.9\% of these \emph{mirror} cases but on only
 27.7\% of \emph{shifts}, where it still predicts A's emotion 29\% of the time; the listener's tokens help mostly on
 mirror cases. Whether a shift will happen is partly predictable (AUC 0.70), but which emotion follows a shift is
-much less so: recall on shifts is 11.8\% for \emph{disgust}, 3.3\% for \emph{surprise} and 0\% for \emph{fear}.
+not: recall on shifts is 1.6\% for \emph{disgust}, 2.8\% for \emph{surprise} and 0\% for \emph{fear}.
 
 \begin{figure}[t]
 \centering
@@ -480,9 +475,9 @@ much less so: recall on shifts is 11.8\% for \emph{disgust}, 3.3\% for \emph{sur
 
 \paragraph{Objective and subjective difficulty.} Errors split into two kinds (Figure~\ref{fig:groups}). Some are
 \emph{objective}: on a shift the next emotion is not determined by what is visible, and accuracy halves (27.7\% vs
-56.3\%). Others are \emph{subjective}: when the annotators marked B's label as uncertain, accuracy falls from 40.6\%
-to 25.2\%, a ceiling set by label ambiguity rather than by the model. Accuracy hardly depends on whether a listener
-is visible in clip III (38.0\% vs.\ 37.7\%), which is consistent with the model falling back on context and on the
+56.9\%). Others are \emph{subjective}: when the annotators marked B's label as uncertain, accuracy falls from 40.5\%
+to 25.2\%, a ceiling set by label ambiguity rather than by the model. Accuracy does not depend on whether a listener
+is visible in clip III (38.0\% either way), which is consistent with the model falling back on context and on the
 speaker when the listener is absent.
 
 \paragraph{The missing information is a recognition problem.} Two oracle analyses locate the headroom. With A's
@@ -495,12 +490,19 @@ combining the same tokens cannot recover it.
 
 % ======================================================================================================
 \section{Conclusion}
+\label{sec:conclusion}
 
 Forecasting a responder's emotion on Hi-EF is mostly a matter of looking at the right person. An identity-free
 listener proxy and a participant-centric evidence set read by a small set encoder outperform the published
 configuration on a locked test split, the proxy loses nothing against the true responder, and additional
 structure in the encoder does not help. The remaining errors point to recognising the participants' current
 emotional states, especially before a shift, as the next problem to solve.
+
+\paragraph{Future work.} Two classes remain unsolved: \model{} recalls none of the \emph{fear} and \emph{surprise}
+responses on test (and 2.5\% of \emph{disgust}). These are rare and mostly arise as shifts away from the speaker's
+emotion, where the visible evidence says little about the next state. Class resampling only trades their recall
+against \emph{angry}; progress will likely need better recognition of the participants' current states (e.g.\
+emotion- and prosody-aware encoders) and more training examples of these reactions.
 
 % ======================================================================================================
 \section*{Limitations}
@@ -509,8 +511,8 @@ emotional states, especially before a shift, as the next problem to solve.
 significance; our main claim rests on plain UAR, which was preregistered as descriptive and is the benchmark
 standard. \textbf{Test reuse.} The test split had been used before for unrelated model families
 (Appendix~\ref{app:test}); \model{}'s design used development data only. The class-resampled variant was selected on
-development data but is a second read of the test split for \model{}, and its gain over the preregistered model is
-not significant. \textbf{Small test set.} Eight test
+development data but is a second read of the test split for \model{}; it is reported only as an analysis.
+\textbf{Rare classes.} \model{} never forecasts \emph{fear} or \emph{surprise} correctly on test. \textbf{Small test set.} Eight test
 episodes give wide intervals; one \emph{fear} example is worth 2.38 UAR points. \textbf{Exploratory development.}
 The design of \model{} was informed by analyses on the same development episodes used for cross-validation.
 \textbf{Responder oracle.} The true responder is approximated by the dominant face of clip IV matched by face
@@ -545,7 +547,8 @@ Access & Models & Status \\
 single preregistered run; invalid for the trajectory arms (caching bug) \\
 2, 3 & same family: re-run after the fix; 5-fold CV over all 53 episodes & announced; execution not verified \\
 4 & \model{}, the baseline and internal variants (this paper, Table~\ref{tab:main}) & single preregistered run \\
-5 & class-resampled \model{} (Table~\ref{tab:main}) & second read; variant selected on development CV before it \\
+5 & square-root class-resampled \model{} (Table~\ref{tab:main}) & second read; selected on development CV before it; reported as analysis \\
+-- & two milder resampling schemes & not read (failed the CV no-regression rule) \\
 \bottomrule
 \end{tabular}
 \caption{Every access to the test split. \model{} was designed after access 1 using development data only; no

@@ -11641,6 +11641,10 @@ SAME_PERSON_COS = 0.45
 MIN_PEOPLE, MIN_PEOPLE_III = 3, 2
 N_RENDER = {'win_shift': 4, 'win_mirror': 3, 'fail_shift_rare': 3}
 FORCE_IDS = ['sample01305']                     # always rendered (motivation candidate chosen by the authors)
+ONLY_FORCED = True                              # True: render only FORCE_IDS (fast); False: also the automatic picks
+TEXT_OVERRIDE = {                               # subtitles with the punctuation the annotation file drops (paper only)
+    'sample01305': ["You'd be a valuable asset to us.", "Claire should've never let you go. \u2013 Yeah.",
+                    "Well\u2026 I'll hold my tongue.", "She and I don't talk."]}
 CAND = """ + repr(_G37_CAND) + r"""
 os.makedirs(OUT_DIR, exist_ok=True)
 roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
@@ -11691,7 +11695,7 @@ keep = [s for s in CAND if s['sample_id'] in info and info[s['sample_id']]['n_pe
         and info[s['sample_id']]['n_people_III'] >= MIN_PEOPLE_III and info[s['sample_id']]['has_L']]
 print(f"MCIS with >= {MIN_PEOPLE} people in I-III and >= {MIN_PEOPLE_III} in III: {len(keep)} / {len(CAND)}")
 PICK = [s for s in CAND if s['sample_id'] in FORCE_IDS and s['sample_id'] in info]
-for cat, n in N_RENDER.items():
+for cat, n in ({} if ONLY_FORCED else N_RENDER).items():
     sub = [s for s in keep if s['category'] == cat]
     sub = sorted(sub, key=lambda s: (str(s['certainty_IV']), -s['margin'] if cat != 'fail_shift_rare' else s['margin']))
     PICK += [x for x in sub[:n] if x not in PICK]
@@ -11778,24 +11782,52 @@ for s in PICK:
                  f"ours: {s['RoleNet']} (p_true {s['p_true_RoleNet']})   baseline: {s['Baseline']} (p_true {s['p_true_Baseline']})",
                  fontsize=9)
     fig.tight_layout(); fig.savefig(f"{OUT_DIR}/{s['sample_id']}_strip.png", dpi=200); plt.close(fig)
-    # paper version: no header, neutral titles, role legend
-    pnames = ['Clip I (context)', 'Clip II (context)', 'Clip III (speaker A)', 'Clip IV (target: responder B)']
-    fig, ax = plt.subplots(1, 4, figsize=(13, 2.9))
-    for k in range(4):
-        t, faces = best_frame(s, k)
+    # paper version: no header, neutral titles, role legend; clip III is split into the speaker shot and the
+    # listener's reaction shot when no sampled frame shows both
+    txt = TEXT_OVERRIDE.get(s['sample_id'], [text(c) for c in clips])
+    panels = [(0, None, 'Clip I (context)', txt[0]), (1, None, 'Clip II (context)', txt[1])]
+    fs3 = G8[clips[2]]['faces']
+    by3 = defaultdict(set)
+    for (kk, j, r) in info[s['sample_id']]['faces']:
+        if kk == 2:
+            by3[fs3[j]['frame']].add(r)
+    if any({'A', 'L'} <= v for v in by3.values()) or not any('A' in v for v in by3.values()):
+        panels.append((2, None, f"Clip III (speaker A: {s['A_III']})", txt[2]))
+    else:
+        panels += [(2, 'A', f"Clip III: speaker A ({s['A_III']})", txt[2]), (2, 'L', 'Clip III: listener L (reaction)', '')]
+    panels.append((3, None, 'Clip IV (target: responder B)', txt[3]))
+
+    def frame_with(k, want):
+        if want is None:
+            return best_frame(s, k)
+        fs = G8[clips[k]]['faces']
+        by = defaultdict(list)
+        for (kk, j, r) in info[s['sample_id']]['faces']:
+            if kk == k:
+                by[fs[j]['frame']].append((fs[j], r))
+        cand = [f for f in by if any(r == want for _, r in by[f])]
+        f = max(cand, key=lambda f: max((d['box'][2] - d['box'][0]) for d, r in by[f] if r == want))
+        return by[f][0][0]['t'], by[f]
+
+    fig, ax = plt.subplots(1, len(panels), figsize=(3.25 * len(panels), 3.1))
+    for a_, (k, want, title, tx) in zip(ax, panels):
+        t, faces = frame_with(k, want)
         img = grab(clips[k], t)
         H, W = img.shape[:2]
-        ax[k].imshow(img); ax[k].axis('off')
+        a_.imshow(img); a_.axis('off')
         for d, r in faces:
             x1, y1, x2, y2 = d['box'] * np.array([W, H, W, H])
-            ax[k].add_patch(mpatches.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, lw=2, ec=COL[r]))
-            ax[k].text(x1, y1 - 4, r, color='white', fontsize=8, weight='bold', bbox=dict(facecolor=COL[r], edgecolor='none', pad=1))
-        ax[k].set_title(pnames[k] + "\n" + "\n".join(textwrap.wrap('"' + text(clips[k]) + '"', 40)[:2]), fontsize=8)
+            a_.add_patch(mpatches.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, lw=2, ec=COL[r]))
+            a_.text(x1, y1 - 4, r, color='white', fontsize=8, weight='bold', bbox=dict(facecolor=COL[r], edgecolor='none', pad=1))
+        a_.set_title(title + ("\n" + "\n".join(textwrap.wrap('\u201c' + tx + '\u201d', 38)[:2]) if tx else "\n"), fontsize=8)
+    ok_ = lambda p_: '\u2713' if p_ == s['B_IV'] else '\u2717'
+    fig.text(0.5, 0.13, f"Forecast for B (true: {s['B_IV']}):  RoleNet {s['RoleNet']} {ok_(s['RoleNet'])}    "
+             f"baseline {s['Baseline']} {ok_(s['Baseline'])}", ha='center', fontsize=9)
     fig.legend(handles=[mpatches.Patch(color=COL['A'], label='A: speaker of clip III'),
                         mpatches.Patch(color=COL['L'], label='L: listener (responder proxy)'),
                         mpatches.Patch(color=COL['O'], label='O: others')],
                loc='lower center', ncol=3, frameon=False, fontsize=8)
-    fig.tight_layout(rect=(0, 0.07, 1, 1)); fig.savefig(f"{OUT_DIR}/{s['sample_id']}_paper.png", dpi=300)
+    fig.tight_layout(rect=(0, 0.17, 1, 0.95)); fig.savefig(f"{OUT_DIR}/{s['sample_id']}_paper.png", dpi=300)
     fig.savefig(f"{OUT_DIR}/{s['sample_id']}_paper.pdf"); plt.close(fig)
     fig, ax = plt.subplots(3, 4, figsize=(13, 6.2))
     for k in range(4):

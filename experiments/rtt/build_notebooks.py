@@ -11387,6 +11387,8 @@ N_OUTER = 5
 ARMS = {'RoleNet': 0.0, 'Up-sqrt': 0.5, 'Up-bal': 1.0}    # sampling weight of an MCIS = n_class ** -beta
 N_BOOT_CV = 1000
 G10_PROBS_GLOBS = ["/kaggle/input/**/g10_test_probs.npz", "/kaggle/working/g10_test_probs.npz"]
+G10_NPY_GLOBS = ["/kaggle/input/**/PaperBest.npy"]          # or the unpacked G10 output: a folder of .npy files
+CV_REUSE_GLOBS = ["/kaggle/input/**/g36_cv_oof.npz"]       # reuse part A of an earlier G36 run (same folds and seeds)
 """
 assert "UNLOCK_TEST = True" in _G36_CFG
 
@@ -11415,8 +11417,9 @@ test is read **only if** its CV ΔUAR vs `RoleNet` is > 0 (point estimate).
 
 **Part B — second test read (disclosed in the paper).** The selected arm is trained exactly as in G10: the 45
 development episodes, selection episodes `random.Random(2026)`, seeds 42, 123, 456, 789, 1024, plain scoring of the
-seed-averaged probabilities. It is compared with the **saved G10 test predictions** of `PaperBest` and `RoleNet`
-(attach the G10 output, `g10_test_probs.npz`); those models are not retrained. Reported: UAR / WAR, per-class recall,
+seed-averaged probabilities. It is compared with the **saved G10 test predictions** of the baseline (`PaperBest`) and `RoleNet`
+(attach the G10 output: `g10_test_probs.npz` or the folder of `.npy` files); those models are not retrained.
+Part A is reused without retraining when an earlier `g36_cv_oof.npz` is attached. Reported: UAR / WAR, per-class recall,
 ΔUAR with a bootstrap over the 8 test episodes. This is the second use of the test split for RoleNet; all numbers are
 reported, whatever their sign.
 """),
@@ -11484,7 +11487,14 @@ def recalls(p, y):
 OOF = {a: np.full((len(CV_SEEDS), N, 7), np.nan, np.float32) for a in ARMS}
 cvlog = []
 t0 = time.time()
-for f in range(N_OUTER):
+reuse = [p for g in CV_REUSE_GLOBS for p in glob.glob(g, recursive=True)]
+if reuse:
+    old = np.load(reuse[0], allow_pickle=True)
+    assert (old['sample_id'] == DEV.sample_id.values[DEVR]).all(), "reused part A does not match these rows"
+    for a in ARMS:
+        OOF[a][:, DEVR] = old[a.replace('-', '_')]
+    print(f"part A reused from {reuse[0]} (no retraining)")
+for f in (range(N_OUTER) if not reuse else []):
     tr_eps = [e for e in EPS if FOLD[e] != f]
     dev_eps = sorted(random.Random(100 + f).sample(tr_eps, 5))
     trr = np.where(np.isin(src, tr_eps))[0]
@@ -11502,7 +11512,8 @@ for f in range(N_OUTER):
             cvlog.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'UAR': u_, 'WAR': w_})
             print(f"fold {f} {a:<8} seed {seed:>3}: sel {sel:5.2f} | UAR {u_:5.2f} | {(time.time() - t0) / 60:.1f} min", flush=True)
             torch.cuda.empty_cache()
-pd.DataFrame(cvlog).to_csv(f"{OUT_DIR}/g36_cv_log.csv", index=False)
+if cvlog:
+    pd.DataFrame(cvlog).to_csv(f"{OUT_DIR}/g36_cv_log.csv", index=False)
 np.savez(f"{OUT_DIR}/g36_cv_oof.npz", sample_id=DEV.sample_id.values[DEVR], y=y_all[DEVR], src=src[DEVR],
          **{a.replace('-', '_'): v[:, DEVR] for a, v in OOF.items()})
 
@@ -11541,8 +11552,14 @@ print(f"\n== selection (fixed rule): {SELECTED} | CV dUAR vs RoleNet {CVD[SELECT
     ("code", r"""
 if RUN_TEST:
     hits = [p for g in G10_PROBS_GLOBS for p in glob.glob(g, recursive=True)]
-    assert hits, "attach the G10 output (g10_test_probs.npz) to compare with the saved PaperBest / RoleNet predictions"
-    g10 = np.load(hits[0], allow_pickle=True)
+    npy = [p for g in G10_NPY_GLOBS for p in glob.glob(g, recursive=True)]
+    if hits:
+        g10 = dict(np.load(hits[0], allow_pickle=True))
+    else:
+        assert npy, "attach the G10 output (g10_test_probs.npz, or the folder with PaperBest.npy / RoleNet.npy / sample_id.npy)"
+        d10 = os.path.dirname(npy[0])
+        g10 = {k: np.load(os.path.join(d10, k + '.npy'), allow_pickle=True) for k in ('sample_id', 'PaperBest', 'RoleNet')}
+    print("saved G10 predictions:", hits[0] if hits else d10)
     sel_eps = sorted(random.Random(SELECT_SEED).sample(list(EPS), N_INNER_DEV))
     trr = np.where(~IS_TEST)[0]
     fit_rows = np.where(~IS_TEST & ~np.isin(src, sel_eps))[0]
@@ -11550,7 +11567,7 @@ if RUN_TEST:
     te_rows = np.where(IS_TEST)[0]
     pos = {s: i for i, s in enumerate(g10['sample_id'])}
     take = np.array([pos[s] for s in DEV.sample_id.values[te_rows]])        # align the saved predictions by sample id
-    SAVED = {'PaperBest': g10['PaperBest'][:, take], 'RoleNet (G10)': g10['RoleNet'][:, take]}
+    SAVED = {'Baseline': g10['PaperBest'][:, take], 'RoleNet (G10)': g10['RoleNet'][:, take]}
     FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
     tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
     P_new, tlog = [], []

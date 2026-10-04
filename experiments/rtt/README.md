@@ -816,3 +816,19 @@ Power caveat: with checkpoints chosen by dev UAR, per-seed probabilities are poo
 vs ensemble ≈ 1.68–1.73) and vary strongly across folds and seeds, so the CIs are about ±0.09 NLL, roughly ten times
 wider than in G28 (NLL selection). Differences of a few hundredths of NLL cannot be detected with this estimand; the
 estimand was fixed before running and is not replaced after the fact.
+
+## G31 results: step 1, mirror/rest mixture vs additive logits (linear, train+val; test untouched)
+
+| | role | noRole (descriptive) |
+|---|---|---|
+| NLL mixture / additive / plain LR / copy p_mirror | 1.7087 / 1.7056 / 1.9215 / 1.8816 | 1.7126 / 1.7108 / 1.8156 / 1.7770 |
+| **ΔNLL = NLL(additive) − NLL(mixture)** | **−0.0031 [−0.0061, −0.0001]** | −0.0018 [−0.0043, +0.0007] |
+| **AUC(g → Y_B = Y_A)** | **0.526 [0.493, 0.560]** | 0.513 [0.478, 0.545] |
+| p_mirror UAR on A's label (fold mean) | 27.1 | 26.1 |
+
+**Fixed rule: NOT PASSED** (neither condition holds; the mixture is slightly worse than additive logits).
+Diagnostics that limit what this shows: the gate collapsed to g ≈ 1e-8 in every fold (the mixture reduced to p_rest),
+the L2 strength of the mixture/additive heads was the largest grid value (0.1) in every fold, and p_mirror's C was the
+smallest grid value (0.01) in every fold, so p_mirror was strongly flattened. In addition, p_rest contained clip-III
+text and audio (A's own turn), so the design compared "A" with "everything including A" rather than A with B. G31 is
+therefore uninformative about the mirror/own-state mechanism itself; it only shows that this linear mixture did not help.

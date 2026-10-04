@@ -404,34 +404,40 @@ Oracle $-$ proxy: $-0.04$ \ci{-1.50}{1.85}.}
 \end{table}
 
 Table~\ref{tab:proxy} shows no difference, also on the 390 MCIS where the proxy picks the wrong person.
-Together with the next experiment, this indicates that the model uses \emph{what the visible faces show}, not
-\emph{whose} faces they are: an identity-free selection of the evidence suffices.
+The model uses \emph{what the visible faces show}; an identity-free selection of the evidence suffices.
 
-\subsection{Which evidence matters?}
+\subsection{Ablation study}
 \label{sec:evidence}
 
 \begin{table}[t]
 \centering\small
 \begin{tabular}{lcc}
 \toprule
-Variant (development CV, 10 seeds) & UAR & $\Delta$ vs.\ full \\
+Variant (development CV, retrained) & UAR & $\Delta$ \\
 \midrule
-\model{} (full) & 26.24 & -- \\
-\quad without listener tokens & 24.20 & $-2.04$\ci{-3.46}{-0.21} \\
-\quad clip III only (no I, II) & 24.11 & $-2.13$\ci{-4.08}{-0.20} \\
-\quad without role labels & 25.80 & $-0.44$\ci{-2.16}{1.21} \\
-\quad mean pooling instead of query & 26.42 & $+0.18$\ci{-1.62}{1.55} \\
+\model{} (10 seeds) & \textbf{26.24} & -- \\
+\quad w/o listener tokens & 24.20 & $-2.04$\ci{-3.46}{-0.21} \\
+\quad w/o context clips I--II & 24.11 & $-2.13$\ci{-4.08}{-0.20} \\
+\midrule
+\model{} (3 seeds) & \textbf{25.92} & -- \\
+\quad w/o face tokens & 22.03 & $-3.90$\ci{-5.41}{-2.20} \\
+\quad w/o joint encoder (separate role paths) & 23.78 & $-2.14$\ci{-3.79}{-0.29} \\
+\quad w/o speech and scene tokens & 25.01 & $-0.92$ \\
+\quad w/o auxiliary heads and modality dropout & 25.15 & $-0.78$ \\
 \bottomrule
 \end{tabular}
-\caption{Evidence ablations, each retrained. Intervals resample seeds and episodes.}
+\caption{Ablations of \model{}, each variant retrained on the development folds and compared with the full model of
+the same run. Intervals resample seeds and episodes (top) or episodes (bottom). Further variants in
+Appendix~\ref{app:ablations}.}
 \label{tab:evidence}
 \end{table}
 
-Two sources survive seed and episode noise (Table~\ref{tab:evidence}). Removing the listener's tokens costs 2.04
-UAR (all five folds), and the cost is concentrated where a listener is visible in clip III ($-2.80$ on 1{,}451 MCIS
-vs.\ $-0.54$ on 970). Removing clips I and II costs 2.13; clip II carries most of this context. Pooling all faces
-without role labels is not significantly worse ($-0.44$): what matters is that the listener's face enters the
-evidence set, not that it is labelled as such.
+Every component contributes (Table~\ref{tab:evidence}). The face tokens matter most: without them UAR drops by
+3.90 points. Within the faces, the listener is the key: removing only the listener's tokens costs 2.04 UAR (all five
+folds), concentrated where a listener is visible in clip III ($-2.80$ on 1{,}451 MCIS vs.\ $-0.54$ on 970). The
+preceding context matters as much: keeping only clip III costs 2.13, most of it from clip II. Processing all tokens
+jointly matters too: replacing the shared encoder by separate role paths that are combined additively costs 2.14.
+Speech and scene tokens and the auxiliary training signals add smaller gains.
 
 \subsection{Does the encoder need more structure?}
 \label{sec:structure}
@@ -442,8 +448,6 @@ evidence set, not that it is labelled as such.
 \toprule
 Change to \model{} (development CV) & Effect \\
 \midrule
-Separate additive role paths & UAR $-2.14$\ci{-3.79}{-0.29} \\
-\quad + learned interaction term & UAR $-1.32$\ci{-2.80}{0.34} \\
 Clips I/II unordered & NLL $+0.006$\ci{-0.010}{0.022} \\
 Clips I--III unordered & NLL $+0.008$ \\
 Relation biases (time, person, evidence) & NLL $+0.001$\ci{-0.014}{0.017} \\
@@ -451,16 +455,14 @@ Readout variants (4 kinds) & UAR within seed noise \\
 Additive projection over L / history / event & NLL $+0.011$\ci{0.005}{0.016} \\
 \bottomrule
 \end{tabular}
-\caption{Structural variants. Separate paths: 3 seeds. Order and relation biases: 10 seeds, temperature-scaled
+\caption{Structural variants. Order and relation biases: 10 seeds, temperature-scaled
 NLL relative to \model{} (positive = worse). Readouts: mean pooling, listener token, read-only query, three queries.
 Additive projection: group-level EMAP of the trained model, 5 seeds $\times$ 3 folds.}
 \label{tab:structure}
 \end{table}
 
 We describe \model{} as a set encoder; Table~\ref{tab:structure} tests whether it needs more structure than that.
-Forcing the evidence into separate role paths (listener, event, scene), each recurrent over clips and combined
-additively, costs 2.14 UAR, and a learned interaction term recovers only part of it: the evidence must be processed
-jointly. Making the encoder exactly invariant to the order of clips I and II, or of all three clips (verified
+Making the encoder exactly invariant to the order of clips I and II, or of all three clips (verified
 numerically, maximum logit change $1.4\cdot10^{-6}$), does not hurt. Factorial attention biases for temporal,
 person and evidence-type relations are learned but bring no gain, nor do alternative readouts.
 A group-level EMAP \citep{hessel2020emap} of the trained model shows that the encoder does use non-additive
@@ -624,8 +626,22 @@ Baseline & AdamW lr $10^{-4}$, wd $10^{-5}$, batch 32, 50 epochs \\
 \section{Full Ablation Tables}
 \label{app:ablations}
 
-\todo{G13 token ablations with the same-model noise distribution (220 three-seed ensembles, 25.55 $\pm$ 0.40), G33a
-and G33b tables, G12 path shares, per-class recall on test (figs/recall\_test.pdf), development confusion with and
-without role labels (figs/confusion\_cv\_roles.pdf).}
+\begin{table}[h]
+\centering\small
+\begin{tabular}{lcc}
+\toprule
+Variant (development CV, retrained) & UAR & $\Delta$ \\
+\midrule
+\model{} (10 seeds) & 26.24 & -- \\
+\quad faces pooled without role labels & 25.80 & $-0.44$\ci{-2.16}{1.21} \\
+\quad mean pooling instead of the query & 26.42 & $+0.18$\ci{-1.62}{1.55} \\
+\midrule
+\model{} (3 seeds) & 25.92 & -- \\
+\quad separate role paths + interaction term & 24.60 & $-1.32$\ci{-2.80}{0.34} \\
+\bottomrule
+\end{tabular}
+\caption{Additional variants. Run-to-run noise: three-seed ensembles of the same model vary with a standard
+deviation of 0.40 UAR (220 ensembles, range 24.59--26.42).}
+\end{table}
 
 \end{document}

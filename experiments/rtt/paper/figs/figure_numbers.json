@@ -1,5 +1,5 @@
 {
- "final_model": "RoleNet (G10, uniform sampling)",
+ "final_model": "Up-sqrt",
  "test_recall": {
   "Baseline": {
    "angry": 44.2,
@@ -11,13 +11,13 @@
    "surprise": 0.0
   },
   "RoleNet": {
-   "angry": 48.1,
-   "disgust": 2.5,
+   "angry": 20.8,
+   "disgust": 22.5,
    "fear": 0.0,
-   "happy": 50.0,
-   "neutral": 52.8,
-   "sad": 23.3,
-   "surprise": 0.0
+   "happy": 47.0,
+   "neutral": 49.4,
+   "sad": 31.7,
+   "surprise": 8.1
   }
  },
  "test_counts": {
@@ -32,74 +32,75 @@
  "cv_accuracy_by_group": {
   "mirror": {
    "n": 860,
-   "acc": 56.9,
+   "acc": 56.3,
    "ci": [
-    51.9,
-    62.3
+    50.3,
+    61.6
    ]
   },
   "shift": {
    "n": 1561,
    "acc": 27.7,
    "ci": [
-    25.2,
-    29.9
+    24.9,
+    30.3
    ]
   },
   "listener visible": {
    "n": 1451,
    "acc": 38.0,
    "ci": [
-    34.9,
-    41.0
+    34.3,
+    41.2
    ]
   },
   "listener not visible": {
    "n": 970,
-   "acc": 38.0,
+   "acc": 37.7,
    "ci": [
-    33.2,
-    42.4
+    31.9,
+    42.2
    ]
   },
   "certain label": {
    "n": 1796,
-   "acc": 40.5,
+   "acc": 40.6,
    "ci": [
-    37.1,
-    43.7
+    36.5,
+    44.2
    ]
   },
   "uncertain label": {
    "n": 314,
    "acc": 25.2,
    "ci": [
-    19.9,
-    31.4
+    19.6,
+    30.2
    ]
   }
  },
  "cv_recall_shift": {
-  "angry": 38.9,
-  "disgust": 1.6,
+  "angry": 32.4,
+  "disgust": 11.8,
   "fear": 0.0,
-  "happy": 47.8,
-  "neutral": 42.4,
-  "sad": 17.3,
-  "surprise": 2.8
+  "happy": 42.7,
+  "neutral": 45.0,
+  "sad": 19.7,
+  "surprise": 3.3
  },
  "cv_recall_mirror": {
-  "angry": 51.4,
-  "disgust": 2.9,
+  "angry": 46.2,
+  "disgust": 14.7,
   "fear": 0.0,
-  "happy": 77.2,
-  "neutral": 60.3,
-  "sad": 37.3,
+  "happy": 75.3,
+  "neutral": 63.5,
+  "sad": 34.5,
   "surprise": 0.0
  },
  "cv_uar": {
-  "RoleNet": 26.24,
-  "noRole": 25.8
+  "final": 26.95,
+  "RoleNet_uniform": 26.24,
+  "noRole_uniform": 25.8
  },
- "cv_predicts_A_on_shift": 29.4
+ "cv_predicts_A_on_shift": 29.0
 }

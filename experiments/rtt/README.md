@@ -914,3 +914,33 @@ UAR (seed ensemble, descriptive): full 24.75, EMAP3 24.48. Median temperature: f
 over listener / history / clip-III event is worse by 0.011 NLL, and each group interacts with the rest. The
 interactions are small (about 5% of the logit variance) and are consistent with G20 (no value from a text × rest
 interaction): the non-additive part lies among the face / context groups, not in text.
+
+## G36 / G36b results: class resampling (development CV, then a second, disclosed test read)
+
+**Part A — development CV** (45 episodes, 5 folds, 10 seeds, plain, seed ensembles):
+
+| Arm | UAR | WAR | angry | disgust | fear | happy | neutral | sad | surprise |
+|---|---|---|---|---|---|---|---|---|---|
+| RoleNet (uniform) | 26.10 | 38.29 | 46.2 | 0.9 | 0.0 | 60.0 | 54.0 | 21.2 | 0.4 |
+| Up-sqrt (∝ n_c^−0.5) | **26.95** | 37.88 | 37.7 | 12.3 | 0.0 | 58.2 | 53.3 | 24.2 | 3.0 |
+| Up-bal (∝ n_c^−1) | 25.06 | 33.17 | 29.9 | 17.3 | 0.0 | 52.0 | 38.2 | 27.6 | 10.6 |
+
+Up-sqrt − RoleNet +0.86 [−0.94, +2.18]; Up-bal − RoleNet −1.03 [−3.22, +1.24]. Fixed rule: **Up-sqrt selected, test read.**
+
+**Part B (G36b) — second test read** (G10 protocol, 5 seeds; baseline and RoleNet = saved G10 predictions):
+
+| Model | UAR | WAR | angry | disgust | fear | happy | neutral | sad | surprise |
+|---|---|---|---|---|---|---|---|---|---|
+| Up-sqrt | **25.64** | 33.74 | 20.8 | 22.5 | 0.0 | 47.0 | 49.4 | 31.7 | 8.1 |
+| Baseline (PaperBest) | 21.40 | 32.52 | 44.2 | 0.0 | 0.0 | 54.0 | 48.3 | 3.3 | 0.0 |
+| RoleNet (G10) | 25.24 | 36.43 | 48.1 | 2.5 | 0.0 | 50.0 | 52.8 | 23.3 | 0.0 |
+
+| Contrast | ΔUAR [95% CI] | ΔWAR [95% CI] | Episodes won (UAR) |
+|---|---|---|---|
+| Up-sqrt − Baseline | **+4.24 [+2.02, +6.81]** | +1.22 [−1.69, +4.66] | 6/8 |
+| Up-sqrt − RoleNet (G10) | +0.40 [−1.98, +1.93] | −2.69 [−5.27, +0.01] | 3/8 |
+
+Per-seed test UAR 22.84–24.27. Reading: resampling spreads the forecasts over the rare classes (disgust 2.5 → 22.5,
+surprise 0 → 8.1, sad 23.3 → 31.7) at the cost of angry (48.1 → 20.8) and WAR; fear stays at 0. Against the
+baseline the gain is +4.24 UAR; against the preregistered RoleNet it is not significant. This is the second read of
+the test split for RoleNet and is reported as such. Files: `results/g36/`.

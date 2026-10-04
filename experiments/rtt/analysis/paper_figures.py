@@ -113,6 +113,7 @@ assert (a23['sample_id'] == z['sample_id']).all()
 y, src = z['y'], z['src']
 yA = a23['yA']
 P = z['Full'].mean(0).argmax(1); Pn = z['noRole'].mean(0).argmax(1)
+Pu = P.copy()                                     # uniform-sampling RoleNet (G14), the fair partner of noRole
 if G36 and os.path.exists(os.path.join(G36, 'g36_cv_oof.npz')):
     c36 = np.load(os.path.join(G36, 'g36_cv_oof.npz'), allow_pickle=True)
     pos = {s_: i for i, s_ in enumerate(c36['sample_id'])}
@@ -152,13 +153,13 @@ fig.tight_layout(); fig.savefig(f"{OUT}/errors_by_group_cv.pdf"); plt.close(fig)
 # CV confusion: RoleNet vs without roles; recall on shifts
 nc = np.bincount(y, minlength=7)
 fig, axs = plt.subplots(1, 2, figsize=(7.2, 3.4))
-draw_cm(axs[0], confusion(P, y), f"RoleNet, CV (UAR {uar(P, y):.1f})", nc)
+draw_cm(axs[0], confusion(Pu, y), f"RoleNet, CV (UAR {uar(Pu, y):.1f})", nc)
 draw_cm(axs[1], confusion(Pn, y), f"w/o role labels, CV (UAR {uar(Pn, y):.1f})", nc)
 axs[0].set_ylabel('true (count)')
 fig.tight_layout(); fig.savefig(f"{OUT}/confusion_cv_roles.pdf"); plt.close(fig)
 NUM['cv_recall_shift'] = dict(zip(EMO, np.round(recalls(P[~mir], y[~mir]), 1)))
 NUM['cv_recall_mirror'] = dict(zip(EMO, np.round(recalls(P[mir], y[mir]), 1)))
-NUM['cv_uar'] = {'RoleNet': round(uar(P, y), 2), 'noRole': round(uar(Pn, y), 2)}
+NUM['cv_uar'] = {'final': round(uar(P, y), 2), 'RoleNet_uniform': round(uar(Pu, y), 2), 'noRole_uniform': round(uar(Pn, y), 2)}
 NUM['cv_predicts_A_on_shift'] = round(float((P[~mir] == yA[~mir]).mean() * 100), 1)
 json.dump(NUM, open(f"{OUT}/figure_numbers.json", 'w'), indent=1)
 print(json.dumps(NUM, indent=1))

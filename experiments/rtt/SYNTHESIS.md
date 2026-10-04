@@ -10,6 +10,8 @@ yet written into the README (marked **[chat]**).
 - Hi-EF is the main dataset. **MELD** is used to check generality. When a forecasting task is built on MELD, the
   identity of the future speaker is not given unless the corresponding information exists in Hi-EF. Any reused
   checkpoint must be checked for overlap between its training data and the evaluation data.
+- **Comparisons with the paper:** report RoleNet against the paper's best baseline (`PaperBest`) only. B1 and other
+  internal baselines are not added to comparisons or tables unless the authors ask for them.
 - Features may be **re-extracted** and the text/audio representations replaced, but only to serve a specific research
   question. A better encoder on its own does not count as novelty.
 - The target contribution is a **new method** that starts from a problem with evidence and a theoretical basis. The

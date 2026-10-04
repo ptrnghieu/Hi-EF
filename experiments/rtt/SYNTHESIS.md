@@ -216,6 +216,11 @@ would be a weak contribution. The notebook is kept in the repo, not run.
   non-additivity, and its CS-int arm (MLP interaction of the three path summaries, a superset of a CP-trilinear term)
   recovered only +0.82 [−0.38, +2.08]; F7, F11 (EMAP −0.002), F16 and F24 found no interaction value; the form is LMF /
   TFN from multimodal emotion recognition, so a small gain would be a weak contribution.
+* **Within-clip time-lagged A→L facial synchrony as a relation token** — fails the data condition stated with the
+  proposal: A and B share a frame in only 0.7% of clips (G6a, 600 MCIS; shot / reaction-shot editing), so there are
+  almost no concurrent A–L series; B covers ~12% of clip III; frames are sampled at 4 fps (≤ 32 per clip). A cross-shot
+  "A shot → L reaction shot" lag would measure the editor's cut timing, not the listener's response latency. G29 also
+  gave the model per-frame tokens (arm R, weakest) and context-conditioned frame pooling, with no gain over FramePool.
 
 ## 6. Problem statements proposed by the authors (chronological) and their status
 

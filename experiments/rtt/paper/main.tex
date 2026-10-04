@@ -11,6 +11,9 @@
 \usepackage{booktabs}
 \usepackage{multirow}
 \usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{graphicx}
 
 \newcommand{\ci}[2]{\,[{#1},\,{#2}]}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
@@ -56,6 +59,14 @@ Two regularities of conversation suggest that this person matters most. Responde
 of their interlocutor \citep[emotional contagion;][]{hatfield1994contagion}, and individuals tend to stay in their
 own recent emotional state \citep[emotional inertia;][]{kuppens2010inertia}. Both pass through the responder: the
 first is visible as a reaction while listening, the second as the responder's own earlier expressions.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.95\columnwidth}{\centering\vspace{0.8cm}\todo{motivation strip from G37 (one test MCIS: clips I--IV,
+transcripts, A's and B's labels; \model{} vs \pb{} forecast)}\vspace{0.8cm}}}
+\caption{\todo{caption after choosing the sample}: the responder is already on screen while A speaks in clip III.}
+\label{fig:motivation}
+\end{figure}
 
 We build the forecaster around the responder. The difficulty is that the responder is unknown. Our first
 contribution is an \textbf{identity-free responder proxy}: within the current turn, the second most visible person
@@ -121,64 +132,145 @@ only two people take part.
 \section{Method}
 \label{sec:method}
 
-\subsection{Participants and the responder proxy}
+\model{} turns an MCIS into a small set of evidence tokens organised around people, and reads that set with an
+attention encoder (Figure~\ref{fig:arch}, Algorithm~\ref{alg:rolenet}). It has four modules.
 
-Faces are detected in frames sampled at 4\,fps (at most 32 per clip) and described by ArcFace identity embeddings
-\citep{deng2019arcface}. Within an MCIS, embeddings from clips I--III are clustered (average linkage, cosine
-threshold 0.45) into identities. In clip III, the identity with the most frames is taken as the speaker A and the
-identity with the second most frames as the \emph{listener} L, our proxy for the responder B. Every other identity
-is a bystander O. If clip III shows only one person, no listener is assigned. The rule uses no clip IV, no
-transcript speaker label and no identity annotation.
+\begin{figure*}[t]
+\centering
+\fbox{\parbox{0.95\textwidth}{\centering\vspace{1.2cm}\todo{architecture figure: clips I--III $\rightarrow$
+face tracks clustered into identities $\rightarrow$ A / L / O assignment in clip III $\rightarrow$ 9 face tokens +
+3 speech + 3 scene tokens $\rightarrow$ 2 SABs with query $\rightarrow$ $p(y_B)$}\vspace{1.2cm}}}
+\caption{\model{}. Faces of clips I--III are grouped into identities; in clip III the most visible identity is the
+speaker A and the second most visible the listener L (responder proxy). Each role $\times$ clip cell becomes one face
+token; each clip adds a speech and a scene token. A query token pools the jointly encoded set into the forecast.}
+\label{fig:arch}
+\end{figure*}
 
-\subsection{The participant-centric evidence set}
+\subsection{Module 1: identities and the responder proxy}
 
-\paragraph{Face tokens.} For role $r \in \{A, L, O\}$ and clip $k \in \{1,2,3\}$, let $F_{r,k}$ be the frames of the
-faces of role $r$ in clip $k$ (at most 24). Each frame $f$ is described by $\phi(f) \in \mathbb{R}^{146}$: a
-128-dimensional PCA of the HSEmotion embedding \citep{savchenko2022hsemotion} (fitted on training faces of the
-current fold), its 8 expression probabilities and valence/arousal, head pose, face box position and size, mouth
-opening and relative time in the clip. Frames are pooled by attention,
+\textbf{Input:} the frames of clips I--III, sampled at 4\,fps (at most 32 per clip).
+\textbf{Output:} a role $r(f) \in \{A, L, O\}$ for every detected face $f$.
+
+Faces are detected and embedded with ArcFace \citep{deng2019arcface}. All face embeddings of the MCIS are clustered
+(average linkage, cosine threshold 0.45), so that one cluster approximates one person across the three clips. In clip
+III, the cluster with the most frames is the speaker A and the cluster with the second most frames is the listener
+L; all other clusters are bystanders O. If clip III shows a single person, no listener is assigned.
+
+\emph{Intuition.} TV dialogue is edited as shot and reaction shot: the camera dwells on the speaker and cuts to the
+person who listens and will answer. The second most visible person of the current turn is therefore a cheap,
+identity-free guess of the responder. The rule reads no clip IV, no speaker label and no identity annotation;
+Section~\ref{sec:proxy} shows that replacing it by the true responder brings nothing.
+
+\subsection{Module 2: face tokens}
+
+\textbf{Input:} for role $r$ and clip $k$, the frames $F_{r,k}$ of the faces with that role (at most 24).
+\textbf{Output:} one token $x_{r,k} \in \mathbb{R}^{d}$, $d = 128$; 9 tokens per MCIS.
+
+Each frame is described by $\phi(f) \in \mathbb{R}^{146}$: a 128-dimensional PCA of the HSEmotion embedding
+\citep{savchenko2022hsemotion}, fitted on training faces only, its 8 expression probabilities and valence/arousal,
+head pose, face box position and size, mouth opening, and relative time in the clip. Frames are pooled by attention:
 \begin{equation}
 u_f = \mathrm{MLP}(\phi(f)),\quad
 \alpha_f = \operatorname{softmax}_{f \in F_{r,k}}\!\big(w^\top u_f\big),\quad
-\bar u_{r,k} = \textstyle\sum_f \alpha_f u_f ,
+x_{r,k} = \textstyle\sum_f \alpha_f u_f + e^{\text{role}}_r + e^{\text{clip}}_k .
 \end{equation}
-and the token is $x_{r,k} = \bar u_{r,k} + e^{\text{role}}_r + e^{\text{clip}}_k$, with a learned placeholder
-$a_{r,k}$ replacing $\bar u_{r,k}$ when $F_{r,k}$ is empty.
+An empty cell receives a learned placeholder $a_{r,k}$ instead of the pooled vector.
 
-\paragraph{Speech and scene tokens.} For each clip $k$, a speech token combines the CLIP text embedding of the
-transcript \citep{radford2021clip}, the AudioCLIP sound-event vector \citep{guzhov2022audioclip} gated by an
-audio-found flag, and a 9-dimensional turn descriptor $v_k$ (mouth--audio synchrony per role, ECAPA
-\citep{desplanques2020ecapa} voice similarity to clip III, and the number of identities):
-$s_k = W_t\,t_k + (W_a\,a_k)\,\delta_k + W_v\,v_k + e^{\text{speech}} + e^{\text{clip}}_k$.
-A scene token $g_k = W_s[\bar c^{\text{frame}}_k;\bar c^{\text{face}}_k] + e^{\text{scene}} + e^{\text{clip}}_k$
-uses mean CLIP embeddings of the whole frames and of all faces.
+\emph{Intuition.} One token per person and turn keeps the set small (Hi-EF clips last about two seconds, and a
+listener is often visible in only one to three frames) while letting the pooling weight the most expressive frame.
 
-The evidence of an MCIS is the set of 15 typed elements
-\begin{equation}
-\mathcal{S} = \{x_{r,k}\}_{r \in \{A,L,O\},\,k \le 3} \;\cup\; \{s_k\}_{k \le 3} \;\cup\; \{g_k\}_{k \le 3}.
-\end{equation}
+\subsection{Module 3: speech and scene tokens}
 
-\subsection{Set encoder and pooling}
+\textbf{Input:} transcript, audio and frames of clip $k$. \textbf{Output:} a speech token $s_k$ and a scene token
+$g_k$; 6 tokens per MCIS.
+\begin{align}
+s_k &= W_t\,t_k + (W_a\,a_k)\,\delta_k + W_v\,v_k + e^{\text{speech}} + e^{\text{clip}}_k, \label{eq:sk}\\
+g_k &= W_s\,[\bar c^{\,\text{frame}}_k;\,\bar c^{\,\text{face}}_k] + e^{\text{scene}} + e^{\text{clip}}_k, \label{eq:gk}
+\end{align}
+with the CLIP text embedding $t_k$ \citep{radford2021clip}, the AudioCLIP sound-event vector $a_k$
+\citep{guzhov2022audioclip} gated by an audio-found flag $\delta_k$, a 9-dimensional turn descriptor $v_k$ (mouth--audio
+synchrony per role, ECAPA \citep{desplanques2020ecapa} voice similarity to clip III, number of identities), and mean
+CLIP embeddings of the whole frames and of all faces.
 
-A learned query $q$ is prepended and the set is processed by two pre-norm set attention blocks
-\citep[SAB;][]{lee2019set}, i.e.\ transformer layers \citep{vaswani2017attention} without positional encoding:
-\begin{equation}
-Z = H + \mathrm{MHA}(\mathrm{LN}(H)),\qquad H' = Z + \mathrm{FFN}(\mathrm{LN}(Z)),
-\end{equation}
-with $H^{(0)} = [q; \mathcal{S}]$, $d = 128$, 4 heads and dropout 0.2. The forecast is
-$p(y_B \mid \mathcal{S}) = \operatorname{softmax}(W\,\mathrm{LN}(h_q))$, read from the query position.
-Because the query participates in self-attention it acts as a pooling seed in the sense of PMA \citep{lee2019set}.
-The encoder is equivariant to permutations of the typed elements; order enters only through the clip embeddings,
-which we show can be removed (Section~\ref{sec:structure}). The model has 0.71M parameters.
+\emph{Intuition.} What is said and the setting of the turn complement the faces; $v_k$ tells the model who is likely
+speaking in clips I and II without naming anyone.
+
+\subsection{Module 4: set encoder and query pooling}
+
+\textbf{Input:} the evidence set
+$\mathcal{S} = \{x_{r,k}\} \cup \{s_k\} \cup \{g_k\}$ of 15 typed tokens and a learned query $q$.
+\textbf{Output:} $p(y_B \mid \mathcal{S}) \in \Delta^{7}$.
+
+The set is processed by two pre-norm set attention blocks \citep[SAB;][]{lee2019set}, i.e.\ transformer layers
+\citep{vaswani2017attention} without positional encoding, and read from the query position:
+\begin{gather}
+H^{(0)} = [q;\,\mathcal{S}],\qquad
+Z = H + \mathrm{MHA}(\mathrm{LN}(H)),\qquad H' = Z + \mathrm{FFN}(\mathrm{LN}(Z)),\\
+p(y_B \mid \mathcal{S}) = \operatorname{softmax}\!\big(W\,\mathrm{LN}(h^{(2)}_q)\big),
+\end{gather}
+with 4 heads, a 512-dimensional FFN and dropout 0.2. Because $q$ takes part in self-attention, it acts as a pooling
+seed in the sense of PMA \citep{lee2019set}.
+
+\emph{Intuition.} Every token can attend to every other, so the listener's face in clip II can be read together with
+what A says in clip III. The encoder is equivariant to permutations of the typed tokens; the order of clips enters
+only through $e^{\text{clip}}$, which we show can be removed (Section~\ref{sec:structure}). Self-attention adds pairwise
+token interactions in every layer, and a group-level EMAP shows that the trained model uses them
+(Section~\ref{sec:structure}).
+
+\begin{algorithm}[t]
+\caption{\model{} forward pass for one MCIS}
+\label{alg:rolenet}
+\small
+\begin{algorithmic}[1]
+\Require frames, transcripts and audio of clips I--III
+\State Detect faces at 4\,fps; embed with ArcFace; cluster all faces of the MCIS into identities
+\State $A \gets$ identity with most frames in clip III; $L \gets$ second most (or none); others $\to O$
+\For{$r \in \{A, L, O\}$, $k \in \{1,2,3\}$}
+  \State $x_{r,k} \gets$ \textsc{AttnPool}$(\{\phi(f) : f \in F_{r,k}\})$ or $a_{r,k}$ if empty; add $e^{\text{role}}_r + e^{\text{clip}}_k$
+\EndFor
+\For{$k \in \{1,2,3\}$} \State build $s_k$ and $g_k$ (Eqs.~\ref{eq:sk}--\ref{eq:gk}) \EndFor
+\State $H \gets [q;\, x_{1,1}, \dots, x_{3,3};\, s_1, s_2, s_3;\, g_1, g_2, g_3]$ \Comment{16 tokens}
+\For{$\ell = 1, 2$} \State $H \gets \mathrm{SAB}(H)$ \EndFor
+\State \Return $\operatorname{softmax}(W\,\mathrm{LN}(H_q))$
+\end{algorithmic}
+\end{algorithm}
 
 \subsection{Training}
 
 The loss is cross-entropy on $y_B$ plus three auxiliary terms (weight 0.3 each): $y_B$ from the mean of the face
 tokens, $y_B$ from the mean of the speech and scene tokens, and A's clip III emotion from A's clip III face token.
-Modality dropout \citep{neverova2016moddrop} removes all speech and scene tokens with probability 0.3, or else all
-face tokens with probability 0.15, which amounts to training on random subsets of $\mathcal{S}$. We use AdamW
-(learning rate $3\cdot10^{-4}$, weight decay $10^{-2}$, batch 64, at most 80 epochs) and keep the checkpoint with the
-best UAR on five held-out training episodes (patience 12). Predictions are averaged over seeds.
+Modality dropout \citep{neverova2016moddrop} removes all speech and scene tokens with probability 0.3, or else all face
+tokens with probability 0.15, i.e.\ the model is trained on random subsets of $\mathcal{S}$. We use AdamW (learning
+rate $3\cdot10^{-4}$, weight decay $10^{-2}$, batch 64, at most 80 epochs), keep the checkpoint with the best UAR on
+five held-out training episodes (patience 12), and average the predicted probabilities of several seeds.
+
+\subsection{Complexity}
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{lcc}
+\toprule
+ & \pb{} & \model{} \\
+\midrule
+Unit of fusion & frame, then clip & person $\times$ turn \\
+Tokens fused & $3 \times 2 \times 16$ frames, then 3 clips & 16 \\
+Width $d$ & 512 & 128 \\
+Trainable parameters & 27.7M & 0.71M \\
+FLOPs per MCIS (fusion only) & $\approx$1.3G & 17--29M \\
+\bottomrule
+\end{tabular}
+\caption{Fusion cost on precomputed features (measured with the PyTorch FLOP counter; \model{}'s range depends on the
+number of face frames). \model{} additionally runs face detection, ArcFace, HSEmotion and ECAPA once per clip.}
+\label{tab:complexity}
+\end{table}
+
+For a set of $n$ tokens of width $d$, an SAB costs $O(n^2 d + n d^2)$. \model{} fuses a fixed $n = 16$ tokens at
+$d = 128$, so the encoder cost is constant per MCIS; attention pooling over faces is linear in the number of face
+frames. \pb{} runs two temporal transformers over 16 frames at $d = 512$ in each of the three clips, followed by
+cross-attention fusion, a three-layer LSTM and a transformer over the clips. Table~\ref{tab:complexity} shows that
+\model{} uses about 40 times fewer parameters and 40--75 times fewer fusion FLOPs. The price is a richer
+pre-processing: face detection, identity and expression embeddings, and a speaker embedding, all computed once per
+clip and shared by every MCIS that contains it.
 
 % ======================================================================================================
 \section{Experimental Protocol}
@@ -235,6 +327,20 @@ for 27.6\% of test MCIS (true rate 1.5\%), gaining two \emph{fear} hits while it
 1.3\%. Without \emph{fear}, the adjusted contrast is $+9.95$ \ci{6.6}{13.6}. We therefore regard the test result as
 consistent with, but not a confirmation of, the development-set evidence, and we flag the choice of an adjusted
 7-class primary metric for a test set with six \emph{fear} examples as a design error of our preregistration.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/confusion_test.pdf}
+\caption{Row-normalised confusion matrices on the test split (saved seed-ensemble predictions; descriptive). Row
+labels give the number of test MCIS per class.}
+\label{fig:confusion}
+\end{figure*}
+
+Figure~\ref{fig:confusion} shows where the gain comes from. \pb{} confuses polarity: it forecasts \emph{happy} for
+58\% of \emph{sad} responses and recalls only 3\% of them. \model{} reduces this confusion to 18\% and raises
+\emph{sad} recall to 23\%, while keeping \emph{angry}, \emph{happy} and \emph{neutral} at a similar level. Both models
+almost never predict \emph{disgust}, \emph{fear} or \emph{surprise}, which we analyse in Section~\ref{sec:analysis}.
+Dropping the role labels lowers \emph{angry} recall from 48\% to 35\%.
 
 \subsection{Does the forecaster need to know who responds?}
 \label{sec:proxy}
@@ -347,6 +453,20 @@ where it still predicts A's emotion 29\% of the time. The listener's tokens help
 shift will happen is partly predictable (AUC 0.70), but which emotion follows a shift is not: recall on shifts is
 1.6\% for \emph{disgust}, 2.8\% for \emph{surprise} and 0\% for \emph{fear}.
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figs/errors_by_group_cv.pdf}
+\caption{Accuracy of \model{} by subgroup (development CV, 10-seed ensemble; 95\% episode bootstrap).}
+\label{fig:groups}
+\end{figure}
+
+\paragraph{Objective and subjective difficulty.} Errors split into two kinds (Figure~\ref{fig:groups}). Some are
+\emph{objective}: on a shift the next emotion is not determined by what is visible, and accuracy halves (27.7\% vs
+56.9\%). Others are \emph{subjective}: when the annotators marked B's label as uncertain, accuracy falls from 40.5\%
+to 25.2\%, a ceiling set by label ambiguity rather than by the model. Accuracy does not depend on whether a listener
+is visible in clip III (38.0\% either way), which is consistent with the model falling back on context and on the
+speaker when the listener is absent.
+
 \paragraph{The missing information is a recognition problem.} Two oracle analyses locate the headroom. With A's
 true clip III emotion added to \model{}'s outputs, UAR rises from 24.73 to 27.51 (NLL $-0.036$
 \ci{-0.049}{-0.021}); with A's emotion estimated by a recogniser from clip III, the gain disappears. On the 26\% of
@@ -395,20 +515,52 @@ classes) and should not be used to make decisions about individuals.
 \section{Test-Split Accesses}
 \label{app:test}
 
-\todo{Table from SYNTHESIS \S1: G4 run 1 (recognize-then-transition and trajectory forecasters, B1), G4 re-run and
-G5 (announced, execution not verified), G10 (this paper, single preregistered run). State that no RoleNet
-hyper-parameter was chosen after any test access.}
+\begin{table}[h]
+\centering\small
+\begin{tabular}{p{0.16\columnwidth}p{0.42\columnwidth}p{0.3\columnwidth}}
+\toprule
+Access & Models & Status \\
+\midrule
+1 & recognise-then-transition and trajectory forecasters, a benchmark-style forecaster (earlier model family) &
+single preregistered run; invalid for the trajectory arms (caching bug) \\
+2, 3 & same family: re-run after the fix; 5-fold CV over all 53 episodes & announced; execution not verified \\
+4 & \model{}, \pb{} and baselines (this paper, Table~\ref{tab:main}) & single preregistered run \\
+5 & class-resampled \model{} (Section~\ref{sec:analysis}) & \todo{G36: run / not run} \\
+\bottomrule
+\end{tabular}
+\caption{Every access to the test split. \model{} was designed after access 1 using development data only; no
+\model{} hyper-parameter was chosen after any test access.}
+\end{table}
 
 \section{Hyper-parameters and Implementation}
 \label{app:hparams}
 
-\todo{Full RN dictionary, PCA fitting per fold, identity clustering thresholds (same-person cosine 0.45, dominant
-fraction 0.25), voice threshold 0.35, frame caps, seeds, PaperBest settings, compute.}
+\begin{table}[h]
+\centering\small
+\begin{tabular}{ll}
+\toprule
+Face sampling & 4\,fps, $\le$ 32 frames per clip, $\le$ 24 per role cell \\
+Identity clustering & ArcFace, average linkage, cosine 0.45 \\
+Frame features & HSEmotion PCA 128 (per fold) + 18 geometric/expression \\
+Voice & ECAPA, same speaker if cosine $\ge$ 0.35 \\
+Encoder & 2 pre-norm SABs, $d$ 128, 4 heads, FFN 512, dropout 0.2 \\
+Head & LN, dropout 0.3, linear \\
+Auxiliary weights & 0.3 (faces, context, A) \\
+Modality dropout & context 0.3, else faces 0.15 \\
+Optimiser & AdamW, lr $3\cdot10^{-4}$, wd $10^{-2}$, batch 64 \\
+Schedule & $\le$ 80 epochs, patience 12 on held-out UAR \\
+Seeds & 10 (development CV), 5 (test) \\
+\pb{} & AdamW lr $10^{-4}$, wd $10^{-5}$, batch 32, 50 epochs \\
+\bottomrule
+\end{tabular}
+\caption{Hyper-parameters (fixed before the test run; none tuned on test).}
+\end{table}
 
 \section{Full Ablation Tables}
 \label{app:ablations}
 
 \todo{G13 token ablations with the same-model noise distribution (220 three-seed ensembles, 25.55 $\pm$ 0.40), G33a
-and G33b tables, G12 path shares.}
+and G33b tables, G12 path shares, per-class recall on test (figs/recall\_test.pdf), development confusion with and
+without role labels (figs/confusion\_cv\_roles.pdf).}
 
 \end{document}

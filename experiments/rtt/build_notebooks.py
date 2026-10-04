@@ -9963,6 +9963,249 @@ print("saved g31_summary.csv")
 ]
 
 
+# ---------------------------------------------------------------- G32: two diagnostics after G31 (oracle mirror; A-vs-B split)
+G32 = [
+    ("markdown", r"""
+# G32 — Diagnostics after G31: oracle mirror and an A-vs-B mixture (linear, train+val, test untouched)
+
+**Why.** G31 (step 1) did not pass, but it was uninformative about the mechanism: its gate collapsed to ≈ 0 in every
+fold, the regularisation sat at the grid edge, p_mirror was flattened, and its "rest" expert contained A's own clip-III
+turn. **This is a second look after seeing G31**, and it is reported as such.
+
+**Shared fixes.** L2 grid for the expert weights W {1e-4, 1e-3, 1e-2, 1e-1, 1}; a **separate** L2 grid for the gate
+weights v {0, 1e-4, 1e-3, 1e-2}; p_mirror's C grid {0.001, 0.01, 0.1, 1, 10}; the gate starts at the training-fold
+mirror share (logit of P(Y_B = Y_A) ≈ 0.355) instead of 0.5. All choices by grouped inner CV on NLL.
+
+**Mixture (both diagnostics):** p = g·p_mirror + (1 − g)·p_own, with
+* p_own = softmax(W[x_L3, x_L12] + b) — **B's (L's) evidence only**;
+* g = σ(vᵀ[x_A, x_L3, x_L12, x_D2, x_D1, text III, audio III, log p_mirror] + c).
+
+**Additive control (same raw information):** softmax(α·log p_mirror + W[x_A, x_L3, x_L12, x_D2, x_D1, text III, audio III] + b).
+
+| Diagnostic | p_mirror |
+|---|---|
+| **(i) oracle mirror** (upper bound, analysis only) | (1 − ε)·one-hot(A's gold clip-III label) + ε/7; ε ∈ {0.1, 0.3, 0.5, 0.7, 0.9} chosen by each model's own inner CV (jointly with its L2 strengths) |
+| **(ii) A-vs-B split** | logistic P(Y_A ∣ x_A, text III, audio III) trained on A's label of the training rows (cross-fitted on training rows) — **A's evidence only** |
+
+**Reading rule (fixed before running), for each diagnostic:** passed iff (a) ΔNLL = NLL(additive) − NLL(mixture) has a
+CI entirely above 0 **and** (b) the AUC of the out-of-fold gate for Y_B = Y_A has a CI lower bound above 0.5.
+
+| (i) oracle | (ii) A-vs-B | Conclusion |
+|---|---|---|
+| not passed | any | even with A's true emotion the gate cannot tell when B mirrors → **stop direction A** |
+| passed | not passed | the structure has value, the bottleneck is recognising A's emotion → contribution 2 must improve the A branch |
+| passed | passed | write the 2×2 notebook (role tokens vs noRole × one query vs mechanism queries) |
+
+Also reported: gate distribution (does it still collapse?), the chosen grid values and whether they hit a grid edge.
+If a chosen value sits on an edge, the conclusion is stated as limited by that.
+"""),
+    ("code", G13[1][1].split("ARMS = [")[0] + """EXPERIMENTS = [("RoleNet", 'role', FULL)]    # only used by the shared model cell's parameter print
+N_BOOT = 2000
+PCA_TXT = PCA_AUD = 32
+LAM_W = [1e-4, 1e-3, 1e-2, 1e-1, 1.0]
+LAM_V = [0.0, 1e-4, 1e-3, 1e-2]
+C_GRID = [0.001, 0.01, 0.1, 1.0, 10.0]
+EPS_GRID = [0.1, 0.3, 0.5, 0.7, 0.9]
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Feature blocks and folds"),
+    G31[10],
+    ("markdown", "## Model fitting"),
+    ("code", r"""
+def tt(x):
+    return torch.as_tensor(np.asarray(x, np.float64))
+
+
+def nll_rows(logp, y):
+    return -logp[np.arange(len(y)), y]
+
+
+def edge(v, grid):
+    return v in (grid[0], grid[-1])
+
+
+def fit_lr_proba(Xtr, ytr, gtr, Xte):
+    def proba(m, X):
+        p = np.full((len(X), 7), 1e-6); p[:, m.classes_] = m.predict_proba(X)
+        return p / p.sum(1, keepdims=True)
+    gkf = list(GroupKFold(5).split(Xtr, ytr, gtr))
+    score = {}
+    for C in C_GRID:
+        score[C] = np.mean([nll_rows(np.log(proba(LogisticRegression(C=C, max_iter=3000).fit(Xtr[a], ytr[a]), Xtr[b])),
+                                     ytr[b]).mean() for a, b in gkf])
+    C = min(score, key=score.get)
+    p_tr = np.zeros((len(Xtr), 7))
+    for a, b in gkf:
+        p_tr[b] = proba(LogisticRegression(C=C, max_iter=3000).fit(Xtr[a], ytr[a]), Xtr[b])
+    return p_tr, proba(LogisticRegression(C=C, max_iter=3000).fit(Xtr, ytr), Xte), C
+
+
+def head_logp(kind, P, Xe, Xg, LPm):
+    # kind 'mix': g p_mirror + (1 - g) softmax(Xe W + b), g = sigmoid(Xg v + c); 'add': softmax(a LPm + Xe W + b)
+    if kind == 'add':
+        return F.log_softmax(P['a'] * LPm + Xe @ P['W'] + P['b'], -1)
+    s = Xg @ P['v'] + P['c']
+    lo = F.log_softmax(Xe @ P['W'] + P['b'], -1)
+    return torch.logsumexp(torch.stack([F.logsigmoid(s).unsqueeze(-1) + LPm, F.logsigmoid(-s).unsqueeze(-1) + lo]), 0)
+
+
+def fit_head(kind, Xe, Xg, LPm, y, lam_w, lam_v, c0):
+    torch.manual_seed(0)
+    Xe, Xg, LPm, yt = tt(Xe), tt(Xg), tt(LPm), torch.as_tensor(np.asarray(y), dtype=torch.long)
+    z_ = lambda *sh: torch.zeros(*sh, dtype=torch.float64, requires_grad=True)
+    P = {'W': z_(Xe.shape[1], 7), 'b': z_(7)}
+    if kind == 'mix':
+        P.update(v=z_(Xg.shape[1]), c=torch.full((1,), float(c0), dtype=torch.float64, requires_grad=True))
+    else:
+        P.update(a=torch.ones(1, dtype=torch.float64, requires_grad=True))
+    opt = torch.optim.LBFGS(list(P.values()), lr=1, max_iter=500, line_search_fn='strong_wolfe')
+
+    def closure():
+        opt.zero_grad()
+        loss = F.nll_loss(head_logp(kind, P, Xe, Xg, LPm), yt) + lam_w * (P['W'] ** 2).sum()
+        if kind == 'mix':
+            loss = loss + lam_v * (P['v'] ** 2).sum()
+        loss.backward()
+        return loss
+    opt.step(closure)
+    return {k: v.detach() for k, v in P.items()}
+
+
+def logp_of(kind, P, Xe, Xg, LPm):
+    return head_logp(kind, P, tt(Xe), tt(Xg), tt(LPm)).numpy()
+
+
+def run_fold(tr, te, diag):
+    zs = lambda M: (M - M[tr].mean(0)) / (M[tr].std(0) + 1e-6)
+    pt = PCA(PCA_TXT, random_state=0).fit(TXT3[tr]); pa = PCA(PCA_AUD, random_state=0).fit(AUD3[tr])
+    T3, A3a = zs(pt.transform(TXT3)), zs(pa.transform(AUD3))
+    B = {k: zs(v) for k, v in BLK.items()}
+    gkf = list(GroupKFold(5).split(tr, y_all[tr], src[tr]))
+    X_own = np.concatenate([B['L3'], B['L12']], 1)
+    X_all = np.concatenate([B['A3'], B['L3'], B['L12'], B['D2'], B['D1'], T3, A3a], 1)
+    out = {}
+    if diag == 'oracle':
+        onehot = np.eye(7)[yA_all]
+
+        def LP(eps):
+            return np.log((1 - eps) * onehot + eps / 7)
+        sc = {}
+        for eps in EPS_GRID:
+            Lp = LP(eps)
+            for lw in LAM_W:
+                sc[(eps, lw)] = np.mean([nll_rows(logp_of('add', fit_head('add', X_all[tr[a]], None, Lp[tr[a]], y_all[tr[a]],
+                                                                                 lw, 0, 0), X_all[tr[b]], X_all[tr[b]], Lp[tr[b]]),
+                                                  y_all[tr[b]]).mean() for a, b in gkf])
+        eps_add, lw_add = min(sc, key=sc.get)
+        out.update(eps_add=eps_add, eps_add_edge=edge(eps_add, EPS_GRID))
+        EPS_MIX, LPm = EPS_GRID, None
+    else:
+        Xm = np.concatenate([B['A3'], T3, A3a], 1)
+        p_tr, p_all, Cm = fit_lr_proba(Xm[tr], yA_all[tr], src[tr], Xm)
+        pm = p_all.copy(); pm[tr] = p_tr
+        LPm = np.log(np.clip(pm, 1e-6, None))
+        out.update(C_mirror=Cm, C_edge=edge(Cm, C_GRID),
+                   p_mirror_UAR_on_A=war_uar(pm[te].argmax(1), yA_all[te], 7)[1])
+        sc = {lw: np.mean([nll_rows(logp_of('add', fit_head('add', X_all[tr[a]], None, LPm[tr[a]], y_all[tr[a]], lw, 0, 0),
+                                            X_all[tr[b]], X_all[tr[b]], LPm[tr[b]]), y_all[tr[b]]).mean() for a, b in gkf])
+              for lw in LAM_W}
+        lw_add = min(sc, key=sc.get)
+        EPS_MIX = [None]
+    LPm_add = LP(eps_add) if diag == 'oracle' else LPm
+    sc = {}
+    for eps in EPS_MIX:
+        Lp = LP(eps) if eps is not None else LPm
+        Xg_ = np.concatenate([X_all, Lp], 1)
+        for lw in LAM_W:
+            for lv in LAM_V:
+                s = []
+                for a, b in gkf:
+                    share = np.clip(np.mean(y_all[tr[a]] == yA_all[tr[a]]), 0.01, 0.99)
+                    P = fit_head('mix', X_own[tr[a]], Xg_[tr[a]], Lp[tr[a]], y_all[tr[a]], lw, lv, np.log(share / (1 - share)))
+                    s.append(nll_rows(logp_of('mix', P, X_own[tr[b]], Xg_[tr[b]], Lp[tr[b]]), y_all[tr[b]]).mean())
+                sc[(eps, lw, lv)] = np.mean(s)
+    eps_mix, lw_mix, lv_mix = min(sc, key=sc.get)
+    if diag == 'oracle':
+        LPm = LP(eps_mix)
+        out.update(eps_mix=eps_mix, eps_mix_edge=edge(eps_mix, EPS_GRID))
+    Xg = np.concatenate([X_all, LPm], 1)
+    share = np.clip(np.mean(y_all[tr] == yA_all[tr]), 0.01, 0.99)
+    Pm = fit_head('mix', X_own[tr], Xg[tr], LPm[tr], y_all[tr], lw_mix, lv_mix, np.log(share / (1 - share)))
+    Pa = fit_head('add', X_all[tr], None, LPm_add[tr], y_all[tr], lw_add, 0, 0)
+    out['mix'] = logp_of('mix', Pm, X_own[te], Xg[te], LPm[te])
+    out['add'] = logp_of('add', Pa, X_all[te], X_all[te], LPm_add[te])
+    out['gate'] = torch.sigmoid(tt(Xg[te]) @ Pm['v'] + Pm['c']).numpy()
+    out.update(lam_w_mix=lw_mix, lam_v_mix=lv_mix, lam_w_add=lw_add, alpha=float(Pa['a']),
+               edges=f"Wmix {edge(lw_mix, LAM_W)} | vmix {edge(lv_mix, LAM_V)} | Wadd {edge(lw_add, LAM_W)}")
+    return out
+"""),
+    ("markdown", "## 5-fold episode cross-validation"),
+    ("code", r"""
+DIAGS = ['oracle', 'AvsB']
+OOF = {d: {k: np.zeros((N, 7)) for k in ('mix', 'add')} for d in DIAGS}
+GATE = {d: np.zeros(N) for d in DIAGS}
+info = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr, te = np.where(fold_of_row != f)[0], np.where(fold_of_row == f)[0]
+    for d in DIAGS:
+        o = run_fold(tr, te, d)
+        OOF[d]['mix'][te], OOF[d]['add'][te], GATE[d][te] = o['mix'], o['add'], o['gate']
+        rec = {k: v for k, v in o.items() if k not in ('mix', 'add', 'gate')}
+        rec.update(fold=f, diag=d, gate_mean=o['gate'].mean(), gate_sd=o['gate'].std())
+        info.append(rec)
+        print(f"fold {f} {d:<6}: " + " | ".join(f"{k} {v}" for k, v in rec.items() if k not in ('fold', 'diag'))
+              + f" | {(time.time() - t0) / 60:.1f} min", flush=True)
+INFO = pd.DataFrame(info)
+INFO.to_csv(f"{OUT_DIR}/g32_fold_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g32_oof.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, yA=yA_all, src=src,
+         **{f"{d}_{k}": a for d, dd in OOF.items() for k, a in dd.items()}, **{f"{d}_gate": g for d, g in GATE.items()})
+print("saved g32_oof.npz and g32_fold_log.csv")
+"""),
+    ("markdown", "## Results and the fixed reading rule"),
+    ("code", r"""
+MIRROR = (y_all == yA_all)
+L = {d: {k: nll_rows(a, y_all) for k, a in dd.items()} for d, dd in OOF.items()}
+gidx = [np.where(src == e)[0] for e in np.unique(src)]
+rng = np.random.default_rng(0)
+DR = {d: [] for d in DIAGS}
+AU = {d: [] for d in DIAGS}
+for _ in range(N_BOOT):
+    idx = np.concatenate([gidx[i] for i in rng.integers(0, len(gidx), len(gidx))])
+    for d in DIAGS:
+        DR[d].append(L[d]['add'][idx].mean() - L[d]['mix'][idx].mean())
+        AU[d].append(roc_auc_score(MIRROR[idx], GATE[d][idx]))
+CI = lambda x: np.percentile(x, [2.5, 97.5])
+PASS = {}
+for d in DIAGS:
+    dn, (lo, hi) = L[d]['add'].mean() - L[d]['mix'].mean(), CI(DR[d])
+    au, (alo, ahi) = roc_auc_score(MIRROR, GATE[d]), CI(AU[d])
+    PASS[d] = lo > 0 and alo > 0.5
+    q = np.percentile(GATE[d], [5, 25, 50, 75, 95])
+    print(f"\n== ({'i' if d == 'oracle' else 'ii'}) {d} ==")
+    print(f"  NLL mixture {L[d]['mix'].mean():.4f} | additive {L[d]['add'].mean():.4f} | "
+          f"UAR mixture {war_uar(OOF[d]['mix'].argmax(1), y_all, 7)[1]:.2f} | additive {war_uar(OOF[d]['add'].argmax(1), y_all, 7)[1]:.2f}")
+    print(f"  (a) ΔNLL = NLL(additive) − NLL(mixture) {dn:+.4f} [{lo:+.4f}, {hi:+.4f}]")
+    print(f"  (b) AUC(g → Y_B = Y_A) {au:.3f} [{alo:.3f}, {ahi:.3f}]")
+    print(f"  gate quantiles 5/25/50/75/95%: {np.round(q, 3)} | mean on mirror {GATE[d][MIRROR].mean():.3f} vs shift "
+          f"{GATE[d][~MIRROR].mean():.3f}")
+    print(f"  grid edges per fold: {INFO[INFO.diag == d].edges.tolist()}")
+    print(f"  -> {'PASSED' if PASS[d] else 'NOT PASSED'}")
+if not PASS['oracle']:
+    verdict = "even with A's true emotion the gate cannot tell when B mirrors → STOP direction A"
+elif not PASS['AvsB']:
+    verdict = "the structure has value; the bottleneck is recognising A's emotion → contribution 2 must improve the A branch"
+else:
+    verdict = "both passed → write the 2×2 notebook"
+print(f"\n== G32 joint reading (fixed rule; second look after G31): {verdict} ==")
+pd.DataFrame([{'diag': d, 'model': k, 'NLL': L[d][k].mean(), 'UAR': war_uar(OOF[d][k].argmax(1), y_all, 7)[1]}
+              for d in DIAGS for k in L[d]]).to_csv(f"{OUT_DIR}/g32_summary.csv", index=False)
+print("saved g32_summary.csv")
+"""),
+]
+assert "BLK = {" in G32[10][1]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -9991,6 +10234,7 @@ if __name__ == "__main__":
                         ("g29_context_pooling_cv.ipynb", G29),
                         ("g30_aux_supervision_cv.ipynb", G30),
                         ("g31_mirror_mixture_linear_check.ipynb", G31),
+                        ("g32_mirror_diagnostics.ipynb", G32),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

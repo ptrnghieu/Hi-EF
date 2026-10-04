@@ -10952,6 +10952,218 @@ print(f"\n== G33c reading (fixed rule, pairwise AUC with all features {a:.3f} [{
 ]
 
 
+# ---------------------------------------------------------------- G34: emotion-hypothesis queries (class-conditioned evidence retrieval)
+G34 = [
+    ("markdown", r"""
+# G34 — Emotion-hypothesis queries: class-conditioned evidence retrieval on the RoleNet backbone (screening: 5 seeds × 3 folds; train+val; test untouched)
+
+**Question.** Vanilla RoleNet mixes all evidence into one shared latent and scores the 7 classes from it
+(H → h → (s_1 … s_7)). Does it help to let **each future-emotion hypothesis retrieve its own evidence** before it is
+scored (H → (h_1 … h_7) → (s_1 … s_7))? The technique is adapted from label-query attention in multimodal emotion
+recognition / multi-label classification (Wang et al. 2023; Query2Label) to forecasting. G13 changed *where/how one
+shared representation is read*; G34 changes *what evidence is retrieved for each candidate label*.
+
+**Arms** — identical evidence tokens, aux heads, modality dropout and 2-layer all-to-all Transformer backbone; only the
+readout after the backbone differs:
+
+| Arm | Readout |
+|---|---|
+| `T0` | RoleNet: the query token's output → LN → dropout → linear 7-way |
+| `G` (generic multi-query) | 7 learned queries cross-attend the 15 evidence outputs (one pre-norm cross-attention); mean of the 7 outputs → LN → dropout → linear 7-way |
+| `H` (hypothesis queries) | the **same** cross-attention module with 7 queries, query c **bound to class c** (fixed order angry, disgust, fear, happy, neutral, sad, surprise; never permuted); s_c = u_cᵀ·dropout(LN(h_c)) + b_c |
+
+H's class-specific parameters u_c ∈ ℝ^d, b_c are exactly the rows of a 7 × d linear classifier (same count as T0/G);
+no per-class scorer network. Queries start without semantics; they get it only through the class-bound scoring.
+
+**Protocol (as G33):** checkpoint by inner-dev UAR; temperature per arm × fold × seed on inner dev; **primary = mean
+per-seed calibrated NLL on the held-out folds**; UAR/WAR/raw NLL secondary; seeds × episodes bootstrap with shared draws.
+
+**Claim gate (fixed before running):** the method claim is unlocked only if **both**
+Δ_base = NLL(T0) − NLL(H) and Δ_specificity = NLL(G) − NLL(H) have CIs entirely above 0.
+H better than T0 but not than G → a multi-query readout may help, not shown that the hypothesis binding is the cause.
+Otherwise stop. **Screening budget:** a pass is re-run with 10 seeds × 5 folds before use; a fail stops the
+hypothesis-query line (no routing / evidence-competition variants afterwards).
+
+**Mechanism diagnostics (descriptive, never gates):** query differentiation D_JS = mean pairwise Jensen–Shannon
+divergence between the 7 queries' attention distributions (H vs G), and the evidence-source profile P(source | query)
+over A / L / O faces, speech, scene and over history (I/II) vs current (III).
+"""),
+    ("code", _G33_CFG_LITE.replace('G33_VERSION = "G33-v1"', 'G33_VERSION = "G34-v1"') + """ARMS = ['T0', 'G', 'H']
+EMO_ORDER = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Shared training / calibration / bootstrap helpers (from G33) and the readout variants"),
+    ("code", _G33_MODEL),
+    ("code", r"""
+assert list(EMO) == EMO_ORDER, f'label order changed: {EMO}'     # query c is bound to class index c
+
+
+class RoleNetQuery(RoleNetX):
+    # RoleNet backbone unchanged; readout = 7 queries cross-attending the 15 evidence outputs ('G' generic, 'H' class-bound)
+    def __init__(self, mode, d=RN['D']):
+        super().__init__('ordered')
+        self.mode = mode
+        self.queries = nn.Parameter(torch.randn(7, d) * 0.02)
+        self.ln_q, self.ln_kv = nn.LayerNorm(d), nn.LayerNorm(d)
+        self.xattn = nn.MultiheadAttention(d, RN['heads'], dropout=RN['dropout'], batch_first=True)
+        self.ln_out, self.drop_out = nn.LayerNorm(d), nn.Dropout(0.3)
+        if mode == 'H':
+            self.u, self.b = nn.Parameter(torch.randn(7, d) * d ** -0.5), nn.Parameter(torch.zeros(7))
+        else:
+            self.lin = nn.Linear(d, 7)
+        del self.head                                                     # the query-token readout is not used
+
+    def backbone(self, ix, train):
+        B, aux = len(ix), {}
+        h, present = self.pool(FACE[ix], FMASK[ix])
+        h = torch.where(present.unsqueeze(-1), h, self.absent.unsqueeze(0).expand(B, -1, -1, -1))
+        h = h + self.face_role[None, :, None] + self.clip_emb[None, None]
+        ft = h.reshape(B, 9, -1)
+        aux['face'] = (self.head_face(ft.mean(1)), YB[ix], RN['aux_w'])
+        tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+        aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
+        spk_ = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
+        scn = self.scene(SCN[ix]) + self.ctx_role[1]
+        ct = torch.cat([spk_ + self.clip_emb, scn + self.clip_emb], 1)
+        aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
+        toks = torch.cat([self.query.expand(B, -1, -1), ft, ct], 1)
+        valid = torch.ones(toks.shape[:2], dtype=torch.bool, device=DEVICE)
+        if train:
+            u = torch.rand(B, device=DEVICE)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+            valid[:, 1:10] &= ~drop_face.unsqueeze(1)
+            valid[:, 10:] &= ~drop_ctx.unsqueeze(1)
+        out = self.enc(toks, src_key_padding_mask=~valid)
+        return out[:, 1:], valid[:, 1:], aux                              # 15 evidence outputs
+
+    def read(self, Hev, valid, need_weights=False):
+        B = len(Hev)
+        kv = self.ln_kv(Hev)
+        q = self.queries.unsqueeze(0).expand(B, -1, -1)
+        a, w = self.xattn(self.ln_q(q), kv, kv, key_padding_mask=~valid, need_weights=need_weights)
+        hq = q + a                                                         # [B, 7, d]
+        if self.mode == 'H':
+            logits = (self.drop_out(self.ln_out(hq)) * self.u).sum(-1) + self.b
+        else:
+            logits = self.lin(self.drop_out(self.ln_out(hq.mean(1))))
+        return logits, w
+
+    def forward(self, ix, train=False, perm=None):
+        Hev, valid, aux = self.backbone(ix, train)
+        return self.read(Hev, valid)[0], aux
+
+    @torch.no_grad()
+    def attention(self, ix, bs=256):
+        self.eval()
+        out = []
+        for i in range(0, len(ix), bs):
+            Hev, valid, _ = self.backbone(ix[i:i + bs], False)
+            out.append(self.read(Hev, valid, need_weights=True)[1].cpu())   # [b, 7, 15], averaged over heads
+        return torch.cat(out).numpy()
+
+
+TOKEN_SRC = ['A'] * 3 + ['L'] * 3 + ['O'] * 3 + ['speech'] * 3 + ['scene'] * 3
+TOKEN_CLIP = [0, 1, 2] * 5
+SRC_NAMES = ['A', 'L', 'O', 'speech', 'scene']
+
+
+def attn_diagnostics(W):
+    # W [n, 7, 15]: mean pairwise JS divergence between queries, source profile per query, history share per query
+    P = np.clip(W, 1e-9, None); P = P / P.sum(-1, keepdims=True)
+    js = []
+    for c in range(7):
+        for c2 in range(c + 1, 7):
+            M = 0.5 * (P[:, c] + P[:, c2])
+            js.append(0.5 * (P[:, c] * np.log(P[:, c] / M)).sum(-1) + 0.5 * (P[:, c2] * np.log(P[:, c2] / M)).sum(-1))
+    src = np.stack([P[:, :, [i for i, s in enumerate(TOKEN_SRC) if s == n]].sum(-1).mean(0) for n in SRC_NAMES], 1)
+    hist = P[:, :, [i for i, k in enumerate(TOKEN_CLIP) if k < 2]].sum(-1).mean(0)
+    return float(np.mean(js)), src, hist
+
+
+for a in ARMS:
+    mdl = RoleNetX('ordered') if a == 'T0' else RoleNetQuery(a)
+    print(f"{a:<3} parameters {sum(p.numel() for p in mdl.parameters()):,}")
+"""),
+    ("markdown", "## 3-fold episode cross-validation (5 seeds)"),
+    ("code", r"""
+os.makedirs(f"{OUT_DIR}/g34_ckpt", exist_ok=True)
+Z = {a: np.full((len(SEEDS), N, 7), np.nan) for a in ARMS}
+TEMP = {a: np.zeros((N_OUTER, len(SEEDS))) for a in ARMS}
+DEVZ, DEVROWS, DIAG, log = {}, {}, [], []
+t0 = time.time()
+for f in range(N_OUTER):
+    trr, fit_rows, dev_rows, te_rows = fold_rows(f)
+    DEVROWS[f] = dev_rows
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for a in ARMS:
+        DEVZ[(a, f)] = np.zeros((len(SEEDS), len(dev_rows), 7))
+        make = (lambda: RoleNetX('ordered')) if a == 'T0' else (lambda a=a: RoleNetQuery(a))
+        for si, seed in enumerate(SEEDS):
+            model, zd, zt, Tt, sel, ep, _ = train_run(make, tr, dev, te, seed + 1000 * f,
+                                                      f"{OUT_DIR}/g34_ckpt/{a}_fold{f}_seed{seed}.pt")
+            Z[a][si, te_rows], DEVZ[(a, f)][si], TEMP[a][f, si] = zt, zd, Tt
+            if a != 'T0':
+                djs, src_, hist_ = attn_diagnostics(model.attention(te))
+                DIAG.append({'arm': a, 'fold': f, 'seed': seed, 'D_JS': djs,
+                             **{f'{EMO_ORDER[c]}|{n}': src_[c, j] for c in range(7) for j, n in enumerate(SRC_NAMES)},
+                             **{f'{EMO_ORDER[c]}|history': hist_[c] for c in range(7)}})
+            yt = y_all[te_rows]
+            log.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'best_epoch': ep, 'T': Tt,
+                        'NLL_raw': nll_logits(zt, yt), 'NLL_cal': nll_logits(zt / Tt, yt), 'UAR': war_uar(zt.argmax(1), yt, 7)[1]})
+            print(f"fold {f} {a:<3} seed {seed:>3}: sel UAR {sel:5.2f} (epoch {ep}) | T {Tt:.2f} | NLL cal "
+                  f"{log[-1]['NLL_cal']:.4f} | UAR {log[-1]['UAR']:5.2f}" + (f" | D_JS {djs:.3f}" if a != 'T0' else "")
+                  + f" | {(time.time() - t0) / 60:.1f} min", flush=True)
+            del model
+            torch.cuda.empty_cache()
+LOG, DIAGD = pd.DataFrame(log), pd.DataFrame(DIAG)
+LOG.to_csv(f"{OUT_DIR}/g34_fold_seed_log.csv", index=False)
+DIAGD.to_csv(f"{OUT_DIR}/g34_attention_diagnostics.csv", index=False)
+np.savez(f"{OUT_DIR}/g34_artifacts.npz", manifest=json.dumps(MANIFEST), sample_id=DEV.sample_id.values, fold=fold_of_row,
+         y=y_all, src=src, **{f"outer_{a}": v for a, v in Z.items()}, **{f"temp_{a}": v for a, v in TEMP.items()},
+         **{f"dev_{a}_fold{f}": v for (a, f), v in DEVZ.items()}, **{f"devrows_fold{f}": r for f, r in DEVROWS.items()})
+print("saved g34_artifacts.npz, g34_fold_seed_log.csv, g34_attention_diagnostics.csv and g34_ckpt/")
+"""),
+    ("markdown", "## Estimands, claim gate and descriptive diagnostics"),
+    ("code", r"""
+foldT = lambda a: TEMP[a][fold_of_row]
+CAL = {a: Z[a] / foldT(a).T[..., None] for a in Z}
+LOSS = {a: row_nll(v, np.broadcast_to(y_all, v.shape[:2])) for a, v in CAL.items()}
+LOSS_RAW = {a: row_nll(v, np.broadcast_to(y_all, v.shape[:2])) for a, v in Z.items()}
+PAIRS = {'D_base = NLL(T0) - NLL(H)': ('T0', 'H'), 'D_specificity = NLL(G) - NLL(H)': ('G', 'H'),
+         'NLL(T0) - NLL(G)': ('T0', 'G')}
+point, CI = boot_pairs(LOSS, PAIRS)
+praw, CIraw = boot_pairs(LOSS_RAW, PAIRS, n_boot=500, seed=1)
+print("mean per-seed calibrated NLL:", {a: round(point[f'NLL {a}'], 4) for a in LOSS})
+print("temperature (median):", {a: round(float(np.median(TEMP[a])), 2) for a in TEMP},
+      "| best epoch (mean):", LOG.groupby('arm').best_epoch.mean().round(1).to_dict())
+for k in PAIRS:
+    print(f"  {k:<32} {point[k]:+.4f} [{CI[k][0]:+.4f}, {CI[k][1]:+.4f}] | raw NLL {praw[k]:+.4f} [{CIraw[k][0]:+.4f}, {CIraw[k][1]:+.4f}]")
+b, s_ = CI['D_base = NLL(T0) - NLL(H)'][0] > 0, CI['D_specificity = NLL(G) - NLL(H)'][0] > 0
+print("\n== G34 claim gate (fixed): " + ("UNLOCKED (screening): H beats T0 and G → re-run with 10 seeds × 5 folds" if b and s_ else
+      "H beats T0 but not G → multi-query readout may help; hypothesis binding not shown → stop" if b else
+      "not passed → stop the hypothesis-query line, keep vanilla RoleNet") + " ==")
+print("\n== mechanism diagnostics (descriptive) ==")
+print("  D_JS (mean pairwise JS between queries):", DIAGD.groupby('arm').D_JS.mean().round(4).to_dict())
+for a in ('H', 'G'):
+    d_ = DIAGD[DIAGD.arm == a]
+    prof = pd.DataFrame({n: [d_[f'{e}|{n}'].mean() for e in EMO_ORDER] for n in SRC_NAMES + ['history']},
+                        index=[f'q_{e}' if a == 'H' else f'q{i}' for i, e in enumerate(EMO_ORDER)])
+    print(f"  {a}: attention mass per source (rows = queries; 'history' = clips I/II)")
+    print(prof.round(3).to_string())
+sm = lambda z: np.exp(z - z.max(-1, keepdims=True)) / np.exp(z - z.max(-1, keepdims=True)).sum(-1, keepdims=True)
+SUM = pd.DataFrame([{'arm': a, 'NLL_cal': point[f'NLL {a}'], 'NLL_raw': praw[f'NLL {a}'],
+                     'UAR_ensemble': war_uar(sm(Z[a]).mean(0).argmax(1), y_all, 7)[1],
+                     'UAR_seed_mean': np.mean([war_uar(Z[a][s].argmax(1), y_all, 7)[1] for s in range(len(SEEDS))])} for a in Z])
+print(SUM.round(4).to_string(index=False))
+SUM.to_csv(f"{OUT_DIR}/g34_summary.csv", index=False)
+pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point', 'lo', 'hi']).T.to_csv(f"{OUT_DIR}/g34_estimands.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -10984,6 +11196,7 @@ if __name__ == "__main__":
                         ("g33a_temporal_audit_cv.ipynb", G33A),
                         ("g33b_relational_bias_cv.ipynb", G33B),
                         ("g33c_order_probe.ipynb", G33C),
+                        ("g34_hypothesis_queries_cv.ipynb", G34),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

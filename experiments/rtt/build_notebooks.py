@@ -10215,6 +10215,11 @@ G33_VERSION = "G33-v1"                         # shared manifest / preprocessing
 REL_LR_MULT, REL_WD = 10.0, 0.0                # relation biases (G33b only): lr = 10 x base lr, no weight decay
 """
 
+_G33_CFG_LITE = (_G33_CFG.replace("SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14",
+                                    "SEEDS = [42, 123, 456, 7, 11]                        # 5 seeds (authors' budget rule)")
+                  .replace("N_OUTER, N_INNER_DEV = 5, 5", "N_OUTER, N_INNER_DEV = 3, 5                  # 3 folds (authors' budget rule)"))
+assert "N_OUTER, N_INNER_DEV = 3, 5" in _G33_CFG_LITE and "SEEDS = [42, 123, 456, 7, 11]" in _G33_CFG_LITE
+
 _G33_MODEL = r"""
 import json, hashlib, re
 from scipy.optimize import minimize_scalar
@@ -10623,9 +10628,10 @@ G33B = [
     ("markdown", r"""
 # G33b — Relational bias study: factorial TIME × PERSON × EVIDENCE attention biases (5-fold CV, train+val, 10 seeds; test untouched)
 
-Part of the **G33 campaign**. R0 (plain RoleNet = G33a `ordered`) is **not retrained**: its held-out logits, inner-dev
-logits and temperatures are loaded from G33a (`g33a_artifacts.npz`), after checking that the manifest (version, seeds,
-folds, sample ids, hyper-parameters) matches this notebook exactly.
+Part of the **G33 campaign**. Budget rule set by the authors after G33a: **5 seeds × 3 folds** (G33a used 10 × 5).
+R0 (plain RoleNet = the `ordered` arm of G33a) is loaded from G33a only if the manifest (version, seeds, folds, sample
+ids, hyper-parameters) matches exactly; with the 3-fold / 5-seed budget it does not, so **R0 is retrained here** with the
+identical model class and training function (relation biases absent).
 
 **Mechanism.** RoleNet unchanged (role and clip embeddings kept) plus additive biases on every attention logit, per
 layer and head: a_ij = Q_iK_jᵀ/√d + b_time[r^t_ij] + b_person[r^p_ij] + b_evidence[r^e_ij], zero-initialised (each arm starts
@@ -10666,7 +10672,7 @@ specificity). Winning only against R0: the parameterisation helps, the ontology 
 against R-random: not better than plain RoleNet. Neither case is claimed as a method contribution. Leave-one-family-out
 differences NLL(R−family) − NLL(R-full) are descriptive (which family the gain depends on); no gate per family.
 """),
-    ("code", _G33_CFG + """R0_ARTIFACTS = "/kaggle/input/**/g33a_artifacts.npz"   # output of G33a (attach it as a dataset)
+    ("code", _G33_CFG_LITE + """R0_ARTIFACTS = "/kaggle/input/**/g33a_artifacts.npz"   # output of G33a (attach it as a dataset)
 RAND_SEED = 20261004                           # fixed randomisation seed of the R-random relation map
 ARMS_B = {'R-full': ('time', 'person', 'evidence'), 'R-time': ('person', 'evidence'),
           'R-person': ('time', 'evidence'), 'R-evidence': ('time', 'person'), 'R-random': ('time', 'person', 'evidence')}
@@ -10688,38 +10694,46 @@ if hits:
     A0 = np.load(hits[0], allow_pickle=True)
 else:                                          # the .npz may have been unpacked into a folder of .npy files on upload
     dirs = sorted(glob.glob("/kaggle/input/**/g33a_artifacts/manifest.npy", recursive=True))
-    assert dirs, f"attach the G33a output (g33a_artifacts.npz or its unpacked folder); pattern {R0_ARTIFACTS}"
-    hits = [os.path.dirname(dirs[0])]
-    A0 = {os.path.basename(f_)[:-4]: np.load(f_, allow_pickle=True) for f_ in glob.glob(f"{hits[0]}/*.npy")}
+    if dirs:
+        hits = [os.path.dirname(dirs[0])]
+        A0 = {os.path.basename(f_)[:-4]: np.load(f_, allow_pickle=True) for f_ in glob.glob(f"{hits[0]}/*.npy")}
+    else:
+        A0 = {'manifest': json.dumps({})}                 # no G33a output attached: R0 is trained here
 M0 = json.loads(str(A0['manifest']))
 bad = [k for k in MANIFEST if json.dumps(MANIFEST[k], sort_keys=True) != json.dumps(M0.get(k), sort_keys=True)]
-assert not bad, f"G33a manifest differs from this notebook in {bad}"
-assert (A0['sample_id'] == DEV.sample_id.values).all() and (A0['fold'] == fold_of_row).all()
-print("R0 artifacts loaded from", hits[0], "| manifest identical")
+TRAIN_R0 = bool(bad)
+if TRAIN_R0:
+    print(f"G33a manifest differs in {bad} (budget rule: {len(SEEDS)} seeds × {N_OUTER} folds) → R0 is retrained here")
+else:
+    assert (A0['sample_id'] == DEV.sample_id.values).all() and (A0['fold'] == fold_of_row).all()
+    print("R0 artifacts loaded from", hits[0], "| manifest identical")
 """),
     ("markdown", "## 5-fold episode cross-validation of the relation arms"),
     ("code", r"""
 os.makedirs(f"{OUT_DIR}/g33_ckpt", exist_ok=True)
-Z = {'R0': A0['outer_ordered'].astype(np.float64)}
-TEMP = {'R0': A0['temp_ordered']}
-Z.update({a: np.full((len(SEEDS), N, 7), np.nan) for a in ARMS_B})
-TEMP.update({a: np.zeros((N_OUTER, len(SEEDS))) for a in ARMS_B})
+ARMS_RUN = ({'R0': ()} if TRAIN_R0 else {}) | ARMS_B
+Z = {} if TRAIN_R0 else {'R0': A0['outer_ordered'].astype(np.float64)}
+TEMP = {} if TRAIN_R0 else {'R0': A0['temp_ordered']}
+Z.update({a: np.full((len(SEEDS), N, 7), np.nan) for a in ARMS_RUN})
+TEMP.update({a: np.zeros((N_OUTER, len(SEEDS))) for a in ARMS_RUN})
 DEVZ, BIAS, DIAG, log = {}, {a: [] for a in ARMS_B}, [], []
 t0 = time.time()
 for f in range(N_OUTER):
     trr, fit_rows, dev_rows, te_rows = fold_rows(f)
-    assert (A0[f'devrows_fold{f}'] == dev_rows).all(), "inner-dev rows differ from G33a"
+    if not TRAIN_R0:
+        assert (A0[f'devrows_fold{f}'] == dev_rows).all(), "inner-dev rows differ from G33a"
     FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
     print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
     tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
-    for a, fams in ARMS_B.items():
+    for a, fams in ARMS_RUN.items():
         DEVZ[(a, f)] = np.zeros((len(SEEDS), len(dev_rows), 7))
         idx = REL_RANDOM if a == 'R-random' else REL
         for si, seed in enumerate(SEEDS):
             model, zd, zt, Tt, sel, ep, dg = train_run(lambda: RoleNetX('ordered', fams, idx), tr, dev, te, seed + 1000 * f,
                                                    f"{OUT_DIR}/g33_ckpt/{a}_fold{f}_seed{seed}.pt")
             Z[a][si, te_rows], DEVZ[(a, f)][si], TEMP[a][f, si] = zt, zd, Tt
-            BIAS[a].append({k: v.detach().cpu().numpy() for k, v in model.rel_b.items()})
+            if fams:
+                BIAS[a].append({k: v.detach().cpu().numpy() for k, v in model.rel_b.items()})
             DIAG.extend({'arm': a, 'fold': f, 'seed': seed, **d_} for d_ in dg)
             yt = y_all[te_rows]
             log.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'best_epoch': ep, 'T': Tt,
@@ -10734,8 +10748,8 @@ LOG.to_csv(f"{OUT_DIR}/g33b_fold_seed_log.csv", index=False)
 DIAGD = pd.DataFrame(DIAG)
 DIAGD.to_csv(f"{OUT_DIR}/g33b_bias_diagnostics.csv", index=False)
 np.savez(f"{OUT_DIR}/g33b_artifacts.npz", manifest=json.dumps(MANIFEST), sample_id=DEV.sample_id.values, fold=fold_of_row,
-         y=y_all, src=src, **{f"outer_{a}": v for a, v in Z.items() if a != 'R0'},
-         **{f"temp_{a}": v for a, v in TEMP.items() if a != 'R0'}, **{f"dev_{a}_fold{f}": v for (a, f), v in DEVZ.items()},
+         y=y_all, src=src, r0_trained_here=TRAIN_R0, **{f"outer_{a}": v for a, v in Z.items()},
+         **{f"temp_{a}": v for a, v in TEMP.items()}, **{f"dev_{a}_fold{f}": v for (a, f), v in DEVZ.items()},
          **{f"bias_{a}_{fam}": np.stack([b[fam] for b in BIAS[a]]) for a in ARMS_B for fam in ARMS_B[a]})
 print("saved g33b_artifacts.npz, g33b_fold_seed_log.csv and g33_ckpt/")
 """),
@@ -10793,6 +10807,151 @@ pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point',
 ]
 
 
+# ---------------------------------------------------------------- G33c: does clip content reveal I-vs-II order? (probe for G33a)
+G33C = [
+    ("markdown", r"""
+# G33c — Does clip content reveal the order of clips I and II? (linear probe for G33a; train+val; test untouched)
+
+**Why.** G33a's `bag12` removes the explicit clip label of clips I and II, but their *content* may still reveal which one
+is closer to clip III (e.g. turn-taking: the clip-II speaker is often L; the voice cosine to clip III may differ). If
+content reveals the order, `bag12` did not remove order *information*, only the order *label*, and U_order ≈ 0 cannot be
+read as "order does not matter".
+
+**Features per clip k ∈ {I, II}** (exactly the inputs RoleNet gets for that clip, without any clip label): for each role
+A/L/O the mean of its kept frame features (HSEmotion PCA + geometric, PCA fitted inside the fold) and a presence flag;
+CLIP text, AudioCLIP audio and scene features (each PCA-32 inside the fold); the audio-found flag; the voice row
+(mouth–audio sync per role, voice cosine to clip III and its flag, number of identities).
+
+**Probe (pairwise, what a set model could exploit).** For every MCIS both orders are used: z = x_first − x_second with
+label 1 if "first" is clip II. Regularised logistic regression, C by grouped inner CV; **3-fold episode CV** (authors'
+budget rule), standardisation and PCA inside the fold. AUC with a 2,000-draw episode bootstrap. Also per feature group
+(faces, speech text+audio, scene, voice row) and a pointwise probe (single clip → I or II) as descriptive context.
+
+**Reading (fixed before running), pairwise AUC with all features:**
+
+| Result | Meaning for G33a |
+|---|---|
+| CI upper bound < 0.60 | content hardly reveals order → `bag12` removed order information; G33a's U_order is a clean test |
+| CI lower bound > 0.60 | content reveals order → `bag12` removed only the explicit label; G33a tested **explicit** order labels, not temporal information |
+| otherwise | partial: report the AUC and state both readings |
+"""),
+    ("code", _G33_CFG_LITE + """PCA_K = 32
+C_GRID = [0.01, 0.1, 1.0]
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Folds and per-clip content features"),
+    ("code", r"""
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.metrics import roc_auc_score
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+src = DEV.source_folder.values
+print("fold sizes (MCIS):", load_)
+
+FM = FMASK.cpu().numpy()                                         # [N, role, clip, frame]
+TXTn, AUDn, SCNn = TXT.float().cpu().numpy(), AUD.float().cpu().numpy(), SCN.float().cpu().numpy()
+AFDn, VOIn = AFD.float().cpu().numpy(), VOI.float().cpu().numpy()
+
+
+def clip_blocks(Fn, k, tr):
+    # per-clip content features for clip k (0 = I, 1 = II); PCA fitted on training rows of both clips
+    faces = []
+    for r in range(3):
+        m = FM[:, r, k].astype(np.float32)[..., None]
+        faces.append((Fn[:, r, k] * m).sum(1) / np.maximum(m.sum(1), 1))
+        faces.append(FM[:, r, k].any(-1, keepdims=True).astype(np.float32))
+    return {'faces': np.concatenate(faces, 1), 'text': TXTn[:, k], 'audio': AUDn[:, k], 'scene': SCNn[:, k],
+            'afound': AFDn[:, k:k + 1], 'voice': VOIn[:, k]}
+
+
+def fit_auc(Ztr, ytr, gtr, Zte):
+    gkf = list(GroupKFold(3).split(Ztr, ytr, gtr))
+    sc = {}
+    for C in C_GRID:
+        s = []
+        for a, b in gkf:
+            m = LogisticRegression(C=C, max_iter=3000).fit(Ztr[a], ytr[a])
+            p = np.clip(m.predict_proba(Ztr[b])[:, 1], 1e-6, 1 - 1e-6)
+            s.append(-np.mean(ytr[b] * np.log(p) + (1 - ytr[b]) * np.log(1 - p)))
+        sc[C] = np.mean(s)
+    return LogisticRegression(C=min(sc, key=sc.get), max_iter=3000).fit(Ztr, ytr).predict_proba(Zte)[:, 1]
+"""),
+    ("markdown", "## 3-fold episode CV of the probes"),
+    ("code", r"""
+GROUPS = {'all': ['faces', 'text', 'audio', 'scene', 'afound', 'voice'], 'faces': ['faces'],
+          'speech (text+audio)': ['text', 'audio', 'afound'], 'scene': ['scene'], 'voice row': ['voice']}
+PAIR = {g: np.zeros((N, 2)) for g in GROUPS}                       # scores for (first=I, second=II) and (first=II, second=I)
+POINT = {g: np.zeros((N, 2)) for g in GROUPS}                      # pointwise scores for clip I and clip II rows
+t0 = time.time()
+for f in range(N_OUTER):
+    trr = np.where(fold_of_row != f)[0]; te = np.where(fold_of_row == f)[0]
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    Fn = FACE.float().cpu().numpy()
+    B0, B1 = clip_blocks(Fn, 0, trr), clip_blocks(Fn, 1, trr)
+    for k_ in ('text', 'audio', 'scene', 'faces'):                  # PCA / scaling inside the fold, fitted on both clips
+        Xfit = np.concatenate([B0[k_][trr], B1[k_][trr]])
+        if k_ != 'faces':
+            pca = PCA(PCA_K, random_state=0).fit(Xfit)
+            B0[k_], B1[k_] = pca.transform(B0[k_]), pca.transform(B1[k_])
+            Xfit = np.concatenate([B0[k_][trr], B1[k_][trr]])
+        mu, sd = Xfit.mean(0), Xfit.std(0) + 1e-6
+        B0[k_], B1[k_] = (B0[k_] - mu) / sd, (B1[k_] - mu) / sd
+    for g, keys in GROUPS.items():
+        X0 = np.concatenate([B0[k_] for k_ in keys], 1); X1 = np.concatenate([B1[k_] for k_ in keys], 1)
+        # pairwise: both orders, label 1 if the first member is clip II
+        Ztr = np.concatenate([X0[trr] - X1[trr], X1[trr] - X0[trr]]); ytr = np.r_[np.zeros(len(trr)), np.ones(len(trr))]
+        gtr = np.r_[src[trr], src[trr]]
+        s = fit_auc(Ztr, ytr, gtr, np.concatenate([X0[te] - X1[te], X1[te] - X0[te]]))
+        PAIR[g][te, 0], PAIR[g][te, 1] = s[:len(te)], s[len(te):]
+        # pointwise: a single clip's features → I (0) or II (1)
+        s = fit_auc(np.concatenate([X0[trr], X1[trr]]), ytr, gtr, np.concatenate([X0[te], X1[te]]))
+        POINT[g][te, 0], POINT[g][te, 1] = s[:len(te)], s[len(te):]
+    print(f"fold {f} done | {(time.time() - t0) / 60:.1f} min", flush=True)
+np.savez(f"{OUT_DIR}/g33c_probe.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, src=src,
+         **{f"pair_{g}": v for g, v in PAIR.items()}, **{f"point_{g}": v for g, v in POINT.items()})
+"""),
+    ("markdown", "## Results and the fixed reading"),
+    ("code", r"""
+gidx = [np.where(src == e)[0] for e in np.unique(src)]
+
+
+def auc_ci(S, n_boot=N_BOOT, seed=0):
+    # S [N, 2]: column 0 has label 0 (I first / clip I), column 1 label 1; episode bootstrap
+    yv = np.r_[np.zeros(N), np.ones(N)]
+    pt = roc_auc_score(yv, np.r_[S[:, 0], S[:, 1]])
+    rng = np.random.default_rng(seed)
+    bs = []
+    for _ in range(n_boot):
+        i = np.concatenate([gidx[j] for j in rng.integers(0, len(gidx), len(gidx))])
+        bs.append(roc_auc_score(np.r_[np.zeros(len(i)), np.ones(len(i))], np.r_[S[i, 0], S[i, 1]]))
+    return pt, np.percentile(bs, [2.5, 97.5])
+
+
+rows = []
+for g in GROUPS:
+    (pa, (plo, phi)), (qa, (qlo, qhi)) = auc_ci(PAIR[g]), auc_ci(POINT[g], seed=1)
+    rows.append({'features': g, 'pairwise_AUC': pa, 'lo': plo, 'hi': phi, 'pointwise_AUC': qa, 'p_lo': qlo, 'p_hi': qhi})
+    print(f"  {g:<20} pairwise AUC {pa:.3f} [{plo:.3f}, {phi:.3f}] | pointwise AUC {qa:.3f} [{qlo:.3f}, {qhi:.3f}]")
+R = pd.DataFrame(rows)
+R.to_csv(f"{OUT_DIR}/g33c_summary.csv", index=False)
+a, lo, hi = R.iloc[0][['pairwise_AUC', 'lo', 'hi']]
+verdict = ("content hardly reveals order → bag12 removed order information; G33a's U_order is a clean test" if hi < 0.60 else
+           "content reveals order → bag12 removed only the explicit label; G33a tested explicit order labels, not temporal information"
+           if lo > 0.60 else "partial: both readings must be stated")
+print(f"\n== G33c reading (fixed rule, pairwise AUC with all features {a:.3f} [{lo:.3f}, {hi:.3f}]): {verdict} ==")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -10824,6 +10983,7 @@ if __name__ == "__main__":
                         ("g32_mirror_diagnostics.ipynb", G32),
                         ("g33a_temporal_audit_cv.ipynb", G33A),
                         ("g33b_relational_bias_cv.ipynb", G33B),
+                        ("g33c_order_probe.ipynb", G33C),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

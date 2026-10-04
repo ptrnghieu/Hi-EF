@@ -8569,7 +8569,25 @@ dev_rows = np.where(np.isin(src, sel_eps))[0]""",
         """sel_eps = 'MELD dev'
 trr = np.where(~IS_TEST)[0]
 fit_rows = np.where((DEV.split == 'train').values)[0]
-dev_rows = np.where((DEV.split == 'val').values)[0]""").replace("g10_", "m3_")),
+dev_rows = np.where((DEV.split == 'val').values)[0]""").replace("g10_", "m3_").replace(
+        "LRFZ = T(((LRF - mu) / sd).astype(np.float32))\n",
+        """LRFZ = T(((LRF - mu) / sd).astype(np.float32))\n
+# MELD: the first M3 run gave constant (NaN) RoleNet outputs; report every non-finite model input and set it to 0
+def _finite(name, t):
+    bad = ~torch.isfinite(t.float())
+    if bad.any():
+        idx = torch.nonzero(bad.reshape(len(t), -1).any(1)).flatten()
+        print(f"non-finite values in {name}: {int(bad.sum())} of {t.numel()} in {len(idx)} rows "
+              f"(e.g. rows {idx[:5].tolist()}) -> set to 0", flush=True)
+        t = torch.nan_to_num(t.float(), nan=0.0, posinf=0.0, neginf=0.0).to(t.dtype)
+    else:
+        print(f"{name}: all finite", flush=True)
+    return t
+
+
+FACE, POOL, VOI, TXT, AUD, AFD, SCN, LRFZ = [_finite(n_, t_) for n_, t_ in zip(
+    ['FACE', 'POOL', 'VOI', 'TXT', 'AUD', 'AFD', 'SCN', 'LRFZ'], [FACE, POOL, VOI, TXT, AUD, AFD, SCN, LRFZ])]
+""")),
     G10[14],
     ("code", _M3_RES[:_M3_RES.index('print("\\n== per-episode')]),
     ("markdown", "## Mirroring vs shift (as Hi-EF F14) and gold-label references"),

@@ -11377,6 +11377,216 @@ json.dump({'verdict': verdict, 'D_int': point['D_int = NLL(EMAP3) - NLL(full)'],
 ]
 
 
+# ---------------------------------------------------------------- G36: class-balanced resampling (CV selection, then a second test read)
+_G36_CFG = G10[2][1].replace(
+    "UNLOCK_TEST = False          # set to True for the single preregistered run",
+    "UNLOCK_TEST = True           # G36: second, disclosed test read (authors' decision); part A never uses test rows") + """
+# ---- G36
+CV_SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]     # development CV, as G14
+N_OUTER = 5
+ARMS = {'RoleNet': 0.0, 'Up-sqrt': 0.5, 'Up-bal': 1.0}    # sampling weight of an MCIS = n_class ** -beta
+N_BOOT_CV = 1000
+G10_PROBS_GLOBS = ["/kaggle/input/**/g10_test_probs.npz", "/kaggle/working/g10_test_probs.npz"]
+"""
+assert "UNLOCK_TEST = True" in _G36_CFG
+
+G36 = [
+    ("markdown", r"""
+# G36 — Class-balanced resampling for RoleNet: development CV, then a second (disclosed) test read
+
+**Why.** RoleNet's plain-scored recall is 0 for *fear* on test, and on shift MCIS it is near 0 for *disgust*, *fear*
+and *surprise* (F14). Resampling the training MCIS by class is the standard remedy for long-tailed classification.
+
+**Arms** (identical RoleNet, identical hyper-parameters; only the order of training MCIS differs). Each epoch draws
+|train| MCIS **with replacement**, an MCIS of class c with probability ∝ n_c^(−β):
+
+| Arm | β | Meaning |
+|---|---|---|
+| `RoleNet` | 0 | uniform (as published) |
+| `Up-sqrt` | 0.5 | square-root resampling |
+| `Up-bal` | 1 | class-balanced resampling |
+
+**Part A — development CV (train+val only, 45 episodes).** 5 folds as G8b–G35, 10 seeds as G14, checkpoint by
+inner-dev UAR (5 episodes, `random.Random(100 + fold)`), plain scoring. Reported: seed-ensemble UAR / WAR, per-class
+recall, ΔUAR vs `RoleNet` with a seeds × episodes bootstrap.
+
+**Selection rule (fixed before running).** The resampling arm with the higher CV seed-ensemble UAR is selected. The
+test is read **only if** its CV ΔUAR vs `RoleNet` is > 0 (point estimate).
+
+**Part B — second test read (disclosed in the paper).** The selected arm is trained exactly as in G10: the 45
+development episodes, selection episodes `random.Random(2026)`, seeds 42, 123, 456, 789, 1024, plain scoring of the
+seed-averaged probabilities. It is compared with the **saved G10 test predictions** of `PaperBest` and `RoleNet`
+(attach the G10 output, `g10_test_probs.npz`); those models are not retrained. Reported: UAR / WAR, per-class recall,
+ΔUAR with a bootstrap over the 8 test episodes. This is the second use of the test split for RoleNet; all numbers are
+reported, whatever their sign.
+"""),
+    G10[1],
+    ("code", _G36_CFG),
+    G10[3], G10[4], G10[5], G10[6], G10[7], G10[8], G10[9],
+    ("markdown", "## Resampled training and the development folds"),
+    ("code", r"""
+def train_eval_w(beta, tr, dev, te, seed):
+    # train_eval('role', FULL, ...) with class-resampled epochs; beta = 0 keeps the uniform order of the original
+    seed_all(seed)
+    hp = HP['role']
+    model = MAKE['role'](FULL).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    cnt = torch.bincount(YB[tr], minlength=7).float().clamp(min=1)
+    w = cnt[YB[tr]] ** (-beta)
+    best, best_state, bad = -1, None, 0
+    for ep in range(hp['epochs']):
+        model.train()
+        if beta == 0:
+            perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        else:
+            perm = tr[torch.multinomial(w, len(tr), replacement=True)]
+        for i in range(0, len(perm), hp['batch']):
+            j = perm[i:i + hp['batch']]
+            logits, aux = model(j, train=True)
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, wt in aux.values():
+                if (t >= 0).any():
+                    loss = loss + wt * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        u = war_uar(predict(model, dev).argmax(1), y_dev, 7)[1]
+        if u > best:
+            best, bad = u, 0
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    return predict(model, te), best
+
+
+y_all = DEV.yB.values
+DEVR = np.where(~IS_TEST)[0]                       # part A uses these rows only
+sizes = pd.Series(src[DEVR]).value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = np.array([FOLD.get(e, -1) for e in src])
+assert (fold_of_row[IS_TEST] == -1).all() and (fold_of_row[DEVR] >= 0).all()
+print("development folds (MCIS):", load_)
+
+
+def recalls(p, y):
+    return np.array([(p[y == c] == c).mean() * 100 if (y == c).any() else np.nan for c in range(7)])
+"""),
+    ("markdown", "## Part A — development CV (train+val only)"),
+    ("code", r"""
+OOF = {a: np.full((len(CV_SEEDS), N, 7), np.nan, np.float32) for a in ARMS}
+cvlog = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, 5))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows_f = np.where(fold_of_row == f)[0]
+    assert not IS_TEST[trr].any() and not IS_TEST[te_rows_f].any()
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows_f)
+    for a, beta in ARMS.items():
+        for si, seed in enumerate(CV_SEEDS):
+            p, sel = train_eval_w(beta, tr, dev, te, seed + 1000 * f)
+            OOF[a][si, te_rows_f] = p
+            w_, u_ = war_uar(p.argmax(1), y_all[te_rows_f], 7)
+            cvlog.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'UAR': u_, 'WAR': w_})
+            print(f"fold {f} {a:<8} seed {seed:>3}: sel {sel:5.2f} | UAR {u_:5.2f} | {(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+pd.DataFrame(cvlog).to_csv(f"{OUT_DIR}/g36_cv_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g36_cv_oof.npz", sample_id=DEV.sample_id.values[DEVR], y=y_all[DEVR], src=src[DEVR],
+         **{a.replace('-', '_'): v[:, DEVR] for a, v in OOF.items()})
+
+yd, sd_ = y_all[DEVR], src[DEVR]
+ENS = {a: v[:, DEVR].mean(0).argmax(1) for a, v in OOF.items()}
+rng = np.random.default_rng(0)
+gidx = [np.where(sd_ == e)[0] for e in np.unique(sd_)]
+
+
+def cv_delta(a, b):
+    d0 = war_uar(ENS[a], yd, 7)[1] - war_uar(ENS[b], yd, 7)[1]
+    ds = []
+    for _ in range(N_BOOT_CV):
+        s_ = rng.integers(0, len(CV_SEEDS), len(CV_SEEDS))
+        i = np.concatenate([gidx[j] for j in rng.integers(0, len(gidx), len(gidx))])
+        pa, pb = OOF[a][s_][:, DEVR].mean(0).argmax(1), OOF[b][s_][:, DEVR].mean(0).argmax(1)
+        ds.append(war_uar(pa[i], yd[i], 7)[1] - war_uar(pb[i], yd[i], 7)[1])
+    return d0, *np.percentile(ds, [2.5, 97.5])
+
+
+CVT = pd.DataFrame([{'arm': a, 'UAR': war_uar(ENS[a], yd, 7)[1], 'WAR': war_uar(ENS[a], yd, 7)[0],
+                     **dict(zip(EMO, recalls(ENS[a], yd)))} for a in ARMS])
+print("== Part A: development CV, 10-seed ensembles, plain ==")
+print(CVT.round(2).to_string(index=False))
+CVD = {}
+for a in ('Up-sqrt', 'Up-bal'):
+    CVD[a] = cv_delta(a, 'RoleNet')
+    print(f"  {a} - RoleNet: dUAR {CVD[a][0]:+.2f} [{CVD[a][1]:+.2f}, {CVD[a][2]:+.2f}]")
+CVT.to_csv(f"{OUT_DIR}/g36_cv_summary.csv", index=False)
+SELECTED = max(('Up-sqrt', 'Up-bal'), key=lambda a: CVT.set_index('arm').at[a, 'UAR'])
+RUN_TEST = CVD[SELECTED][0] > 0
+print(f"\n== selection (fixed rule): {SELECTED} | CV dUAR vs RoleNet {CVD[SELECTED][0]:+.2f} -> "
+      f"{'read the test (second, disclosed read)' if RUN_TEST else 'NO test read; report CV only'} ==")
+"""),
+    ("markdown", "## Part B — second test read of the selected arm (only if the rule says so)"),
+    ("code", r"""
+if RUN_TEST:
+    hits = [p for g in G10_PROBS_GLOBS for p in glob.glob(g, recursive=True)]
+    assert hits, "attach the G10 output (g10_test_probs.npz) to compare with the saved PaperBest / RoleNet predictions"
+    g10 = np.load(hits[0], allow_pickle=True)
+    sel_eps = sorted(random.Random(SELECT_SEED).sample(list(EPS), N_INNER_DEV))
+    trr = np.where(~IS_TEST)[0]
+    fit_rows = np.where(~IS_TEST & ~np.isin(src, sel_eps))[0]
+    dev_rows = np.where(np.isin(src, sel_eps))[0]
+    te_rows = np.where(IS_TEST)[0]
+    pos = {s: i for i, s in enumerate(g10['sample_id'])}
+    take = np.array([pos[s] for s in DEV.sample_id.values[te_rows]])        # align the saved predictions by sample id
+    SAVED = {'PaperBest': g10['PaperBest'][:, take], 'RoleNet (G10)': g10['RoleNet'][:, take]}
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    P_new, tlog = [], []
+    for seed in SEEDS:
+        p, sel = train_eval_w(ARMS[SELECTED], tr, dev, te, seed)
+        P_new.append(p)
+        w_, u_ = war_uar(p.argmax(1), y_all[te_rows], 7)
+        tlog.append({'seed': seed, 'sel_UAR': sel, 'test_UAR': u_, 'test_WAR': w_})
+        print(f"{SELECTED} seed {seed}: sel {sel:5.2f} | test UAR {u_:5.2f} WAR {w_:5.2f}", flush=True)
+    PT = {SELECTED: np.stack(P_new), **SAVED}
+    yt, st = y_all[te_rows], src[te_rows]
+    PRED = {k: v.mean(0).argmax(1) for k, v in PT.items()}
+    G_ = [np.where(st == e)[0] for e in np.unique(st)]
+    rng = np.random.default_rng(0)
+    BOOT = [np.concatenate([G_[j] for j in rng.integers(0, len(G_), len(G_))]) for _ in range(2000)]
+    print("\n== Part B: test (second read), seed ensembles, plain ==")
+    TT = pd.DataFrame([{'model': k, 'UAR': war_uar(v, yt, 7)[1], 'WAR': war_uar(v, yt, 7)[0], **dict(zip(EMO, recalls(v, yt)))}
+                       for k, v in PRED.items()])
+    print(TT.round(2).to_string(index=False))
+    for b in SAVED:
+        d0 = war_uar(PRED[SELECTED], yt, 7)[1] - war_uar(PRED[b], yt, 7)[1]
+        ds = [war_uar(PRED[SELECTED][i], yt[i], 7)[1] - war_uar(PRED[b][i], yt[i], 7)[1] for i in BOOT]
+        lo, hi = np.percentile(ds, [2.5, 97.5])
+        wins = sum(war_uar(PRED[SELECTED][g], yt[g], 7)[1] > war_uar(PRED[b][g], yt[g], 7)[1] for g in G_)
+        print(f"  {SELECTED} - {b}: dUAR {d0:+.2f} [{lo:+.2f}, {hi:+.2f}] | episodes won {wins}/{len(G_)}")
+    TT.to_csv(f"{OUT_DIR}/g36_test_summary.csv", index=False)
+    pd.DataFrame(tlog).to_csv(f"{OUT_DIR}/g36_test_per_seed.csv", index=False)
+    np.savez(f"{OUT_DIR}/g36_test_probs.npz", sample_id=DEV.sample_id.values[te_rows], selected=SELECTED,
+             **{k.replace(' ', '_').replace('(', '').replace(')', '').replace('-', '_'): v for k, v in PT.items()})
+    print("saved g36_test_summary.csv, g36_test_per_seed.csv, g36_test_probs.npz")
+else:
+    print("test not read (selection rule)")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -11411,6 +11621,7 @@ if __name__ == "__main__":
                         ("g33c_order_probe.ipynb", G33C),
                         ("g34_hypothesis_queries_cv.ipynb", G34),
                         ("g35_group_emap_cv.ipynb", G35),
+                        ("g36_resampling_cv_test.ipynb", G36),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

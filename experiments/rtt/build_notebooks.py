@@ -11587,6 +11587,90 @@ else:
 ]
 
 
+# ---------------------------------------------------------------- G37: frames of the case-study MCIS (figures only)
+_G37_PICK = [{'sample_id': 'sample00225', 'category': 'win_shift', 'clip1': '02/00647', 'clip2': '02/00648', 'clip3': '02/00649', 'clip4': '02/00650', 'A_III': 'surprise', 'B_IV': 'neutral', 'RoleNet': 'neutral', 'PaperBest': 'angry', 'p_true_RoleNet': 0.529, 'p_true_PaperBest': 0.153}, {'sample_id': 'sample01051', 'category': 'win_shift', 'clip1': '16/00115', 'clip2': '16/00116', 'clip3': '16/00117', 'clip4': '16/00118', 'A_III': 'sad', 'B_IV': 'neutral', 'RoleNet': 'neutral', 'PaperBest': 'angry', 'p_true_RoleNet': 0.343, 'p_true_PaperBest': 0.072}, {'sample_id': 'sample01044', 'category': 'win_shift', 'clip1': '15/00811', 'clip2': '15/00812', 'clip3': '15/00813', 'clip4': '15/00814', 'A_III': 'sad', 'B_IV': 'angry', 'RoleNet': 'angry', 'PaperBest': 'happy', 'p_true_RoleNet': 0.352, 'p_true_PaperBest': 0.083}, {'sample_id': 'sample02754', 'category': 'win_shift', 'clip1': '53/00106', 'clip2': '53/00107', 'clip3': '53/00108', 'clip4': '53/00109', 'A_III': 'angry', 'B_IV': 'sad', 'RoleNet': 'sad', 'PaperBest': 'happy', 'p_true_RoleNet': 0.449, 'p_true_PaperBest': 0.186}, {'sample_id': 'sample01305', 'category': 'win_mirror', 'clip1': '21/00047', 'clip2': '21/00048', 'clip3': '21/00049', 'clip4': '21/00050', 'A_III': 'happy', 'B_IV': 'happy', 'RoleNet': 'happy', 'PaperBest': 'neutral', 'p_true_RoleNet': 0.588, 'p_true_PaperBest': 0.139}, {'sample_id': 'sample02795', 'category': 'win_mirror', 'clip1': '53/00462', 'clip2': '53/00463', 'clip3': '53/00464', 'clip4': '53/00465', 'A_III': 'angry', 'B_IV': 'angry', 'RoleNet': 'angry', 'PaperBest': 'sad', 'p_true_RoleNet': 0.533, 'p_true_PaperBest': 0.261}, {'sample_id': 'sample00202', 'category': 'win_mirror', 'clip1': '02/00395', 'clip2': '02/00396', 'clip3': '02/00397', 'clip4': '02/00398', 'A_III': 'neutral', 'B_IV': 'neutral', 'RoleNet': 'neutral', 'PaperBest': 'angry', 'p_true_RoleNet': 0.455, 'p_true_PaperBest': 0.191}, {'sample_id': 'sample01306', 'category': 'fail_shift_rare', 'clip1': '21/00049', 'clip2': '21/00050', 'clip3': '21/00051', 'clip4': '21/00052', 'A_III': 'happy', 'B_IV': 'surprise', 'RoleNet': 'happy', 'PaperBest': 'happy', 'p_true_RoleNet': 0.028, 'p_true_PaperBest': 0.114}, {'sample_id': 'sample01619', 'category': 'fail_shift_rare', 'clip1': '28/00233', 'clip2': '28/00234', 'clip3': '28/00235', 'clip4': '28/00236', 'A_III': 'happy', 'B_IV': 'surprise', 'RoleNet': 'sad', 'PaperBest': 'happy', 'p_true_RoleNet': 0.047, 'p_true_PaperBest': 0.121}, {'sample_id': 'sample01082', 'category': 'fail_shift_rare', 'clip1': '16/00624', 'clip2': '16/00625', 'clip3': '16/00626', 'clip4': '16/00627', 'A_III': 'happy', 'B_IV': 'disgust', 'RoleNet': 'happy', 'PaperBest': 'angry', 'p_true_RoleNet': 0.097, 'p_true_PaperBest': 0.165}]
+
+G37 = [
+    ("markdown", r"""
+# G37 — Frames for the case-study / motivation figure (no model, no training)
+
+Renders frames of clips I–IV for the MCIS selected in `analysis/case_study_select.py` from the **saved** G10 test
+predictions (descriptive use, decided by the authors). Clip IV frames are shown only as illustration of the target
+turn; no model reads them. Two images per MCIS: a 4 × 3 grid (three frames per clip) and a one-row strip (middle frame
+of each clip) for the paper. Inputs: `hi-ef-dataset` only. CPU is enough.
+"""),
+    ("code", r"""
+import os, glob, textwrap
+import numpy as np, pandas as pd, cv2
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+OUT_DIR = "/kaggle/working/g37_frames"
+os.makedirs(OUT_DIR, exist_ok=True)
+PICK = """ + repr(_G37_PICK) + r"""
+roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
+VIDEO_ROOTS = [os.path.join(r, "video") for r in roots if os.path.isdir(os.path.join(r, "video"))]
+ANNOT_CSV = [os.path.join(r, "annotation.csv") for r in roots if os.path.exists(os.path.join(r, "annotation.csv"))][0]
+ann = pd.read_csv(ANNOT_CSV, header=None, dtype=str).set_index(0)
+print("video roots:", VIDEO_ROOTS, "| MCIS to render:", len(PICK))
+
+
+def video_path(clip):
+    ep, num = clip.split('/')
+    for root in VIDEO_ROOTS:
+        for ext in ('.mp4', '.avi', '.mkv', '.mov'):
+            p = os.path.join(root, ep, num + ext)
+            if os.path.exists(p):
+                return p
+    return None
+
+
+def frames(clip, n=3):
+    p = video_path(clip)
+    if p is None:
+        return [np.zeros((180, 320, 3), np.uint8)] * n
+    cap = cv2.VideoCapture(p)
+    tot = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    out = []
+    for t in np.linspace(0.15, 0.85, n):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(t * (tot - 1)))
+        ok, fr = cap.read()
+        out.append(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB) if ok else np.zeros((180, 320, 3), np.uint8))
+    cap.release()
+    return out
+
+
+def text(c):
+    t = ann.at[c, 1] if c in ann.index else ''
+    return t if isinstance(t, str) else ''
+
+
+for s in PICK:
+    clips = [s['clip1'], s['clip2'], s['clip3'], s['clip4']]
+    F = [frames(c) for c in clips]
+    names = ['I (context)', 'II (context)', f"III (A: {s['A_III']})", f"IV (target B: {s['B_IV']})"]
+    fig, ax = plt.subplots(3, 4, figsize=(13, 6.2))
+    for k in range(4):
+        for j in range(3):
+            ax[j, k].imshow(F[k][j]); ax[j, k].axis('off')
+        ax[0, k].set_title(names[k] + "\n" + "\n".join(textwrap.wrap('"' + text(clips[k]) + '"', 38)[:2]), fontsize=8)
+    fig.suptitle(f"{s['sample_id']} [{s['category']}]  RoleNet: {s['RoleNet']} (p_true {s['p_true_RoleNet']})   "
+                 f"PaperBest: {s['PaperBest']} (p_true {s['p_true_PaperBest']})", fontsize=9)
+    fig.tight_layout(); fig.savefig(f"{OUT_DIR}/{s['sample_id']}_grid.png", dpi=130); plt.close(fig)
+    fig, ax = plt.subplots(1, 4, figsize=(13, 2.6))
+    for k in range(4):
+        ax[k].imshow(F[k][1]); ax[k].axis('off')
+        ax[k].set_title(names[k] + "\n" + "\n".join(textwrap.wrap('"' + text(clips[k]) + '"', 40)[:2]), fontsize=8)
+    fig.tight_layout(); fig.savefig(f"{OUT_DIR}/{s['sample_id']}_strip.png", dpi=200); plt.close(fig)
+    print("rendered", s['sample_id'], s['category'])
+pd.DataFrame(PICK).to_csv(f"{OUT_DIR}/picked.csv", index=False)
+print("saved to", OUT_DIR)
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -11622,6 +11706,7 @@ if __name__ == "__main__":
                         ("g34_hypothesis_queries_cv.ipynb", G34),
                         ("g35_group_emap_cv.ipynb", G35),
                         ("g36_resampling_cv_test.ipynb", G36),
+                        ("g37_case_frames.ipynb", G37),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

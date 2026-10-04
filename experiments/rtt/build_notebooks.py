@@ -8592,6 +8592,422 @@ print(f"[gold reference] copy A's label: UAR {uar7(yA_t, yt):.2f} | P(B | A_gold
 assert "fit_rows = np.where((DEV.split == 'train').values)[0]" in M3[13][1]
 assert "per-episode" not in M3[15][1] and "CI includes 0" in M3[15][1]
 
+# ---------------------------------------------------------------- G28: does training with L masked help under the same masking?
+G28 = [
+    ("markdown", r"""
+# G28 — Training RoleNet with masked listener features: adaptation and cost (5-fold CV, train+val, 10 seeds; test untouched)
+
+**Question.** If the listener's (L) face features are missing, does training RoleNet with the *same* kind of masking
+improve the forecast under that masking, and what does it cost on the data as they are? The architecture is unchanged;
+only the training policy differs. This is not a test of a new architecture.
+
+**Arms** (RoleNet `Full` of G13/G14, same folds, inner early-stop episodes and hyper-parameters; 10 seeds, same seed
+per fold for both arms):
+* `R-std` — RoleNet trained as before.
+* `R-mask` — **training matched to the evaluation masking**: for each training MCIS, with probability 0.5 one of the
+  conditions C1–C3 that *changes that MCIS* is drawn uniformly and applied; if none applies, the MCIS is left as is.
+  The actual masked share and the frequency of each condition are reported (the share is below 50% because some MCIS
+  have no L). A policy that does not help does not show that other policies cannot.
+
+**Masking conditions** (applied after role assignment, to the L face-token branch only):
+
+| Condition | What is removed | MCIS on which it is evaluated |
+|---|---|---|
+| C0 | nothing (data as they are) | all, and for each Ck also on exactly the Ck set |
+| C1 | all L face observations (clips I–III) | at least one L observation |
+| C2 | L in clip III, L history (I/II) kept | L in III **and** L in I or II |
+| C3 | L history (I/II), L in clip III kept | L in III **and** L in I or II |
+
+* The mask is applied to the frame mask **before** the face tokens are built, so the masked cells become the learned
+  *absent* token exactly like naturally missing cells, and the face auxiliary head sees the same masked tokens as the
+  main head.
+* Speech tokens, scene tokens (whole-frame and face CLIP features) and voice cues (which include per-role mouth–audio
+  synchrony) are **kept**. The intervention is therefore "missing role-specific face features of L", not "L was never
+  observed".
+* C1 and C3 give **presence patterns** that the role rule can also produce naturally (L exists only when clip III has at
+  least two identities, so L absent in III implies L absent everywhere). The masked MCIS are still artificial: e.g. after
+  C1 the voice cues may still carry L information, which a natural MCIS without L does not have. C2 creates a pattern
+  the role rule never produces (L in I/II without L in III).
+* Modality dropout (whole face branch / whole context branch, as in G8b) is kept identical in both arms. The share of
+  L-masked training MCIS that also had the whole face branch dropped (so the L mask had no effect on the main head) is
+  reported.
+
+**Checkpoint selection (differs from G13).** Both arms select the epoch by the same inner-dev criterion
+J_dev = 0.5·NLL(C0) + 0.5·mean_k NLL(Ck), each NLL(Ck) on the dev MCIS eligible for Ck (G13 used dev UAR on C0).
+`R-std` keeps its training, only the selection rule is G28's.
+
+**Estimand and interval (fixed before running).** NLL is the only primary metric.
+* NLL_{s,k}: mean NLL of seed s's probabilities on the Ck set under Ck.
+* **Δ_rec = (1/3S) Σ_k Σ_s [NLL^std_{s,k} − NLL^mask_{s,k}]** — mean of per-seed NLLs, not the NLL of the ensemble
+  (ensemble NLL is reported separately). Δ_rec > 0 means `R-mask` forecasts better under masking.
+* Interval: 2,000 bootstrap draws resampling the 10 seeds and the 45 episodes, with the **same** draws for both arms and
+  all three conditions; every quantity is recomputed per draw (C1–C3 are not treated as independent).
+* Secondary: Δ_clean = NLL^mask(C0) − NLL^std(C0) on all MCIS (> 0 = cost of masked training on the data as they are);
+  sensitivity_k = NLL^std(Ck) − NLL^std(C0) on the same Ck set; per-condition Δ_rec,k; UAR (descriptive).
+* Recovery share Δ_rec,k / sensitivity_k is reported only when the sensitivity's CI lower bound is > 0; it is not a share
+  of "recovered information".
+
+**Reading rules (fixed before running).**
+
+| Result | Allowed conclusion |
+|---|---|
+| CI of Δ_rec entirely > 0 | masked training helps adaptation to the interventions tried |
+| CI of Δ_rec contains 0 | not shown that this policy helps; **cannot tell** whether the drop under masking is mostly lost evidence or lack of adaptation |
+| CI of Δ_rec entirely < 0 | this policy makes the forecast under masking worse |
+
+A positive Δ_rec together with a Δ_clean whose CI is above 0 is a trade-off, not robustness without cost.
+
+**Auxiliary analysis (not a gate).** Do the 9 presence flags (A/L/O × I/II/III, after role assignment) forecast B's
+emotion better than the training-fold prior? Regularised logistic regression (C chosen inside the training fold by
+grouped inner CV) and the same with pairwise flag interactions; out-of-fold by episode; ΔNLL vs prior with an episode
+bootstrap. A gain only shows an association of the presence pattern with the label, not that it adds information
+beyond the observed content.
+"""),
+    ("code", G13[1][1]
+        .replace("SEEDS = [42, 123, 456]                       # as G8b / G11 / G12",
+                 "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14")
+        .split("ARMS = [")[0] + """ARMS = ['R-std', 'R-mask']
+EXPERIMENTS = [("RoleNet", 'role', FULL)]    # only used by the shared model cell's parameter print
+P_MASK, N_BOOT = 0.5, 2000
+LR_GRID = [0.01, 0.1, 1.0, 10.0]             # auxiliary presence analysis
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Presence patterns and the MCIS sets of C1–C3"),
+    ("code", r"""
+PRES = FMASK.any(-1).cpu().numpy()                    # [N, role A/L/O, clip I/II/III]
+L_any, L3, L12 = PRES[:, 1].any(-1), PRES[:, 1, 2], PRES[:, 1, :2].any(-1)
+ELIG = np.stack([L_any, L3 & L12, L3 & L12], 1)      # C1, C2, C3
+COND = ['C1 no L', 'C2 no L-III (history kept)', 'C3 no L history (L-III kept)']
+for k in range(3):
+    print(f"{COND[k]:<32} eligible MCIS {ELIG[:, k].sum():5d} ({ELIG[:, k].mean() * 100:.1f}%)")
+print("role-rule checks (expected 0): L in I/II without L in III", int((L12 & ~L3).sum()),
+      "| O in III without L in III", int((PRES[:, 2, 2] & ~L3).sum()))
+pat = pd.Series([' '.join(r + ':' + ''.join(str(int(x)) for x in PRES[i, j]) for j, r in enumerate('ALO'))
+                 for i in range(N)])
+vc = pat.value_counts()
+print(f"\n{len(vc)} distinct presence patterns (A/L/O, clips I II III); most frequent:")
+print((vc.head(15) / N * 100).round(1).to_string())
+ELIG_T = T(ELIG)
+"""),
+    ("markdown", "## Auxiliary analysis: do the presence flags forecast B's emotion? (logistic, out-of-fold)"),
+    ("code", r"""
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import PolynomialFeatures
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+print("fold sizes (MCIS):", load_)
+
+X9 = PRES.reshape(N, 9).astype(float)
+X_int = PolynomialFeatures(2, interaction_only=True, include_bias=False).fit_transform(X9)
+
+
+def lr_proba(Xtr, ytr, Xte, C):
+    m = LogisticRegression(C=C, max_iter=5000).fit(Xtr, ytr)
+    out = np.full((len(Xte), 7), 1e-6)
+    out[:, m.classes_] = m.predict_proba(Xte)
+    return out / out.sum(1, keepdims=True)
+
+
+def nll_rows(p, y):
+    return -np.log(np.clip(p[np.arange(len(y)), y], 1e-7, None))
+
+
+PRES_OOF = {k: np.zeros((N, 7)) for k in ('prior', 'flags', 'flags+pairs')}
+CHOSEN = {'flags': [], 'flags+pairs': []}
+for f in range(N_OUTER):
+    tr, te = fold_of_row != f, fold_of_row == f
+    cnt = np.bincount(y_all[tr], minlength=7) + 1.0
+    PRES_OOF['prior'][te] = cnt / cnt.sum()
+    for name, X in (('flags', X9), ('flags+pairs', X_int)):
+        gkf = GroupKFold(5)
+        score = {}
+        for C in LR_GRID:
+            s = []
+            for a, b in gkf.split(X[tr], y_all[tr], src[tr]):
+                s.append(nll_rows(lr_proba(X[tr][a], y_all[tr][a], X[tr][b], C), y_all[tr][b]).mean())
+            score[C] = np.mean(s)
+        C = min(score, key=score.get)
+        CHOSEN[name].append(C)
+        PRES_OOF[name][te] = lr_proba(X[tr], y_all[tr], X[te], C)
+print("C chosen per fold:", CHOSEN)
+
+NLLP = {k: nll_rows(v, y_all) for k, v in PRES_OOF.items()}
+groups = [np.where(src == e)[0] for e in np.unique(src)]
+rng = np.random.default_rng(0)
+for name in ('flags', 'flags+pairs'):
+    d = NLLP[name] - NLLP['prior']
+    bs = [d[np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])].mean() for _ in range(N_BOOT)]
+    lo, hi = np.percentile(bs, [2.5, 97.5])
+    print(f"  {name:<12} NLL {NLLP[name].mean():.4f} vs prior {NLLP['prior'].mean():.4f} | "
+          f"ΔNLL (model − prior) {d.mean():+.4f} [{lo:+.4f}, {hi:+.4f}]"
+          + ("  -> presence pattern is associated with the label" if hi < 0 else ""))
+"""),
+    ("markdown", "## RoleNet with L masking applied before the face tokens"),
+    ("code", r"""
+def apply_cond(m, cond):
+    # m: [B, 3, 3, F] frame mask (role, clip, frame); cond: [B] in {0 none, 1 C1, 2 C2, 3 C3}
+    m = m.clone()
+    m[cond == 1, 1] = False                  # C1: L, all clips
+    m[cond == 2, 1, 2] = False               # C2: L in clip III
+    m[cond == 3, 1, :2] = False              # C3: L in clips I/II
+    return m
+
+
+class RoleNetMask(RoleNet):
+    # RoleNet (G8b, all switches on) whose L frame mask can be changed per sample before pooling; the masked cells
+    # become the absent token, and the face auxiliary head sees the same tokens as the main head.
+    def forward(self, ix, train=False, cond=None):
+        B, aux = len(ix), {}
+        m = FMASK[ix] if cond is None else apply_cond(FMASK[ix], cond)
+        h, present = self.pool(FACE[ix], m)                                   # [B, 3, 3, d]
+        h = torch.where(present.unsqueeze(-1), h, self.absent.unsqueeze(0).expand(B, -1, -1, -1))
+        h = h + self.face_role[None, :, None] + self.clip_emb[None, None]
+        ft = h.reshape(B, 9, -1)
+        aux['face'] = (self.head_face(ft.mean(1)), YB[ix], RN['aux_w'])
+        tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+        aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])
+        spk_ = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
+        scn = self.scene(SCN[ix]) + self.ctx_role[1]
+        ct = torch.cat([spk_ + self.clip_emb, scn + self.clip_emb], 1)         # [B, 6, d]
+        aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
+        toks = torch.cat([self.query.expand(B, -1, -1), ft, ct], 1)
+        valid = torch.ones(toks.shape[:2], dtype=torch.bool, device=toks.device)
+        self.last_drop_face = None
+        if train:
+            u = torch.rand(B, device=toks.device)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+            valid[:, 1:10] &= ~drop_face.unsqueeze(1)
+            valid[:, 10:] &= ~drop_ctx.unsqueeze(1)
+            self.last_drop_face = drop_face
+        out = self.enc(toks, src_key_padding_mask=~valid)
+        return self.head(out[:, 0]), aux
+
+
+def draw_cond(j):
+    # R-mask: with prob. P_MASK pick uniformly one condition that changes this MCIS; none applicable -> unchanged
+    el = ELIG_T[j]
+    do = (torch.rand(len(j), device=DEVICE) < P_MASK) & el.any(1)
+    w = el.float() + (~el.any(1, keepdim=True)).float()
+    pick = torch.multinomial(w, 1).squeeze(1) + 1
+    return torch.where(do, pick, torch.zeros_like(pick))
+
+
+def predict_c(model, ix, k, bs=256):
+    model.eval()
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(ix), bs):
+            j = ix[i:i + bs]
+            out.append(F.softmax(model(j, cond=torch.full((len(j),), k, dtype=torch.long, device=DEVICE))[0], -1).cpu())
+    return torch.cat(out).numpy()
+
+
+def nll_mean(p, y):
+    return float(-np.log(np.clip(p[np.arange(len(y)), y], 1e-7, None)).mean())
+
+
+def train_eval_g28(arm, tr, dev, te, seed):
+    seed_all(seed)
+    hp = HP['role']
+    model = RoleNetMask(FULL).to(DEVICE)
+    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    y_dev = YB[dev].cpu().numpy()
+    el_dev = ELIG[dev.cpu().numpy()]
+    st = {'n': 0, 'masked': 0, 'C1': 0, 'C2': 0, 'C3': 0, 'masked_and_facedrop': 0}
+    best, best_state, bad, best_ep = np.inf, None, 0, -1
+    for ep in range(hp['epochs']):
+        model.train()
+        perm = tr[torch.randperm(len(tr), device=DEVICE)]
+        for i in range(0, len(perm), hp['batch']):
+            j = perm[i:i + hp['batch']]
+            cond = draw_cond(j)                       # drawn in both arms so that their random streams stay aligned
+            if arm == 'R-std':
+                cond = torch.zeros_like(cond)
+            logits, aux = model(j, train=True, cond=cond)
+            st['n'] += len(j); st['masked'] += int((cond > 0).sum())
+            for k in (1, 2, 3):
+                st[f'C{k}'] += int((cond == k).sum())
+            st['masked_and_facedrop'] += int(((cond > 0) & model.last_drop_face).sum())
+            loss = F.cross_entropy(logits, YB[j])
+            for l, t, w in aux.values():
+                if (t >= 0).any():
+                    loss = loss + w * F.cross_entropy(l, t, ignore_index=-100)
+            opt.zero_grad(); loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        terms = [nll_mean(predict_c(model, dev[torch.tensor(el_dev[:, k - 1], device=DEVICE)], k), y_dev[el_dev[:, k - 1]])
+                 for k in (1, 2, 3) if el_dev[:, k - 1].any()]
+        J = 0.5 * nll_mean(predict_c(model, dev, 0), y_dev) + 0.5 * (np.mean(terms) if terms else 0.0)
+        if J < best:
+            best, bad, best_ep = J, 0, ep
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= hp['patience']:
+                break
+    model.load_state_dict(best_state)
+    probs = np.stack([predict_c(model, te, k) for k in range(4)])         # [4 conditions, n_te, 7]
+    return probs, best, best_ep, st, int(el_dev.any(0).sum())
+
+
+print("parameters:", f"{sum(p.numel() for p in RoleNetMask(FULL).parameters()) / 1e6:.3f}M")
+"""),
+    ("markdown", "## 5-fold episode cross-validation (same folds, early-stop episodes and seeds as G14)"),
+    ("code", r"""
+import re
+
+OOF = {a: np.full((len(SEEDS), 4, N, 7), np.nan, np.float32) for a in ARMS}
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)} | dev MCIS eligible for "
+          f"C1/C2/C3 {ELIG[dev_rows].sum(0).tolist()}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for arm in ARMS:
+        for si, seed in enumerate(SEEDS):
+            p, J, ep, st, n_terms = train_eval_g28(arm, tr, dev, te, seed + 1000 * f)
+            OOF[arm][si][:, te_rows] = p
+            yt = y_all[te_rows]
+            log.append({'fold': f, 'arm': arm, 'seed': seed, 'J_dev': J, 'best_epoch': ep, 'dev_cond_terms': n_terms,
+                        **{f'NLL_C{k}': nll_mean(p[k], yt) for k in range(4)}, **st})
+            print(f"fold {f} {arm:<6} seed {seed:>3}: J_dev {J:.4f} (epoch {ep}) | NLL C0 {nll_mean(p[0], yt):.4f} | "
+                  f"masked {st['masked'] / max(st['n'], 1) * 100:4.1f}% of training draws | "
+                  f"{(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+
+assert all(not np.isnan(v).any() for v in OOF.values())
+LOG = pd.DataFrame(log)
+LOG.to_csv(f"{OUT_DIR}/g28_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g28_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
+         presence=PRES, eligible=ELIG, presence_oof_prior=PRES_OOF['prior'], presence_oof_flags=PRES_OOF['flags'],
+         presence_oof_pairs=PRES_OOF['flags+pairs'], **{re.sub(r'[^0-9A-Za-z]+', '_', a): v for a, v in OOF.items()})
+print("saved g28_oof_probs.npz (arm arrays: [seed, condition C0..C3, MCIS, 7]) and g28_fold_seed_log.csv")
+"""),
+    ("markdown", "## Masking actually applied during training"),
+    ("code", r"""
+m = LOG[LOG.arm == 'R-mask']
+tot = m[['n', 'masked', 'C1', 'C2', 'C3', 'masked_and_facedrop']].sum()
+print(f"R-mask: masked share of training draws {tot.masked / tot.n * 100:.1f}% (nominal {P_MASK * 100:.0f}%, lower because "
+      f"some MCIS have no applicable condition)")
+print("  condition frequency among masked draws:", {k: f"{tot[k] / max(tot.masked, 1) * 100:.1f}%" for k in ('C1', 'C2', 'C3')})
+print(f"  masked draws whose whole face branch was also dropped by modality dropout: "
+      f"{tot.masked_and_facedrop / max(tot.masked, 1) * 100:.1f}% (the L mask had no effect on the main head there)")
+print("  R-std masked draws:", int(LOG[LOG.arm == 'R-std'].masked.sum()), "(expected 0)")
+print("  best epoch per arm (mean):", LOG.groupby('arm').best_epoch.mean().round(1).to_dict())
+"""),
+    ("markdown", "## Results (fixed estimand: mean of per-seed NLL; two-level bootstrap with shared draws)"),
+    ("code", r"""
+S = len(SEEDS)
+LOSS = {a: -np.log(np.clip(np.take_along_axis(OOF[a], y_all[None, None, :, None], -1)[..., 0], 1e-7, None))
+        for a in ARMS}                                                   # [S, 4, N]
+SETS = [np.ones(N, bool), ELIG[:, 0], ELIG[:, 1], ELIG[:, 2]]          # evaluation set of C0 (all), C1, C2, C3
+
+
+def quantities(sidx, w):
+    # every reported quantity for one draw: seeds sidx (indices into SEEDS), row weights w (episode multiplicities)
+    M = {a: LOSS[a][sidx].mean(0) for a in ARMS}                        # mean over drawn seeds, [4, N]
+    nll = lambda a, k, s: float((M[a][k] * w * s).sum() / max((w * s).sum(), 1e-12))
+    q = {}
+    for k in (1, 2, 3):
+        s = SETS[k]
+        q[f'drec_C{k}'] = nll('R-std', k, s) - nll('R-mask', k, s)
+        q[f'sens_C{k}'] = nll('R-std', k, s) - nll('R-std', 0, s)
+        q[f'sens_mask_C{k}'] = nll('R-mask', k, s) - nll('R-mask', 0, s)
+        q[f'clean_on_C{k}'] = nll('R-mask', 0, s) - nll('R-std', 0, s)
+        q[f'std_C{k}'], q[f'mask_C{k}'] = nll('R-std', k, s), nll('R-mask', k, s)
+    q['drec'] = np.mean([q[f'drec_C{k}'] for k in (1, 2, 3)])
+    q['dclean'] = nll('R-mask', 0, SETS[0]) - nll('R-std', 0, SETS[0])
+    q['std_C0'], q['mask_C0'] = nll('R-std', 0, SETS[0]), nll('R-mask', 0, SETS[0])
+    return q
+
+
+point = quantities(np.arange(S), np.ones(N))
+rng = np.random.default_rng(0)
+gidx = [np.where(src == e)[0] for e in np.unique(src)]
+draws = []
+for _ in range(N_BOOT):
+    w = np.zeros(N)
+    for i in rng.integers(0, len(gidx), len(gidx)):
+        w[gidx[i]] += 1
+    draws.append(quantities(rng.integers(0, S, S), w))
+D = pd.DataFrame(draws)
+CI = {k: np.percentile(D[k], [2.5, 97.5]) for k in D}
+
+
+def show(k, label):
+    lo, hi = CI[k]
+    print(f"  {label:<58} {point[k]:+.4f} [{lo:+.4f}, {hi:+.4f}]")
+
+
+print(f"NLL (mean of per-seed NLL), C0 all MCIS: R-std {point['std_C0']:.4f} | R-mask {point['mask_C0']:.4f}")
+for k in (1, 2, 3):
+    print(f"  {COND[k - 1]:<32} n={SETS[k].sum():4d}: R-std {point[f'std_C{k}']:.4f} | R-mask {point[f'mask_C{k}']:.4f}")
+print("\n== primary ==")
+show('drec', "Δ_rec = mean_k,s [NLL_std − NLL_mask] under C1–C3")
+print("\n== secondary ==")
+show('dclean', "Δ_clean = NLL_mask − NLL_std on C0, all MCIS (> 0 = cost)")
+for k in (1, 2, 3):
+    show(f'drec_C{k}', f"Δ_rec,{k} ({COND[k - 1]})")
+for k in (1, 2, 3):
+    show(f'sens_C{k}', f"sensitivity R-std, C{k} − C0 on the C{k} set")
+    show(f'sens_mask_C{k}', f"sensitivity R-mask, C{k} − C0 on the C{k} set")
+    show(f'clean_on_C{k}', f"NLL_mask − NLL_std under C0 on the C{k} set")
+print("\n== recovery share (only where the sensitivity CI lower bound > 0) ==")
+for k in (1, 2, 3):
+    if CI[f'sens_C{k}'][0] > 0:
+        r = D[f'drec_C{k}'] / D[f'sens_C{k}']
+        lo, hi = np.percentile(r, [2.5, 97.5])
+        print(f"  C{k}: {point[f'drec_C{k}'] / point[f'sens_C{k}']:.2f} [{lo:.2f}, {hi:.2f}]  (not a share of recovered information)")
+    else:
+        print(f"  C{k}: not reported (sensitivity CI includes 0 or is negative); see the two NLL differences above")
+
+lo, hi = CI['drec']
+verdict = ('MASKED TRAINING HELPS ADAPTATION to the interventions tried' if lo > 0 else
+           'MASKED TRAINING MAKES THE FORECAST UNDER MASKING WORSE' if hi < 0 else
+           'NOT SHOWN that this policy helps; cannot tell lost evidence from lack of adaptation')
+print(f"\n== G28 reading (fixed rule): {verdict} ==")
+if lo > 0 and CI['dclean'][0] > 0:
+    print("   with a cost on the data as they are (Δ_clean CI above 0): a trade-off, not robustness without cost")
+
+print("\n== descriptive: UAR (per-seed mean / 10-seed ensemble) and ensemble NLL ==")
+rows = []
+for a in ARMS:
+    for k in range(4):
+        s = SETS[k]
+        per = [war_uar(OOF[a][si, k, s].argmax(1), y_all[s], 7)[1] for si in range(S)]
+        ens = OOF[a][:, k, s].mean(0)
+        rows.append({'arm': a, 'condition': ['C0', 'C1', 'C2', 'C3'][k],
+                     'n': int(s.sum()), 'UAR_seed_mean': np.mean(per), 'UAR_ensemble': war_uar(ens.argmax(1), y_all[s], 7)[1],
+                     'NLL_seed_mean': LOSS[a][:, k, s].mean(), 'NLL_ensemble': nll_mean(ens, y_all[s])})
+SUM = pd.DataFrame(rows)
+print(SUM.round(4).to_string(index=False))
+SUM.to_csv(f"{OUT_DIR}/g28_summary.csv", index=False)
+pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point', 'lo', 'hi']).T.to_csv(
+    f"{OUT_DIR}/g28_estimands.csv")
+print("saved g28_summary.csv and g28_estimands.csv")
+"""),
+]
+assert "train_eval(" not in G28[-3][1] and "G13" in G28[0][1]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -8616,6 +9032,7 @@ if __name__ == "__main__":
                         ("g26a_clip4_faces.ipynb", G26A),
                         ("g26_responder_pointer_cv.ipynb", G26),
                         ("g27_mention_aggregation_pilot.ipynb", G27),
+                        ("g28_masked_listener_training_cv.ipynb", G28),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

@@ -11,6 +11,12 @@ D = os.environ.get('G10_DIR', '.')
 ld = lambda n: np.load(os.path.join(D, f'{n}.npy'), allow_pickle=True)
 sid = ld('sample_id')
 P = {k: ld(f).mean(0) for k, f in (('RoleNet', 'RoleNet'), ('Baseline', 'PaperBest'), ('noRole', 'RoleNet_noRole'))}
+G36 = os.environ.get('G36_DIR')
+if G36 and os.path.exists(os.path.join(G36, 'g36_test_probs.npz')):      # final class-resampled model replaces RoleNet
+    t36 = np.load(os.path.join(G36, 'g36_test_probs.npz'), allow_pickle=True)
+    pos = {s_: i for i, s_ in enumerate(t36['sample_id'])}
+    P['RoleNet'] = t36[str(t36['selected']).replace('-', '_')][:, [pos[s_] for s_ in sid]].mean(0)
+    print("RoleNet = G36 selected arm:", t36['selected'])
 ann = pd.read_csv(os.environ['ANNOT'], header=None, dtype=str).set_index(0)
 sp = pd.read_csv(os.environ['SPLIT'], dtype=str).set_index('sample_id').loc[sid]
 yB, yA = sp.clip4_emotion.map(E2I).values, sp.clip3_emotion.map(E2I).values

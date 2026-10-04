@@ -9008,6 +9008,319 @@ print("saved g28_summary.csv and g28_estimands.csv")
 assert "train_eval(" not in G28[-3][1] and "G13" in G28[0][1]
 
 
+# ---------------------------------------------------------------- G29: context-conditioned evidence pooling before compression
+G29 = [
+    ("markdown", r"""
+# G29 — Context-conditioned face-evidence pooling before compression (5-fold CV, train+val, 10 seeds; test untouched)
+
+**Question.** RoleNet compresses the frames of each (role, clip) cell into one token with FramePool, whose frame scores
+depend on the frame alone: h_t = φ(x_t), a_t = softmax_t(wᵀh_t), f = Σ a_t h_t. The Transformer sees context only after
+this choice. Does letting the context choose the frames (before compression) help the forecast, compared with a
+stronger context-free pooling and with adding the same context after pooling?
+
+**Arms** (same folds, inner early-stop episodes, hyper-parameters, frame budget MAXF and 9 face tokens as G14; the
+same φ = FramePool's projection; absent cells use the learned absent token in every arm):
+
+| Arm | Cell token f_{r,k} | Role |
+|---|---|---|
+| `P0` | FramePool: softmax_t(wᵀh_t) | current RoleNet |
+| `P1` | mean_t h_t (same φ) | does the current frame selection matter? |
+| `P2` | softmax_t(MLP(h_t)), MLP = d→d_a→d_a→1 with tanh, d_a = d | stronger context-free scorer, scorer size matched to P4 |
+| `P3` | softmax_t(vᵀtanh(W_h h_t + b)) pooled, **then** f + U c_{r,k} on observed cells | context after pooling |
+| `P4` | softmax_t(vᵀtanh(W_h h_t + W_c c_{r,k} + b)) pooled; values stay h_t | **context in the frame scores** (proposed) |
+| `R` | no cell pooling: every frame token h_t + e_r + e_k (and one absent token per empty cell) enters the Transformer | reference "no compression" |
+
+**Context code c_{r,k} (P3 and P4, identical module g_θ).** Preliminary cell summaries h̄_{r,k} = mean_t h_t (absent token
+if empty) + e_r + e_k, together with the 6 speech/scene tokens of clips I–III, go through **one** pre-norm Transformer
+layer (d = 128, 4 heads, FFN 2d); c_{r,k} is its output at cell (r,k). Modality dropout is drawn **before** g_θ, and
+g_θ does not read a dropped branch. W_c (P4) and U (P3) are zero-initialised and the scorer (W_h, b, v) is shared in
+form, so P3 and P4 start as the same function and differ only in where the context enters. The post-pooling map in P3
+(U, d×d) and the score map in P4 (W_c, d×d_a) have the same size; this is a controlled comparison, not a perfect
+isolation, because a context term added to the token can also change content while P4 only reweights frames.
+
+* **Auxiliary heads** (face, A) read the pooled cell token **before** any post-pooling context term (P3: f, not
+  f + U c). In P4 that token is a context-weighted average of the same frame values. In R they read the cell means h̄.
+* A cell with a single observation gives the same token under any normalised pooling, so P4 can only change cells
+  with ≥ 2 frames; their share is reported in step 0.
+* R uses exactly the frames of P0–P4 (MAXF per cell), the same φ, role/clip embeddings and absent handling.
+
+**Checkpoint selection:** the G14 rule for every arm (UAR on the inner-dev episodes, same patience and maximum epochs).
+
+**Estimand and interval (fixed before running).** NLL is the only deciding metric: NLL_{s,a} = mean NLL of seed s's
+out-of-fold probabilities of arm a over all 2,421 MCIS; quantities are means of per-seed NLL (not the ensemble NLL).
+* **Δ_43 = NLL(P3) − NLL(P4)** and **Δ_42 = NLL(P2) − NLL(P4)** (positive = P4 better).
+* Interval: 2,000 bootstrap draws resampling the 10 seeds and the 45 episodes, the same draws for all arms.
+* **Main hypothesis confirmed only if both CIs are entirely above 0.**
+* Reported in every case (no further winning rule): NLL(P0) − NLL(P4), NLL(R) − NLL(P4), NLL(P1) − NLL(P0),
+  per-arm UAR (descriptive), training time and peak GPU memory per run. If the main hypothesis is confirmed, the
+  report says whether P4 is also better than, indistinguishable from, or worse than the current RoleNet (P0) by the CI
+  of NLL(P0) − NLL(P4); only "better" allows calling P4 an improvement of RoleNet.
+
+**Step 0 (descriptive only, not a gate).** Observations per cell by role (0 / 1 / 2 / > 2), share of cells P4 can
+reweight, and the within-cell share of variance (within / (within + between cells), per dimension, averaged) separately
+for the HSEmotion PCA block and the 18 geometric features. O can hold several people, so its within-cell variance is not
+purely temporal.
+"""),
+    ("code", G13[1][1]
+        .replace("SEEDS = [42, 123, 456]                       # as G8b / G11 / G12",
+                 "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14")
+        .split("ARMS = [")[0] + """ARMS = ['P0', 'P1', 'P2', 'P3', 'P4', 'R']
+EXPERIMENTS = [("RoleNet", 'role', FULL)]    # only used by the shared model cell's parameter print
+N_BOOT = 2000
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Step 0 — observations per cell (descriptive)"),
+    ("code", r"""
+NOBS = FMASK.sum(-1).cpu().numpy()                     # [N, role, clip] frames kept per cell
+rows = []
+for r, name in enumerate('ALO'):
+    v = NOBS[:, r].ravel()
+    rows.append({'role': name, '0': (v == 0).mean(), '1': (v == 1).mean(), '2': (v == 2).mean(), '>2': (v > 2).mean(),
+                 'mean frames | observed': v[v > 0].mean() if (v > 0).any() else np.nan})
+print("share of (MCIS, clip) cells by number of kept frames:")
+print(pd.DataFrame(rows).round(3).to_string(index=False))
+print(f"cells P4 can reweight (>= 2 frames): {(NOBS >= 2).mean() * 100:.1f}% of all cells, "
+      f"{(NOBS >= 2).sum() / max((NOBS >= 1).sum(), 1) * 100:.1f}% of observed cells; "
+      f"MCIS with no such cell: {((NOBS >= 2).sum((1, 2)) == 0).mean() * 100:.1f}%")
+"""),
+    ("markdown", "## Pooling variants"),
+    ("code", r"""
+class RoleNetPool(RoleNet):
+    # RoleNet (G8b, all switches on) with the cell pooling chosen by `arm`; the rest of the model is unchanged.
+    def __init__(self, arm, d=RN['D']):
+        super().__init__(FULL, d)
+        self.arm, da = arm, d
+        self.score2 = nn.Sequential(nn.Linear(d, da), nn.Tanh(), nn.Linear(da, da), nn.Tanh(), nn.Linear(da, 1))   # P2
+        self.Wh, self.v = nn.Linear(d, da), nn.Linear(da, 1, bias=False)                                            # P3, P4
+        self.Wc = nn.Linear(d, da, bias=False)                                                                      # P4
+        self.U = nn.Linear(d, d, bias=False)                                                                        # P3
+        nn.init.zeros_(self.Wc.weight); nn.init.zeros_(self.U.weight)
+        layer = nn.TransformerEncoderLayer(d, RN['heads'], 2 * d, RN['dropout'], batch_first=True, norm_first=True)
+        self.g = nn.TransformerEncoder(layer, 1, enable_nested_tensor=False)                                       # P3, P4
+        used = {'P0': ['pool.score'], 'P1': [], 'P2': ['score2'], 'P3': ['Wh', 'v', 'U', 'g'],
+                'P4': ['Wh', 'v', 'Wc', 'g'], 'R': []}[arm]
+        extra = ['pool.score', 'score2', 'Wh', 'v', 'Wc', 'U', 'g']
+        self.unused = [e for e in extra if e not in used]
+
+    def active_params(self):
+        return sum(p.numel() for n, p in self.named_parameters() if not any(n.startswith(u + '.') for u in self.unused))
+
+    @staticmethod
+    def attend(s, h, m):
+        a = s.squeeze(-1).masked_fill(~m, -1e4)
+        w = torch.softmax(a, -1) * m.float()
+        return (w.unsqueeze(-1) * h).sum(-2)
+
+    def forward(self, ix, train=False):
+        B, arm, aux = len(ix), self.arm, {}
+        x, m = FACE[ix], FMASK[ix]                                            # [B, 3, 3, F, fin], [B, 3, 3, F]
+        h = self.pool.proj(x.float())                                        # shared φ, [B, 3, 3, F, d]
+        present = m.any(-1)
+        mf = m.float().unsqueeze(-1)
+        hbar = (h * mf).sum(-2) / mf.sum(-2).clamp(min=1)                    # [B, 3, 3, d]
+        absent = self.absent.unsqueeze(0).expand(B, -1, -1, -1)
+        emb = self.face_role[None, :, None] + self.clip_emb[None, None]
+        spk_ = self.text(TXT[ix]) + self.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + self.voice(VOI[ix]) + self.ctx_role[0]
+        scn = self.scene(SCN[ix]) + self.ctx_role[1]
+        ct = torch.cat([spk_ + self.clip_emb, scn + self.clip_emb], 1)        # [B, 6, d]
+        drop_face = drop_ctx = torch.zeros(B, dtype=torch.bool, device=DEVICE)
+        if train:                                                             # modality dropout, drawn before g_θ
+            u = torch.rand(B, device=DEVICE)
+            drop_ctx = u < RN['p_drop_ctx']
+            drop_face = (u >= RN['p_drop_ctx']) & (u < RN['p_drop_ctx'] + RN['p_drop_face'])
+        prelim = (torch.where(present.unsqueeze(-1), hbar, absent) + emb).reshape(B, 9, -1)
+        if arm in ('P3', 'P4'):
+            kpm = torch.cat([drop_face.unsqueeze(1).expand(-1, 9), drop_ctx.unsqueeze(1).expand(-1, 6)], 1)
+            c = self.g(torch.cat([prelim, ct], 1), src_key_padding_mask=kpm)[:, :9].reshape(B, 3, 3, -1)
+        if arm == 'P0':
+            f = self.attend(self.pool.score(h), h, m)
+        elif arm in ('P1', 'R'):
+            f = hbar
+        elif arm == 'P2':
+            f = self.attend(self.score2(h), h, m)
+        elif arm == 'P3':
+            f = self.attend(self.v(torch.tanh(self.Wh(h))), h, m)
+        else:
+            f = self.attend(self.v(torch.tanh(self.Wh(h) + self.Wc(c).unsqueeze(-2))), h, m)
+        cell = torch.where(present.unsqueeze(-1), f, absent) + emb            # pooled token before any context term
+        aux['face'] = (self.head_face(cell.reshape(B, 9, -1).mean(1)), YB[ix], RN['aux_w'])
+        tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))
+        aux['A'] = (self.head_A(cell[:, 0, 2]), tA, RN['a_w'])
+        aux['ctx'] = (self.head_ctx(ct.mean(1)), YB[ix], RN['aux_w'])
+        if arm == 'P3':
+            cell = cell + torch.where(present.unsqueeze(-1), self.U(c), torch.zeros_like(c))
+        if arm == 'R':
+            fr = (h + emb.unsqueeze(-2)).reshape(B, -1, h.shape[-1])          # every kept frame is a token
+            ab = (absent + emb).reshape(B, 9, -1)
+            face_toks = torch.cat([fr, ab], 1)
+            vf = torch.cat([m.reshape(B, -1), ~present.reshape(B, 9)], 1)
+        else:
+            face_toks, vf = cell.reshape(B, 9, -1), torch.ones(B, 9, dtype=torch.bool, device=DEVICE)
+        vf = vf & ~drop_face.unsqueeze(1)
+        vc = torch.ones(B, 6, dtype=torch.bool, device=DEVICE) & ~drop_ctx.unsqueeze(1)
+        toks = torch.cat([self.query.expand(B, -1, -1), face_toks, ct], 1)
+        valid = torch.cat([torch.ones(B, 1, dtype=torch.bool, device=DEVICE), vf, vc], 1)
+        out = self.enc(toks, src_key_padding_mask=~valid)
+        return self.head(out[:, 0]), aux
+
+
+for a in ARMS:
+    MAKE[a] = (lambda arm: (lambda cfg: RoleNetPool(arm)))(a)
+    HP[a] = HP['role']
+print("active parameters:", {a: f"{RoleNetPool(a).active_params() / 1e6:.3f}M" for a in ARMS})
+_m = RoleNetPool('P4')
+print("P4 scorer:", sum(p.numel() for n in ('Wh', 'v', 'Wc') for p in getattr(_m, n).parameters()),
+      "| P2 scorer:", sum(p.numel() for p in _m.score2.parameters()),
+      "| P3 scorer + U:", sum(p.numel() for n in ('Wh', 'v', 'U') for p in getattr(_m, n).parameters()),
+      "| g_θ:", sum(p.numel() for p in _m.g.parameters()))
+"""),
+    ("markdown", "## 5-fold episode cross-validation (same folds, early-stop episodes and seeds as G14)"),
+    ("code", r"""
+import re
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_)
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+
+
+def variance_share(Fn, M, dims):
+    # within-cell share of variance per dimension, averaged over dimensions; cells with >= 2 frames for 'within'
+    out = {}
+    for r, name in enumerate('ALO'):
+        X, mk = Fn[:, r][..., dims].reshape(-1, Fn.shape[3], len(dims)), M[:, r].reshape(-1, Fn.shape[3])
+        cnt = mk.sum(1)
+        obs = cnt >= 1
+        mu = (X * mk[..., None]).sum(1) / np.maximum(cnt, 1)[:, None]
+        multi = cnt >= 2
+        if multi.sum() < 10:
+            out[name] = np.nan; continue
+        dev_ = ((X - mu[:, None]) ** 2 * mk[..., None]).sum(1)
+        within = (dev_[multi] / (cnt[multi, None] - 1)).mean(0)
+        between = mu[obs].var(0)
+        out[name] = float(np.mean(within / np.maximum(within + between, 1e-12)))
+    return out
+
+
+OOF = {a: np.full((len(SEEDS), N, 7), np.nan, np.float32) for a in ARMS}
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    if f == 0:                                                            # step 0, descriptive (fold-0 PCA)
+        Fn, Mn = FACE.float().cpu().numpy(), FMASK.cpu().numpy()
+        emo = list(range(PCA_DIM)) if HAS_EMB else []
+        geo = list(range(FDIM - 18, FDIM))
+        if emo:
+            print("step 0, within-cell share of variance, HSEmotion PCA block:", variance_share(Fn, Mn, emo))
+        print("step 0, within-cell share of variance, geometric block:     ", variance_share(Fn, Mn, geo))
+        del Fn
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for a in ARMS:
+        for si, seed in enumerate(SEEDS):
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(); torch.cuda.reset_peak_memory_stats()
+            t1 = time.time()
+            p, sel = train_eval(a, FULL, tr, dev, te, seed + 1000 * f)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            OOF[a][si, te_rows] = p
+            yt = y_all[te_rows]
+            nll = float(-np.log(np.clip(p[np.arange(len(yt)), yt], 1e-7, None)).mean())
+            w, u = war_uar(p.argmax(1), yt, 7)
+            log.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'UAR': u, 'WAR': w, 'NLL': nll,
+                        'train_s': time.time() - t1,
+                        'peak_MB': torch.cuda.max_memory_allocated() / 2 ** 20 if torch.cuda.is_available() else np.nan})
+            print(f"fold {f} {a:<3} seed {seed:>3}: sel UAR {sel:5.2f} | NLL {nll:.4f} UAR {u:5.2f} | "
+                  f"{log[-1]['train_s']:.0f} s | {(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+
+assert all(not np.isnan(v).any() for v in OOF.values())
+LOG = pd.DataFrame(log)
+LOG.to_csv(f"{OUT_DIR}/g29_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g29_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
+         n_obs=NOBS, **OOF)
+print("saved g29_oof_probs.npz (arm arrays: [seed, MCIS, 7]) and g29_fold_seed_log.csv")
+"""),
+    ("markdown", "## Results (fixed estimand: mean of per-seed NLL; two-level bootstrap with shared draws)"),
+    ("code", r"""
+S = len(SEEDS)
+LOSS = {a: -np.log(np.clip(np.take_along_axis(OOF[a], y_all[None, :, None], -1)[..., 0], 1e-7, None)) for a in ARMS}
+PAIRS = {'D43 = NLL(P3) - NLL(P4)': ('P3', 'P4'), 'D42 = NLL(P2) - NLL(P4)': ('P2', 'P4'),
+         'NLL(P0) - NLL(P4)': ('P0', 'P4'), 'NLL(R) - NLL(P4)': ('R', 'P4'), 'NLL(P1) - NLL(P0)': ('P1', 'P0'),
+         'NLL(P2) - NLL(P0)': ('P2', 'P0'), 'NLL(P3) - NLL(P0)': ('P3', 'P0'), 'NLL(R) - NLL(P0)': ('R', 'P0')}
+
+
+def quantities(sidx, w):
+    nl = {a: float((LOSS[a][sidx].mean(0) * w).sum() / w.sum()) for a in ARMS}
+    q = {f'NLL {a}': nl[a] for a in ARMS}
+    q.update({k: nl[x] - nl[y] for k, (x, y) in PAIRS.items()})
+    return q
+
+
+point = quantities(np.arange(S), np.ones(N))
+rng = np.random.default_rng(0)
+gidx = [np.where(src == e)[0] for e in np.unique(src)]
+draws = []
+for _ in range(N_BOOT):
+    w = np.zeros(N)
+    for i in rng.integers(0, len(gidx), len(gidx)):
+        w[gidx[i]] += 1
+    draws.append(quantities(rng.integers(0, S, S), w))
+D = pd.DataFrame(draws)
+CI = {k: np.percentile(D[k], [2.5, 97.5]) for k in D}
+
+print("mean per-seed NLL (all MCIS):", {a: round(point[f'NLL {a}'], 4) for a in ARMS})
+print("\n== primary (positive = P4 better) ==")
+for k in list(PAIRS)[:2]:
+    print(f"  {k:<26} {point[k]:+.4f} [{CI[k][0]:+.4f}, {CI[k][1]:+.4f}]")
+print("\n== reported in every case ==")
+for k in list(PAIRS)[2:]:
+    print(f"  {k:<26} {point[k]:+.4f} [{CI[k][0]:+.4f}, {CI[k][1]:+.4f}]")
+
+ok = CI['D43 = NLL(P3) - NLL(P4)'][0] > 0 and CI['D42 = NLL(P2) - NLL(P4)'][0] > 0
+print("\n== G29 decision (fixed rule): " + ("CONFIRMED — context in the frame scores beats both controls" if ok else
+      "NOT CONFIRMED — P4 does not beat both P3 and P2") + " ==")
+if ok:
+    lo, hi = CI['NLL(P0) - NLL(P4)']
+    print("   relative to the current RoleNet (P0): " + ("better → P4 may be called an improvement of RoleNet" if lo > 0 else
+          "worse → supports the conditional design within the controls only, not an improvement of RoleNet" if hi < 0
+          else "not distinguishable → not an improvement of RoleNet"))
+
+rows = []
+for a in ARMS:
+    per = [war_uar(OOF[a][s].argmax(1), y_all, 7)[1] for s in range(S)]
+    la = LOG[LOG.arm == a]
+    rows.append({'arm': a, 'NLL_seed_mean': point[f'NLL {a}'], 'NLL_ensemble': float(-np.log(np.clip(
+        OOF[a].mean(0)[np.arange(N), y_all], 1e-7, None)).mean()), 'UAR_seed_mean': np.mean(per), 'UAR_seed_sd': np.std(per),
+        'UAR_ensemble': war_uar(OOF[a].mean(0).argmax(1), y_all, 7)[1], 'train_s_mean': la.train_s.mean(),
+        'peak_MB_mean': la.peak_MB.mean(), 'active_params': RoleNetPool(a).active_params()})
+SUM = pd.DataFrame(rows)
+print("\n== per arm (UAR, time, memory descriptive) ==")
+print(SUM.round(4).to_string(index=False))
+SUM.to_csv(f"{OUT_DIR}/g29_summary.csv", index=False)
+pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point', 'lo', 'hi']).T.to_csv(
+    f"{OUT_DIR}/g29_estimands.csv")
+print("saved g29_summary.csv and g29_estimands.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -9033,6 +9346,7 @@ if __name__ == "__main__":
                         ("g26_responder_pointer_cv.ipynb", G26),
                         ("g27_mention_aggregation_pilot.ipynb", G27),
                         ("g28_masked_listener_training_cv.ipynb", G28),
+                        ("g29_context_pooling_cv.ipynb", G29),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

@@ -142,8 +142,7 @@ cols = [BLUE, BAR['light']] * 3
 ypos = [0, 1, 2.5, 3.5, 5, 6]
 for yi, (n, c, a, l, h), col in zip(ypos, rows, cols):
     ax.barh(yi, a, color=col, height=0.7, edgecolor='black', linewidth=0.4)
-    ax.errorbar(a, yi, xerr=[[a - l], [h - a]], fmt='none', ecolor=INK, elinewidth=0.8, capsize=1.8, capthick=0.8)
-    ax.text(h + 1.5, yi, f"{a:.1f}", va='center', fontsize=7, color=INK)
+    ax.text(a + 1.5, yi, f"{a:.1f}", va='center', fontsize=7, color=INK)
 ax.set_yticks(ypos); ax.set_yticklabels([f"{r[0]} ({r[1]:,})" for r in rows], fontsize=7.5, color=INK)
 ax.set_ylim(6.7, -0.7)
 ax.set_xlabel('accuracy (%), development CV', fontsize=8); ax.set_xlim(0, 75)

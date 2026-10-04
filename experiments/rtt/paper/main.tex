@@ -53,19 +53,23 @@ Two properties make the task unusual. The target clip is never observed, and the
 
 Existing systems for this setting process each clip as a whole and fuse the clips over time
 \citep{wang2026hief}. The clip III speaker (A) dominates such summaries, because the camera, the transcript and the
-audio follow whoever talks. Yet the person who will answer is often visible already, listening to A.
+audio follow whoever talks. Yet the person who will answer is often visible already, listening to A (Figure~\ref{fig:motivation}).
 Two regularities of conversation suggest that this person matters most. Responders tend to take over the emotion
 of their interlocutor \citep[emotional contagion;][]{hatfield1994contagion}, and individuals tend to stay in their
 own recent emotional state \citep[emotional inertia;][]{kuppens2010inertia}. Both pass through the responder: the
 first is visible as a reaction while listening, the second as the responder's own earlier expressions.
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\fbox{\parbox{0.95\columnwidth}{\centering\vspace{0.8cm}\todo{motivation strip from G37 (one test MCIS: clips I--IV,
-transcripts, A's and B's labels; \model{} vs.\ baseline forecast)}\vspace{0.8cm}}}
-\caption{\todo{caption after choosing the sample}: the responder is already on screen while A speaks in clip III.}
+\includegraphics[width=\textwidth]{figs/motivation.pdf}
+\caption{A Hi-EF test sample with several people on screen. Boxes mark the roles that \model{} assigns without any
+future information: the speaker A of clip III (orange), the listener L chosen as responder proxy (blue) and the
+others O (grey). TV editing alternates between the speaker shot and the listener's reaction shot within clip III.
+The listener, already visible in the crowded context clips, is the person who answers in clip IV. A forecaster built
+around the listener predicts B's \emph{happy} response; the baseline, which summarises each clip around the speaker,
+predicts \emph{neutral}.}
 \label{fig:motivation}
-\end{figure}
+\end{figure*}
 
 We build the forecaster around the responder. The difficulty is that the responder is unknown. Our first
 contribution is an \textbf{identity-free responder proxy}: within the current turn, the second most visible person

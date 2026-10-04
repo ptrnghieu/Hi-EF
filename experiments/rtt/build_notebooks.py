@@ -11621,7 +11621,8 @@ appear in clips I–III (ArcFace identities clustered as in RoleNet) and at leas
   role — **A** (speaker of clip III), **L** (listener = responder proxy), **O** (others) — and the transcripts;
 * a 4 × 3 grid (three frames per clip) for checking.
 
-Clip IV is shown only to illustrate the target turn; no model reads it. Inputs: `hi-ef-dataset`, `g8a-features`. CPU.
+People are identities seen in at least two sampled frames. A `_paper` version (no header, role legend) is saved
+for the figure. Clip IV is shown only to illustrate the target turn; no model reads it. Inputs: `hi-ef-dataset`, `g8a-features`. CPU.
 """),
     ("code", r"""
 import os, glob, pickle, textwrap
@@ -11639,6 +11640,7 @@ OUT_DIR = "/kaggle/working/g37_frames"
 SAME_PERSON_COS = 0.45
 MIN_PEOPLE, MIN_PEOPLE_III = 3, 2
 N_RENDER = {'win_shift': 4, 'win_mirror': 3, 'fail_shift_rare': 3}
+FORCE_IDS = ['sample01305']                     # always rendered (motivation candidate chosen by the authors)
 CAND = """ + repr(_G37_CAND) + r"""
 os.makedirs(OUT_DIR, exist_ok=True)
 roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
@@ -11672,7 +11674,12 @@ def roles(s):
     A = ids3[0] if ids3 else None
     L = ids3[1] if len(ids3) > 1 else None
     role = {p: ('A' if p == A else 'L' if p == L else 'O') for p in set(lab)}
-    return {'n_people': len(set(lab)), 'n_people_III': len(ids3), 'faces': [(k, j, role[p]) for (k, j), p in zip(items, lab)]}
+    tot = defaultdict(int)
+    for (k, p), fr in frames.items():
+        tot[p] += len(fr)
+    # people = identities seen in >= 2 sampled frames (single-frame clusters are mostly background or split faces)
+    return {'n_people': sum(v >= 2 for v in tot.values()), 'n_people_III': sum(len(frames[(2, p)]) >= 2 for p in ids3),
+            'has_L': L is not None, 'faces': [(k, j, role[p]) for (k, j), p in zip(items, lab)]}
 
 
 info = {}
@@ -11681,13 +11688,13 @@ for s in CAND:
     if r is not None:
         info[s['sample_id']] = r
 keep = [s for s in CAND if s['sample_id'] in info and info[s['sample_id']]['n_people'] >= MIN_PEOPLE
-        and info[s['sample_id']]['n_people_III'] >= MIN_PEOPLE_III]
+        and info[s['sample_id']]['n_people_III'] >= MIN_PEOPLE_III and info[s['sample_id']]['has_L']]
 print(f"MCIS with >= {MIN_PEOPLE} people in I-III and >= {MIN_PEOPLE_III} in III: {len(keep)} / {len(CAND)}")
-PICK = []
+PICK = [s for s in CAND if s['sample_id'] in FORCE_IDS and s['sample_id'] in info]
 for cat, n in N_RENDER.items():
     sub = [s for s in keep if s['category'] == cat]
     sub = sorted(sub, key=lambda s: (str(s['certainty_IV']), -s['margin'] if cat != 'fail_shift_rare' else s['margin']))
-    PICK += sub[:n]
+    PICK += [x for x in sub[:n] if x not in PICK]
 pd.DataFrame([{**s, **{k: v for k, v in info[s['sample_id']].items() if k != 'faces'}} for s in keep]).to_csv(
     f"{OUT_DIR}/candidates_multiparty.csv", index=False)
 print("to render:", [(s['sample_id'], s['category'], info[s['sample_id']]['n_people']) for s in PICK])
@@ -11746,7 +11753,9 @@ def best_frame(s, k):
             by[fs[j]['frame']].append((fs[j], r))
     if not by:
         return duration(clips[k]) / 2, []
-    fr = max(by, key=lambda f: (len(by[f]), -abs(by[f][0][0]['t'] - duration(clips[k]) / 2)))
+    # prefer frames that show the listener, then the speaker, then the most faces
+    fr = max(by, key=lambda f: (any(r == 'L' for _, r in by[f]), any(r == 'A' for _, r in by[f]), len(by[f]),
+                                -abs(by[f][0][0]['t'] - duration(clips[k]) / 2)))
     return by[fr][0][0]['t'], by[fr]
 
 
@@ -11769,6 +11778,25 @@ for s in PICK:
                  f"ours: {s['RoleNet']} (p_true {s['p_true_RoleNet']})   baseline: {s['Baseline']} (p_true {s['p_true_Baseline']})",
                  fontsize=9)
     fig.tight_layout(); fig.savefig(f"{OUT_DIR}/{s['sample_id']}_strip.png", dpi=200); plt.close(fig)
+    # paper version: no header, neutral titles, role legend
+    pnames = ['Clip I (context)', 'Clip II (context)', 'Clip III (speaker A)', 'Clip IV (target: responder B)']
+    fig, ax = plt.subplots(1, 4, figsize=(13, 2.9))
+    for k in range(4):
+        t, faces = best_frame(s, k)
+        img = grab(clips[k], t)
+        H, W = img.shape[:2]
+        ax[k].imshow(img); ax[k].axis('off')
+        for d, r in faces:
+            x1, y1, x2, y2 = d['box'] * np.array([W, H, W, H])
+            ax[k].add_patch(mpatches.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, lw=2, ec=COL[r]))
+            ax[k].text(x1, y1 - 4, r, color='white', fontsize=8, weight='bold', bbox=dict(facecolor=COL[r], edgecolor='none', pad=1))
+        ax[k].set_title(pnames[k] + "\n" + "\n".join(textwrap.wrap('"' + text(clips[k]) + '"', 40)[:2]), fontsize=8)
+    fig.legend(handles=[mpatches.Patch(color=COL['A'], label='A: speaker of clip III'),
+                        mpatches.Patch(color=COL['L'], label='L: listener (responder proxy)'),
+                        mpatches.Patch(color=COL['O'], label='O: others')],
+               loc='lower center', ncol=3, frameon=False, fontsize=8)
+    fig.tight_layout(rect=(0, 0.07, 1, 1)); fig.savefig(f"{OUT_DIR}/{s['sample_id']}_paper.png", dpi=300)
+    fig.savefig(f"{OUT_DIR}/{s['sample_id']}_paper.pdf"); plt.close(fig)
     fig, ax = plt.subplots(3, 4, figsize=(13, 6.2))
     for k in range(4):
         dur = duration(clips[k])

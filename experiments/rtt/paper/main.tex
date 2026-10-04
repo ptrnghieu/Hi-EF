@@ -128,6 +128,25 @@ therefore not comparable to those printed in \citet{wang2026hief}, who used a di
 strongest configuration on ours (Section~\ref{sec:protocol}). Classes are imbalanced: the 409 test MCIS contain
 six examples of \emph{fear}.
 
+\paragraph{Who is on screen?} We grouped the faces of each sample into identities (ArcFace clustering, no
+annotation) and matched voices with ECAPA, using clip IV for analysis only (Figure~\ref{fig:datastats}). Hi-EF is
+multi-party: 47\% of samples show three or more people. The responder is usually present before it speaks: B appears in
+clips I--III in 88\% of samples, is seen listening in clip III in 48\%, and spoke in clip I or II in 50\%. The editing
+alternates shot and reaction shot: A and B share a frame in only 0.7\% of clip III, so a frame-level summary of a clip
+mixes different people. Turn-taking alone does not identify B, because the clip I/II speaker is a third person in
+about 39\% of samples. Reading the listener's face also carries signal: zero-shot facial expression of the listener
+forecasts B better than that of A ($+3.72$ UAR \ci{0.60}{7.24} on 1{,}234 samples with a visible listener), while a
+listener-presence flag alone does not. These observations motivate an evidence set organised by person rather than by
+clip.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figs/data_stats.pdf}
+\caption{Party statistics of Hi-EF development samples. Faces: 600 samples; voices: 592; responder found in clips
+I--III and spoke in clip I/II: 2{,}421 (clip IV used for analysis only).}
+\label{fig:datastats}
+\end{figure}
+
 \paragraph{Constraints.} Clip IV is never an input at inference. B's identity is not given. We do not assume that
 only two people take part.
 

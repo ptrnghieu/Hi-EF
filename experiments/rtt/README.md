@@ -653,7 +653,7 @@ Reading: with this zero-shot appraisal reading of the subtitles, no information 
 reaction was found. The measurement itself is weak (degenerate ratings; no within-negative separation even for the
 speaker of the read text), so a better appraisal measure is not excluded.
 
-## MELD in the Hi-EF setting (M1–M3, prepared; not yet run)
+## MELD in the Hi-EF setting (M1–M3)
 
 Order: M1 (Internet; downloads MELD.Raw ≈ 10 GB into `/tmp`, or attach a copy via `MELD_LOCAL`) → make its output a
 dataset → M2 once per chunk (attach M1) → M3 (attach M1 and all M2 outputs). Speaker names are never an input; clip IV
@@ -661,6 +661,27 @@ is never processed; the Hi-EF features are re-implemented because the original e
 Local checks: M1 ran end to end on synthetic MELD videos with the real CLIP and AudioCLIP models (AudioCLIP weights load
 with no missing keys) and a mocked face detector; M2's MELD-specific cells and its G8a clip listing ran (the G8a model
 cells are unchanged); M3 ran end to end on mock M1/M2 outputs built from the real MELD transcripts.
+
+**M3 results (MELD train → fit, dev → early stopping, test; 3 seeds; plain UAR; chance 14.29).** M1 used the Kaggle
+copy of MELD.Raw (train/dev/test videos 9,989 / 1,112 / 2,615; MCIS 5,405 / 595 / 1,341; `dia125_utt3` unreadable).
+The first M3 run gave constant RoleNet outputs (UAR 14.29 for every seed) because 3 VOI values (3 of 7,341 MCIS) were
+NaN; M3 now zeroes non-finite inputs and was re-run, so **MELD test was read twice** (the first read produced no usable
+RoleNet result; nothing else changed). Roles: A in III 99.8%, listener in III 81.2%, listener in I/II 53.6%.
+
+| Split | RoleNet UAR | PaperBest UAR |
+|---|---|---|
+| train (fit) | not measured | not measured |
+| val = MELD dev (best epoch per seed, selection-biased) | 20.88 (20.20 / 21.10 / 21.34) | 17.66 (16.78 / 18.79 / 17.40) |
+| test, mean of seeds | 16.72 (15.98 / 17.64 / 16.55) | 15.56 (16.15 / 15.43 / 15.09) |
+| test, 3-seed ensemble | 16.85 (WAR 39.30) | 15.50 (WAR 46.09) |
+
+- RoleNet − PaperBest on test (ensemble UAR, bootstrap over seeds and dialogues): **+1.35 [−1.02, +4.24]**, not
+  established. PaperBest predicts mostly neutral (recall 93%; all other classes 0 except angry 15.5%); RoleNet spreads
+  its predictions (happy 17.9%, angry 17.6%) but disgust, sad, fear and surprise stay near 0.
+- Ensemble NLL: PaperBest 1.543 vs RoleNet 1.695 (RoleNet − PaperBest +0.152 [+0.062, +0.395]): RoleNet is worse
+  calibrated on MELD.
+- Test labels for these numbers were rebuilt from the MELD test CSV with the M1 window rule; the per-seed UARs match
+  `m3_test_per_seed.csv` exactly.
 
 ## G25 results: listener state vs reaction (train+val, analysis only; test untouched)
 

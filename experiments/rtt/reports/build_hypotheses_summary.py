@@ -129,15 +129,23 @@ tab([['Thiết lập', 'Mô hình', 'UAR', 'WAR / ghi chú'],
     [4.2, 3.4, 3.6, 6.3])
 
 h2('5. MELD: RoleNet theo train / val / test')
-p('<b>RoleNet chưa được chạy trên MELD.</b> Ba notebook M1 (dựng MCIS và đặc trưng CLIP/AudioCLIP), M2 (đặc trưng khuôn '
-  'mặt/giọng kiểu G8a) và M3 (RoleNet cùng các baseline theo khung G10: train để fit, dev để early stopping, test đọc một '
-  'lần) đã viết và chạy thử trên dữ liệu giả, nhưng chưa chạy trên MELD thật. Bảng dưới để trống phần RoleNet thay vì đưa '
-  'số không có thật.')
-tab([['Split MELD', 'RoleNet UAR', 'RoleNet WAR', 'B1 / PaperBest / LateFusion'],
-     ['train (fit)', 'chưa chạy', 'chưa chạy', 'chưa chạy'],
-     ['val = MELD dev (early stopping)', 'chưa chạy', 'chưa chạy', 'chưa chạy'],
-     ['test', 'chưa chạy', 'chưa chạy', 'chưa chạy']],
-    [5.0, 3.2, 3.2, 6.1])
+p('M1 → M2 → M3 đã chạy trên MELD thật, đúng khung Hi-EF: không đưa tên người nói hay clip IV vào mô hình; train để fit, '
+  'dev để early stopping, test đọc một lần cho mỗi lần chạy. Lần chạy đầu RoleNet ra NaN do 3 giá trị NaN trong đặc '
+  'trưng voice (3/7.341 MCIS); sau khi đặt các giá trị đó về 0 thì chạy lại, nên test MELD đã được đọc hai lần (lần đầu '
+  'không có kết quả RoleNet dùng được). 3 seed mỗi mô hình. UAR plain; mức đoán ngẫu nhiên 14,29.')
+tab([['Split MELD', 'RoleNet UAR', 'PaperBest UAR', 'Ghi chú'],
+     ['train (fit, 5.405 MCIS)', 'không đo', 'không đo', 'notebook không lưu dự đoán trên tập fit'],
+     ['val = MELD dev (595)', '20,88 (20,20 / 21,10 / 21,34)', '17,66 (16,78 / 18,79 / 17,40)',
+      'UAR tốt nhất theo seed, dùng để chọn epoch nên lạc quan'],
+     ['test (1.341), trung bình seed', '16,72 (15,98 / 17,64 / 16,55)', '15,56 (16,15 / 15,43 / 15,09)', ''],
+     ['test, ensemble 3 seed', '16,85 (WAR 39,30)', '15,50 (WAR 46,09)', 'RoleNet − PaperBest +1,35 [−1,02; +4,24]']],
+    [4.2, 4.4, 4.4, 4.5])
+bl(['Trên test MELD, RoleNet hơn PaperBest +1,35 UAR nhưng CI (bootstrap seed × hội thoại) chứa 0: <b>chưa xác nhận</b>.',
+    'PaperBest gần như chỉ đoán neutral (recall neutral 93%, các lớp khác 0 trừ angry 15,5%), nên WAR cao hơn; RoleNet '
+    'trải dự đoán hơn (happy 17,9%, angry 17,6%) nhưng disgust, sad, fear, surprise vẫn gần 0.',
+    'Xác suất: PaperBest có NLL ensemble thấp hơn (1,543 vs 1,695; khác biệt 0,152 [0,062; 0,395]), tức RoleNet kém hiệu '
+    'chỉnh hơn trên MELD.',
+    'MELD có người nghe ở clip III trong 81,2% MCIS (Hi-EF 59,9%), nhưng lợi thế này không chuyển thành điểm cao hơn rõ.'])
 p('Những gì đã đo được trên MELD là ở mức nhãn (nhãn vàng, không mô hình học), với cửa sổ dựng giống MCIS (ba lượt rồi '
   'lượt IV của một người khác người nói ở III). Các số "copy" là oracle tham chiếu, không phải mô hình triển khai được.')
 tab([['Split MELD', 'Số MCIS', 'Neutral', 'B lặp lại cảm xúc của A', 'Đoán neutral: UAR / WAR', 'Copy-A (nhãn vàng): UAR / WAR',

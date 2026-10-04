@@ -160,6 +160,24 @@ Each candidate must state, before any experiment:
 6. "If the proposal is replaced by the closest method with reasonable tuning, what is lost?"
 7. Which finding in §3 it would contradict, and why that finding does not already rule it out.
 
+**Run gate (fixed by the authors after G34; applies on top of the checklist).** "Worth a try" and exploratory
+screening rounds are no longer reasons to spend compute. An experiment is run only if, before running:
+
+1. a bottleneck is clearly indicated by the current evidence;
+2. the intervention acts on that bottleneck, not just a plausible architectural variant;
+3. there is a quantitative or mechanistic reason to expect an effect large enough to matter, not only "possible";
+4. a win would be a substantial contribution (a +0.2–0.5 UAR gain with weak novelty does not qualify);
+5. earlier results do not already lower its prior strongly.
+
+Current reading of the evidence: the bottleneck is **the right evidence being available to the model**, especially
+listener evidence and the immediately preceding context. Structural changes to attention / readout / relations
+(G12–G13, G28–G33) did not help detectably. New candidates must target the quality or availability of evidence.
+
+*G34 (emotion-hypothesis queries) was withdrawn by the authors before running under this gate:* G13 showed the readout
+is insensitive; it adds no information, only another readout of the same representation; the rare-class bottleneck
+appears to lie partly in the input signal; the prior art (label-query attention, Query2Label) is close, so a small gain
+would be a weak contribution. The notebook is kept in the repo, not run.
+
 ## 6. Problem statements proposed by the authors (chronological) and their status
 
 | # | Problem statement (authors) | What was done on Hi-EF | Status | Testable on MELD? |

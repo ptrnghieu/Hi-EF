@@ -10212,6 +10212,7 @@ _G33_CFG = G13[1][1].replace(
     "SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # as G14").split("ARMS = [")[0] + """EXPERIMENTS = [("RoleNet", 'role', FULL)]    # only used by the shared model cell's parameter print
 N_BOOT = 2000
 G33_VERSION = "G33-v1"                         # shared manifest / preprocessing version of the campaign
+REL_LR_MULT, REL_WD = 10.0, 0.0                # relation biases (G33b only): lr = 10 x base lr, no weight decay
 """
 
 _G33_MODEL = r"""
@@ -10376,16 +10377,25 @@ def fit_temperature(z, y):
 
 
 def train_run(make, tr, dev, te, seed, ckpt_path):
-    # checkpoint by inner-dev UAR (G14 rule); temperature fitted on the same inner-dev rows; held-out fold scored after
+    # checkpoint by inner-dev UAR (G14 rule); temperature fitted on the same inner-dev rows; held-out fold scored after.
+    # Relation biases (if any) get their own parameter group: lr = REL_LR_MULT x base lr, weight decay REL_WD; every
+    # other parameter keeps the RoleNet setting. Per-epoch bias diagnostics are returned (never used for selection).
     seed_all(seed)
     hp = HP['role']
     model = make().to(DEVICE)
-    opt = torch.optim.AdamW(model.parameters(), lr=hp['lr'], weight_decay=hp['wd'])
+    rel = [p_ for n_, p_ in model.named_parameters() if n_.startswith('rel_b.')]
+    base = [p_ for n_, p_ in model.named_parameters() if not n_.startswith('rel_b.')]
+    groups = [{'params': base, 'lr': hp['lr'], 'weight_decay': hp['wd']}]
+    if rel:
+        groups.append({'params': rel, 'lr': REL_LR_MULT * hp['lr'], 'weight_decay': REL_WD})
+    opt = torch.optim.AdamW(groups)
     y_dev = YB[dev].cpu().numpy()
     best, best_state, bad, best_ep = -1, None, 0, -1
+    diag = []
     for ep in range(hp['epochs']):
         model.train()
         perm_ = tr[torch.randperm(len(tr), device=DEVICE)]
+        gsum, nst = 0.0, 0
         for i in range(0, len(perm_), hp['batch']):
             j = perm_[i:i + hp['batch']]
             logits, aux = model(j, train=True)
@@ -10394,7 +10404,16 @@ def train_run(make, tr, dev, te, seed, ckpt_path):
                 if (t >= 0).any():
                     loss = loss + w * F.cross_entropy(l, t, ignore_index=-100)
             opt.zero_grad(); loss.backward()
+            if rel:
+                gsum += float(torch.sqrt(sum((p_.grad ** 2).sum() for p_ in rel if p_.grad is not None))); nst += 1
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        if rel:
+            for fam, b in model.rel_b.items():
+                b_ = b.detach().cpu().numpy()                                 # [layers, heads, types]
+                spread = b_.max(-1) - b_.min(-1)                              # within-head relation spread
+                diag.append({'epoch': ep, 'family': fam, 'abs_mean': float(np.abs(b_).mean()), 'abs_max': float(np.abs(b_).max()),
+                             'std': float(b_.std()), 'spread_mean': float(spread.mean()), 'spread_max': float(spread.max()),
+                             'grad_norm_mean': gsum / max(nst, 1)})
         u = war_uar(logits_of(model, dev).argmax(1), y_dev, 7)[1]
         if u > best:
             best, bad, best_ep = u, 0, ep
@@ -10406,7 +10425,9 @@ def train_run(make, tr, dev, te, seed, ckpt_path):
     model.load_state_dict(best_state)
     torch.save(best_state, ckpt_path)
     zd, zt = logits_of(model, dev), logits_of(model, te)
-    return model, zd, zt, fit_temperature(zd, y_dev), best, best_ep
+    for d_ in diag:
+        d_['is_best_epoch'] = d_['epoch'] == best_ep
+    return model, zd, zt, fit_temperature(zd, y_dev), best, best_ep, diag
 
 
 def fold_rows(f):
@@ -10510,7 +10531,7 @@ for f in range(N_OUTER):
     for a, mode in ARMS_A.items():
         DEVZ[(a, f)] = np.zeros((len(SEEDS), len(dev_rows), 7))
         for si, seed in enumerate(SEEDS):
-            model, zd, zt, Tt, sel, ep = train_run(lambda: RoleNetX(clip=mode), tr, dev, te, seed + 1000 * f,
+            model, zd, zt, Tt, sel, ep, _ = train_run(lambda: RoleNetX(clip=mode), tr, dev, te, seed + 1000 * f,
                                                    f"{OUT_DIR}/g33_ckpt/{a}_fold{f}_seed{seed}.pt")
             Z[a][si, te_rows], DEVZ[(a, f)][si], TEMP[a][f, si] = zt, zd, Tt
             if a == 'ordered':
@@ -10619,6 +10640,15 @@ as R0). Row i attends to column j. A pair's relation is the tuple (r^t, r^p, r^e
 EVIDENCE does not encode time: "face–speech in the same clip" is (same time, face–speech); "face–speech across clips" is
 (earlier/later, face–speech). Added parameters: (4 + 5 + 5) × heads × layers = 112.
 
+**Optimiser treatment of the relation biases (fixed before running, identical for R-full, every leave-one-out arm and
+R-random):** own parameter group with lr = 10 × base lr (3e-3) and **no weight decay** (decay would pull every bias
+toward "no relation", the null being tested); zero initialisation, no warm-up; every other parameter keeps RoleNet's
+setting (lr 3e-4, weight decay 1e-2). lr_rel is not tuned on any outcome. Per epoch and run the notebook logs, per family,
+|b| mean / max, std, the **within-head relation spread** (max − min over the family's types, the part softmax does not
+cancel), and the mean gradient norm of the biases (before clipping). These are optimisation diagnostics only: a
+negative result is read as "relations not used" only if the biases moved to material spreads or their gradients stayed
+near zero; non-negligible gradients with spreads near zero point to an optimisation problem.
+
 | Arm | Biases |
 |---|---|
 | R0 | none (loaded from G33a) |
@@ -10669,7 +10699,7 @@ Z = {'R0': A0['outer_ordered'].astype(np.float64)}
 TEMP = {'R0': A0['temp_ordered']}
 Z.update({a: np.full((len(SEEDS), N, 7), np.nan) for a in ARMS_B})
 TEMP.update({a: np.zeros((N_OUTER, len(SEEDS))) for a in ARMS_B})
-DEVZ, BIAS, log = {}, {a: [] for a in ARMS_B}, []
+DEVZ, BIAS, DIAG, log = {}, {a: [] for a in ARMS_B}, [], []
 t0 = time.time()
 for f in range(N_OUTER):
     trr, fit_rows, dev_rows, te_rows = fold_rows(f)
@@ -10681,10 +10711,11 @@ for f in range(N_OUTER):
         DEVZ[(a, f)] = np.zeros((len(SEEDS), len(dev_rows), 7))
         idx = REL_RANDOM if a == 'R-random' else REL
         for si, seed in enumerate(SEEDS):
-            model, zd, zt, Tt, sel, ep = train_run(lambda: RoleNetX('ordered', fams, idx), tr, dev, te, seed + 1000 * f,
+            model, zd, zt, Tt, sel, ep, dg = train_run(lambda: RoleNetX('ordered', fams, idx), tr, dev, te, seed + 1000 * f,
                                                    f"{OUT_DIR}/g33_ckpt/{a}_fold{f}_seed{seed}.pt")
             Z[a][si, te_rows], DEVZ[(a, f)][si], TEMP[a][f, si] = zt, zd, Tt
             BIAS[a].append({k: v.detach().cpu().numpy() for k, v in model.rel_b.items()})
+            DIAG.extend({'arm': a, 'fold': f, 'seed': seed, **d_} for d_ in dg)
             yt = y_all[te_rows]
             log.append({'fold': f, 'arm': a, 'seed': seed, 'sel_UAR': sel, 'best_epoch': ep, 'T': Tt,
                         'NLL_raw': nll_logits(zt, yt), 'NLL_cal': nll_logits(zt / Tt, yt), 'UAR': war_uar(zt.argmax(1), yt, 7)[1]})
@@ -10695,6 +10726,8 @@ for f in range(N_OUTER):
 
 LOG = pd.DataFrame(log)
 LOG.to_csv(f"{OUT_DIR}/g33b_fold_seed_log.csv", index=False)
+DIAGD = pd.DataFrame(DIAG)
+DIAGD.to_csv(f"{OUT_DIR}/g33b_bias_diagnostics.csv", index=False)
 np.savez(f"{OUT_DIR}/g33b_artifacts.npz", manifest=json.dumps(MANIFEST), sample_id=DEV.sample_id.values, fold=fold_of_row,
          y=y_all, src=src, **{f"outer_{a}": v for a, v in Z.items() if a != 'R0'},
          **{f"temp_{a}": v for a, v in TEMP.items() if a != 'R0'}, **{f"dev_{a}_fold{f}": v for (a, f), v in DEVZ.items()},
@@ -10725,6 +10758,20 @@ print("  " + ("UNLOCKED: relational biases help (vs R0) and their semantics matt
               "beats R0 only: the parameterisation helps, the ontology is not shown to matter → no method claim" if u else
               "beats R-random only: not better than plain RoleNet → no method claim" if s else
               "neither: no evidence for relational inductive bias → no method claim"))
+print("\n== optimisation diagnostics of the relation biases (not used for selection or decisions) ==")
+bestd = DIAGD[DIAGD.is_best_epoch]
+first = DIAGD[DIAGD.epoch == 0]
+for a in ARMS_B:
+    for fam in ARMS_B[a]:
+        b_, f_ = bestd[(bestd.arm == a) & (bestd.family == fam)], first[(first.arm == a) & (first.family == fam)]
+        g_ = DIAGD[(DIAGD.arm == a) & (DIAGD.family == fam)].groupby('epoch').grad_norm_mean.median()
+        print(f"  {a:<10} {fam:<9} at the selected epoch (median over runs): |b| mean {b_.abs_mean.median():.3f} max "
+              f"{b_.abs_max.median():.3f} | within-head spread mean {b_.spread_mean.median():.3f} max {b_.spread_max.median():.3f}"
+              f" | after epoch 1: |b| mean {f_.abs_mean.median():.4f} | grad norm epoch 1 {g_.iloc[0]:.4f}, last {g_.iloc[-1]:.4f}")
+sp = bestd[bestd.arm == 'R-full'].spread_max.median()
+print("  reading aid: within-head spreads of about 0.3 or more mean the relations are distinguished; spreads near 0 with "
+      "non-negligible gradients point to an optimisation problem, near-zero gradients to relations the loss does not use"
+      f" (R-full median max spread {sp:.3f})")
 print("\nlearned biases of R-full (mean over runs, per family, layer × head × type):")
 for fam in ARMS_B['R-full']:
     print(f"  {fam}: mean over heads per layer {np.stack([b[fam] for b in BIAS['R-full']]).mean(0).mean(1).round(3).tolist()}")

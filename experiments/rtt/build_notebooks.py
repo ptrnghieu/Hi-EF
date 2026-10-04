@@ -10684,8 +10684,13 @@ for f in REL:
           f"{(REL[f][NONQ] != REL_RANDOM[f][NONQ]).mean() * 100:.0f}%")
 
 hits = sorted(glob.glob(R0_ARTIFACTS, recursive=True))
-assert hits, f"attach the G33a output (g33a_artifacts.npz); pattern {R0_ARTIFACTS}"
-A0 = np.load(hits[0], allow_pickle=True)
+if hits:
+    A0 = np.load(hits[0], allow_pickle=True)
+else:                                          # the .npz may have been unpacked into a folder of .npy files on upload
+    dirs = sorted(glob.glob("/kaggle/input/**/g33a_artifacts/manifest.npy", recursive=True))
+    assert dirs, f"attach the G33a output (g33a_artifacts.npz or its unpacked folder); pattern {R0_ARTIFACTS}"
+    hits = [os.path.dirname(dirs[0])]
+    A0 = {os.path.basename(f_)[:-4]: np.load(f_, allow_pickle=True) for f_ in glob.glob(f"{hits[0]}/*.npy")}
 M0 = json.loads(str(A0['manifest']))
 bad = [k for k in MANIFEST if json.dumps(MANIFEST[k], sort_keys=True) != json.dumps(M0.get(k), sort_keys=True)]
 assert not bad, f"G33a manifest differs from this notebook in {bad}"

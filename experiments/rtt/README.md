@@ -835,3 +835,27 @@ the L2 strength of the mixture/additive heads was the largest grid value (0.1) i
 smallest grid value (0.01) in every fold, so p_mirror was strongly flattened. In addition, p_rest contained clip-III
 text and audio (A's own turn), so the design compared "A" with "everything including A" rather than A with B. G31 is
 therefore uninformative about the mirror/own-state mechanism itself; it only shows that this linear mixture did not help.
+
+## G33a results: temporal structure audit (5-fold CV, train+val, 10 seeds; test untouched)
+
+Invariance (bag definition): max |Δ logit| under clip permutations 1.4e-6 (bag12: I↔II; bag123: three permutations),
+below the 1e-5 tolerance in every fold and seed → both bags valid. Checkpoint by inner-dev UAR; temperature fitted on
+inner dev (median T 1.73–1.85, i.e. the UAR-selected checkpoints are over-confident; calibration lowers the held-out
+NLL from 1.89–1.93 to 1.70–1.71).
+
+| Quantity (mean per-seed calibrated NLL, held-out; seeds × episodes bootstrap) | Estimate [95% CI] |
+|---|---|
+| NLL ordered / bag12 / bag123 / ordered + swap | 1.7018 / 1.7076 / 1.7097 / 1.7032 |
+| **D_reliance** = NLL(ordered + swap) − NLL(ordered) | **+0.0014 [−0.0007, +0.0035]** |
+| **U_order** = NLL(bag12) − NLL(ordered) | **+0.0058 [−0.0101, +0.0219]** (positive in 4/5 folds; fold 4 −0.014) |
+| **U_boundary** = NLL(bag123) − NLL(bag12) | **+0.0021 [−0.0108, +0.0180]** |
+
+Diagnostics: swapping I↔II changes the ordered model's predicted distribution by a mean total variation of 0.019
+(95th percentile 0.062) and flips 4.8% of argmax predictions. UAR (10-seed ensemble): ordered 26.25, bag12 26.46,
+bag123 26.67 (descriptive).
+
+**Reading (fixed rule): history helps as context (G14 +2.13); no evidence for temporal modelling** — neither the
+order of the past clips nor an explicit current-vs-past designation is shown to be useful, and the trained model
+barely relies on I/II order. Conclusions concern explicit clip identity only (roles defined from clip III remain an
+implicit marker). The CI of U_order spans about 0.032 NLL, so order effects below roughly 0.016 NLL cannot be
+detected with this design.

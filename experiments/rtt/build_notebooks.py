@@ -9723,6 +9723,246 @@ print("saved g30_summary.csv and g30_estimands.csv")
 ]
 
 
+# ---------------------------------------------------------------- G31: step 1 — mirror/rest mixture vs additive logits (linear check)
+G31 = [
+    ("markdown", r"""
+# G31 — Step 1: does a "B mirrors A" / "rest" mixture forecast better than additive logits? (linear check, train+val, test untouched)
+
+**Story being checked.** Forecasting B's next emotion means deciding *whose* evidence matters (person × clip
+tokenisation) and *how* it acts on B: B may mirror A (emotional contagion) or follow its own state / something else.
+Before building mechanism queries in RoleNet, this notebook checks with linear models whether the **mixture form**
+helps at all, with exactly the same information in both forms.
+
+**Inputs (clips I–III only; G8a/G8b role features).**
+* x_A: A's face in clip III (12: HSEmotion 8-class probabilities, valence/arousal, present flag, frame share).
+* x_L: L's face in clip III (12) and L in clips I/II (12).
+* x_ctx: dominant faces of clips II and I (24); CLIP text and AudioCLIP audio of clip III, each reduced to 32 dims by a
+  PCA fitted inside the fold.
+
+**Models (fitted inside each outer fold, L2 strength chosen by grouped inner CV on NLL).**
+1. **p_mirror** = P(Y_A | x_A, text III, audio III): multinomial logistic trained on **A's clip-III label** of the
+   training rows only. For the training rows its probabilities are cross-fitted (grouped 5-fold), for evaluation rows it
+   is the model fitted on all training rows; no label is an input at prediction time.
+2. **Mixture (proposed form):** p = g·p_mirror + (1 − g)·p_rest, p_rest = softmax(W[x_L, x_ctx] + b),
+   g = σ(vᵀ[x_A, x_L, x_ctx, log p_mirror] + c). p_mirror is fixed; W, b, v, c are fitted jointly (full-batch L-BFGS).
+3. **Additive (control, same information):** softmax(α·log p_mirror + W[x_L, x_ctx] + b).
+* Descriptive only: a plain logistic on all features, and a **noRole** version of 2 and 3 in which the five face blocks
+  are averaged into one pooled face block (no A/L separation; p_mirror is then learned from the pooled face + text/audio).
+
+**Protocol.** 5-fold episode CV (same folds as G8b–G30), out-of-fold NLL; models are deterministic, so no seeds;
+2,000 bootstrap draws over the 45 episodes.
+
+**Reading rule (fixed before running).** Step 1 is **passed** iff both hold:
+* (a) ΔNLL = NLL(additive) − NLL(mixture) has a CI entirely above 0;
+* (b) the AUC of the out-of-fold gate g for MCIS where B's gold label equals A's gold label (Y_B = Y_A; analysis only)
+  has a CI lower bound above 0.5.
+
+Passed → write the 2×2 notebook (role tokens vs noRole × one query vs mechanism queries, 10 seeds, inner-dev logits
+saved). Not passed → stop direction A. A pass shows that the mixture form helps with these linear features; it does not
+show that mechanism queries will win inside the Transformer.
+"""),
+    ("code", G13[1][1].split("ARMS = [")[0] + """EXPERIMENTS = [("RoleNet", 'role', FULL)]    # only used by the shared model cell's parameter print
+N_BOOT = 2000
+PCA_TXT = PCA_AUD = 32
+LAMBDAS = [1e-4, 1e-3, 1e-2, 1e-1]            # L2 strengths for the mixture / additive models
+C_GRID = [0.01, 0.1, 1.0, 10.0]               # inverse L2 strengths for p_mirror
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Feature blocks and folds"),
+    ("code", r"""
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold
+from sklearn.metrics import roc_auc_score
+
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+y_all, yA_all = DEV.yB.values.astype(int), DEV.yA.values.astype(int)
+src = DEV.source_folder.values
+print("fold sizes (MCIS):", load_, "| MCIS with Y_B = Y_A:", f"{np.mean(y_all == yA_all) * 100:.1f}%",
+      "| rows with an A label:", int((yA_all >= 0).sum()))
+
+BLK = {'A3': LRF[:, 0:12], 'L3': LRF[:, 12:24], 'L12': LRF[:, 24:36], 'D2': LRF[:, 36:48], 'D1': LRF[:, 48:60]}
+BLK['POOL'] = np.mean([BLK[k] for k in ('A3', 'L3', 'L12', 'D2', 'D1')], 0)        # noRole: one pooled face block
+TXT3 = TXT[:, 2].float().cpu().numpy()
+AUD3 = AUD[:, 2].float().cpu().numpy()
+print("feature blocks:", {k: v.shape for k, v in BLK.items()}, "| text III", TXT3.shape, "| audio III", AUD3.shape)
+"""),
+    ("markdown", "## Model fitting"),
+    ("code", r"""
+def tt(x):
+    return torch.as_tensor(np.asarray(x, np.float64))
+
+
+def nll_rows(logp, y):
+    return -logp[np.arange(len(y)), y]
+
+
+def fit_lr_proba(Xtr, ytr, gtr, Xte):
+    # p_mirror: multinomial logistic, C by grouped inner CV; cross-fitted probabilities for the training rows
+    def proba(m, X):
+        p = np.full((len(X), 7), 1e-6); p[:, m.classes_] = m.predict_proba(X)
+        return p / p.sum(1, keepdims=True)
+    gkf = list(GroupKFold(5).split(Xtr, ytr, gtr))
+    score = {}
+    for C in C_GRID:
+        s = []
+        for a, b in gkf:
+            m = LogisticRegression(C=C, max_iter=3000).fit(Xtr[a], ytr[a])
+            s.append(nll_rows(np.log(proba(m, Xtr[b])), ytr[b]).mean())
+        score[C] = np.mean(s)
+    C = min(score, key=score.get)
+    p_tr = np.zeros((len(Xtr), 7))
+    for a, b in gkf:
+        p_tr[b] = proba(LogisticRegression(C=C, max_iter=3000).fit(Xtr[a], ytr[a]), Xtr[b])
+    p_te = proba(LogisticRegression(C=C, max_iter=3000).fit(Xtr, ytr), Xte)
+    return p_tr, p_te, C
+
+
+def fit_head(kind, Xr, Xg, LPm, y, lam):
+    # kind 'mix': p = g p_mirror + (1 - g) softmax(Xr W + b), g = sigmoid(Xg v + c); kind 'add': softmax(a LPm + Xr W + b)
+    torch.manual_seed(0)
+    Xr, Xg, LPm, yt = tt(Xr), tt(Xg), tt(LPm), torch.as_tensor(np.asarray(y), dtype=torch.long)
+    z_ = lambda *sh: torch.zeros(*sh, dtype=torch.float64, requires_grad=True)
+    P = {'W': z_(Xr.shape[1], 7), 'b': z_(7)}
+    if kind == 'mix':
+        P.update(v=z_(Xg.shape[1]), c=z_(1))
+    else:
+        P.update(a=torch.ones(1, dtype=torch.float64, requires_grad=True))
+    opt = torch.optim.LBFGS(list(P.values()), lr=1, max_iter=500, line_search_fn='strong_wolfe')
+
+    def closure():
+        opt.zero_grad()
+        loss = F.nll_loss(head_logp(kind, P, Xr, Xg, LPm), yt) + lam * (P['W'] ** 2).sum()
+        if kind == 'mix':
+            loss = loss + lam * (P['v'] ** 2).sum()
+        loss.backward()
+        return loss
+    opt.step(closure)
+    return {k: v.detach() for k, v in P.items()}
+
+
+def head_logp(kind, P, Xr, Xg, LPm):
+    lr = F.log_softmax(Xr @ P['W'] + P['b'], -1)
+    if kind == 'add':
+        return F.log_softmax(P['a'] * LPm + Xr @ P['W'] + P['b'], -1)
+    s = Xg @ P['v'] + P['c']
+    return torch.logsumexp(torch.stack([F.logsigmoid(s).unsqueeze(-1) + LPm, F.logsigmoid(-s).unsqueeze(-1) + lr]), 0)
+
+
+def gate(P, Xg):
+    return torch.sigmoid(tt(Xg) @ P['v'] + P['c']).numpy()
+
+
+def run_fold(tr, te, faces, mirror_face):
+    # faces: block names for x_L / x_ctx faces; mirror_face: block name used by p_mirror (A3, or POOL for noRole)
+    zs = lambda M: (M - M[tr].mean(0)) / (M[tr].std(0) + 1e-6)
+    pt = PCA(PCA_TXT, random_state=0).fit(TXT3[tr]); pa = PCA(PCA_AUD, random_state=0).fit(AUD3[tr])
+    T3, A3a = zs(pt.transform(TXT3)), zs(pa.transform(AUD3))
+    B = {k: zs(v) for k, v in BLK.items()}
+    Xm = np.concatenate([B[mirror_face], T3, A3a], 1)
+    okA = tr[yA_all[tr] >= 0]
+    p_okA, _, Cm = fit_lr_proba(Xm[okA], yA_all[okA], src[okA], Xm[okA])
+    _, p_all, _ = fit_lr_proba(Xm[okA], yA_all[okA], src[okA], Xm)            # model fitted on all training rows
+    pm = p_all.copy()
+    pm[okA] = p_okA                                                          # cross-fitted on training rows
+    LPm = np.log(np.clip(pm, 1e-6, None))
+    Xr = np.concatenate([B[k] for k in faces] + [T3, A3a], 1)
+    Xg = np.concatenate([B[mirror_face], Xr, LPm], 1)
+    gkf = list(GroupKFold(5).split(tr, y_all[tr], src[tr]))
+    out = {'p_mirror_UAR_on_A': war_uar(pm[te].argmax(1)[yA_all[te] >= 0], yA_all[te][yA_all[te] >= 0], 7)[1], 'C_mirror': Cm}
+    for kind in ('mix', 'add'):
+        sc = {}
+        for lam in LAMBDAS:
+            s = []
+            for a, b in gkf:
+                P = fit_head(kind, Xr[tr[a]], Xg[tr[a]], LPm[tr[a]], y_all[tr[a]], lam)
+                lp = head_logp(kind, P, *map(tt, (Xr[tr[b]], Xg[tr[b]], LPm[tr[b]]))).numpy()
+                s.append(nll_rows(lp, y_all[tr[b]]).mean())
+            sc[lam] = np.mean(s)
+        lam = min(sc, key=sc.get)
+        P = fit_head(kind, Xr[tr], Xg[tr], LPm[tr], y_all[tr], lam)
+        out[kind] = head_logp(kind, P, *map(tt, (Xr[te], Xg[te], LPm[te]))).numpy()
+        out[f'lam_{kind}'] = lam
+        if kind == 'mix':
+            out['gate'] = gate(P, Xg[te])
+    m = LogisticRegression(C=1.0, max_iter=3000).fit(np.concatenate([B[mirror_face], Xr], 1)[tr], y_all[tr])
+    p = np.full((len(te), 7), 1e-6); p[:, m.classes_] = m.predict_proba(np.concatenate([B[mirror_face], Xr], 1)[te])
+    out['plain'] = np.log(p / p.sum(1, keepdims=True))
+    out['copy_mirror'] = LPm[te]
+    return out
+"""),
+    ("markdown", "## 5-fold episode cross-validation"),
+    ("code", r"""
+VARIANTS = {'role': (['L3', 'L12', 'D2', 'D1'], 'A3'), 'noRole': (['POOL'], 'POOL')}
+OOF = {v: {k: np.zeros((N, 7)) for k in ('mix', 'add', 'plain', 'copy_mirror')} for v in VARIANTS}
+GATE = {v: np.zeros(N) for v in VARIANTS}
+info = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr, te = np.where(fold_of_row != f)[0], np.where(fold_of_row == f)[0]
+    for vname, (faces, mf) in VARIANTS.items():
+        o = run_fold(tr, te, faces, mf)
+        for k in ('mix', 'add', 'plain', 'copy_mirror'):
+            OOF[vname][k][te] = o[k]
+        GATE[vname][te] = o['gate']
+        info.append({'fold': f, 'variant': vname, 'p_mirror_UAR_on_A': o['p_mirror_UAR_on_A'], 'C_mirror': o['C_mirror'],
+                     'lam_mix': o['lam_mix'], 'lam_add': o['lam_add'], 'mean_gate': o['gate'].mean()})
+        print(f"fold {f} {vname:<6}: p_mirror UAR on A {o['p_mirror_UAR_on_A']:.2f} | λ mix {o['lam_mix']:g} add {o['lam_add']:g} "
+              f"| mean g {o['gate'].mean():.3f} | {(time.time() - t0) / 60:.1f} min", flush=True)
+INFO = pd.DataFrame(info)
+INFO.to_csv(f"{OUT_DIR}/g31_fold_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g31_oof.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, yA=yA_all, src=src,
+         **{f"{v}_{k}": a for v, d in OOF.items() for k, a in d.items()}, **{f"{v}_gate": g for v, g in GATE.items()})
+print("saved g31_oof.npz (out-of-fold log-probabilities, gates) and g31_fold_log.csv")
+"""),
+    ("markdown", "## Results and the fixed reading rule"),
+    ("code", r"""
+MIRROR = (y_all == yA_all)
+L = {v: {k: nll_rows(a, y_all) for k, a in d.items()} for v, d in OOF.items()}
+gidx = [np.where(src == e)[0] for e in np.unique(src)]
+rng = np.random.default_rng(0)
+DR = {v: [] for v in VARIANTS}
+AU = {v: [] for v in VARIANTS}
+for _ in range(N_BOOT):
+    idx = np.concatenate([gidx[i] for i in rng.integers(0, len(gidx), len(gidx))])
+    for v in VARIANTS:
+        DR[v].append(L[v]['add'][idx].mean() - L[v]['mix'][idx].mean())
+        AU[v].append(roc_auc_score(MIRROR[idx], GATE[v][idx]) if MIRROR[idx].any() and (~MIRROR[idx]).any() else np.nan)
+CI = lambda x: np.nanpercentile(x, [2.5, 97.5])
+
+for v in VARIANTS:
+    print(f"\n== {v} ==")
+    for k in ('copy_mirror', 'plain', 'add', 'mix'):
+        print(f"  NLL {k:<12} {L[v][k].mean():.4f} | UAR {war_uar(OOF[v][k].argmax(1), y_all, 7)[1]:5.2f}")
+    d, (lo, hi) = L[v]['add'].mean() - L[v]['mix'].mean(), CI(DR[v])
+    a, (alo, ahi) = roc_auc_score(MIRROR, GATE[v]), CI(AU[v])
+    print(f"  ΔNLL = NLL(additive) − NLL(mixture) {d:+.4f} [{lo:+.4f}, {hi:+.4f}]")
+    print(f"  AUC(g → Y_B = Y_A) {a:.3f} [{alo:.3f}, {ahi:.3f}] | mean g on mirror {GATE[v][MIRROR].mean():.3f} vs "
+          f"shift {GATE[v][~MIRROR].mean():.3f}")
+    print(f"  p_mirror UAR on A's label (mean over folds): {INFO[INFO.variant == v].p_mirror_UAR_on_A.mean():.2f}")
+
+lo, _ = CI(DR['role']); alo, _ = CI(AU['role'])
+ok = lo > 0 and alo > 0.5
+print("\n== G31 step-1 decision (fixed rule, role variant): " + ("PASSED → write the 2×2 notebook" if ok else
+      "NOT PASSED → stop direction A") + f" (ΔNLL CI low {lo:+.4f}; AUC CI low {alo:.3f}) ==")
+dd = (np.array(DR['role']) - np.array(DR['noRole']))
+print(f"descriptive preview of the 2×2 interaction: ΔNLL(role) − ΔNLL(noRole) "
+      f"{(L['role']['add'].mean() - L['role']['mix'].mean()) - (L['noRole']['add'].mean() - L['noRole']['mix'].mean()):+.4f} "
+      f"(bootstrap {CI(dd)[0]:+.4f}, {CI(dd)[1]:+.4f}; not a decision)")
+pd.DataFrame([{'variant': v, 'model': k, 'NLL': L[v][k].mean(), 'UAR': war_uar(OOF[v][k].argmax(1), y_all, 7)[1]}
+              for v in VARIANTS for k in L[v]]).to_csv(f"{OUT_DIR}/g31_summary.csv", index=False)
+print("saved g31_summary.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -9750,6 +9990,7 @@ if __name__ == "__main__":
                         ("g28_masked_listener_training_cv.ipynb", G28),
                         ("g29_context_pooling_cv.ipynb", G29),
                         ("g30_aux_supervision_cv.ipynb", G30),
+                        ("g31_mirror_mixture_linear_check.ipynb", G31),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

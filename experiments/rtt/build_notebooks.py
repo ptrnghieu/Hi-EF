@@ -11164,6 +11164,219 @@ pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point',
 ]
 
 
+# ---------------------------------------------------------------- G35: group-level EMAP of RoleNet (L / history / clip-III event)
+G35 = [
+    ("markdown", r"""
+# G35 — Do RoleNet's forecasts use non-additive interactions between evidence groups? Group EMAP (5 seeds × 3 folds; train+val; test untouched)
+
+**Why.** The method section describes RoleNet as a set encoder (2 × SAB + query pooling). Two earlier results point
+in different directions: forcing the evidence into separate additive paths costs about 2 UAR (G12), while projecting
+RoleNet onto an additive *text + rest* form loses nothing (G20 EMAP −0.002). G35 measures, on the trained model
+itself, whether its forecasts depend on **non-additive interactions between three evidence groups**:
+
+| Group | Tokens (RoleNet layout) |
+|---|---|
+| `L` listener | listener face tokens of clips I, II, III |
+| `H` history | clips I–II: A and O face tokens, speech, scene |
+| `E` event | clip III: A and O face tokens, speech, scene |
+
+**EMAP** (Hessel & Lee, 2020), extended to three groups. With f the trained model's logits and partners drawn from the
+same evaluation rows (independently per group):
+
+  f_add(l, h, e) = E_{h',e'} f(l, h', e') + E_{l',e'} f(l', h, e') + E_{l',h'} f(l', h', e) − 2·E f
+
+f_add is the best additive (no-interaction) approximation of f under the product of the group marginals. Also
+reported, one group against the rest (two-block EMAP): f_g = E f(x_g, rest') + E f(x_g', rest) − E f.
+Expectations use M = 32 random partners per row (inner-dev partners for inner-dev rows, held-out partners for
+held-out rows). Mixing is done on the input tokens; the query token is shared by all rows.
+
+**Protocol (as G33).** RoleNet (`ordered`) trained with the G33 recipe: checkpoint by inner-dev UAR. Each predictor
+(full model and each projection) gets its own temperature, fitted on its inner-dev logits. **Primary: mean per-seed
+calibrated NLL on the held-out folds**; seeds × episodes bootstrap with shared draws.
+
+**Reading rule (fixed before running)** for D_int = NLL(f_add) − NLL(f):
+* CI lower bound > 0 → **interactions**: non-additive interactions among L / H / E carry forecast value.
+* CI upper bound < 0.01 → **joint aggregation without interaction value**: no forecast value from non-additive
+  L / H / E interactions above 0.01 NLL.
+* otherwise → inconclusive at this budget.
+
+The two-block EMAPs, the interaction share of the logit variance and UAR are descriptive.
+
+**Caveats.** EMAP describes the trained function, not the data distribution. Mixed inputs combine groups from
+different MCIS and may lie outside the training distribution. Modality dropout during training only removes whole
+face or context groups, not these three groups.
+"""),
+    ("code", _G33_CFG_LITE.replace('G33_VERSION = "G33-v1"', 'G33_VERSION = "G35-v1"') + """ARMS = ['full', 'emap3', 'emap_L', 'emap_H', 'emap_E']
+EMAP_M = 32                                   # random partners per row for every expectation
+INTERACTION_MARGIN = 0.01                     # NLL margin of the reading rule
+"""),
+    G13[2], G13[3], G13[4], G13[5], G13[6], G13[7], G13[8],
+    ("markdown", "## Shared training / calibration / bootstrap helpers (from G33) and the EMAP projections"),
+    ("code", _G33_MODEL),
+    ("code", r"""
+GROUPS = {'L': [4, 5, 6], 'H': [1, 2, 7, 8, 10, 11, 13, 14], 'E': [3, 9, 12, 15]}
+assert sorted(sum(GROUPS.values(), [])) == list(range(1, NT))
+assert all(TOK[p][:2] == ('face', 1) for p in GROUPS['L'])
+assert all(TOK[p][2] in (0, 1) and TOK[p][:2] != ('face', 1) for p in GROUPS['H'])
+assert all(TOK[p][2] == 2 and TOK[p][:2] != ('face', 1) for p in GROUPS['E'])
+
+
+@torch.no_grad()
+def tokens_of(model, ix):
+    # RoleNetX.forward ('ordered', no relation biases, eval mode) up to the token sequence [B, NT, d]
+    assert model.clip_mode == 'ordered' and not model.families and not model.training
+    B = len(ix)
+    h, present = model.pool(FACE[ix], FMASK[ix])
+    absent = model.absent[:, model.cmap].unsqueeze(0).expand(B, -1, -1, -1)
+    clip_e = model.clip_emb[model.cmap]
+    h = torch.where(present.unsqueeze(-1), h, absent) + model.face_role[None, :, None] + clip_e[None, None]
+    ft = h.reshape(B, 9, -1)
+    spk_ = model.text(TXT[ix]) + model.audio(AUD[ix]) * AFD[ix].unsqueeze(-1) + model.voice(VOI[ix]) + model.ctx_role[0]
+    sc_ = model.scene(SCN[ix]) + model.ctx_role[1]
+    ct = torch.cat([spk_ + clip_e, sc_ + clip_e], 1)
+    return torch.cat([model.query.expand(B, -1, -1), ft, ct], 1)
+
+
+@torch.no_grad()
+def logits_tok(model, toks, bs=4096):
+    return torch.cat([model.head(model.enc(toks[i:i + bs])[:, 0]).float() for i in range(0, len(toks), bs)])
+
+
+@torch.no_grad()
+def mixed(model, TOKS, src):
+    # src: group -> row indices into TOKS; position p of output row i comes from row src[group(p)][i]
+    n = len(next(iter(src.values())))
+    t = torch.empty(n, NT, TOKS.shape[-1], device=TOKS.device, dtype=TOKS.dtype)
+    t[:, 0] = TOKS[0, 0]
+    for g, pos in GROUPS.items():
+        t[:, pos] = TOKS[src[g]][:, pos]
+    return logits_tok(model, t)
+
+
+@torch.no_grad()
+def projections(model, rows, M, seed):
+    # full logits and the EMAP projections for the given rows; partners drawn from the same rows
+    model.eval()
+    gen = torch.Generator().manual_seed(int(seed))
+    TOKS = torch.cat([tokens_of(model, rows[i:i + 512]) for i in range(0, len(rows), 512)])
+    n = len(rows)
+    own = torch.arange(n, device=DEVICE)
+    rnd = lambda: torch.randint(0, n, (n,), generator=gen).to(DEVICE)
+
+    def term(blocks):
+        # blocks: list of (groups, 'own' | 'rand'); the groups of one random block share a partner row
+        acc = 0.0
+        for _ in range(M):
+            src = {}
+            for gs, kind in blocks:
+                r = own if kind == 'own' else rnd()
+                for g in gs:
+                    src[g] = r
+            acc = acc + mixed(model, TOKS, src)
+        return acc / M
+
+    G = list(GROUPS)
+    full = logits_tok(model, TOKS)
+    assert (mixed(model, TOKS, {g: own for g in G}) - full).abs().max() < 1e-4
+    base3 = term([([g], 'rand') for g in G]).mean(0, keepdim=True)
+    main = {g: term([([g], 'own')] + [([h], 'rand') for h in G if h != g]) for g in G}
+    out = {'full': full, 'emap3': sum(main.values()) - 2 * base3}
+    for g in G:
+        rest = [h for h in G if h != g]
+        base2 = term([([g], 'rand'), (rest, 'rand')]).mean(0, keepdim=True)
+        out[f'emap_{g}'] = term([([g], 'own'), (rest, 'rand')]) + term([(rest, 'own'), ([g], 'rand')]) - base2
+    return {k: v.cpu().numpy().astype(np.float64) for k, v in out.items()}
+
+
+def interaction_share(full, add):
+    # share of the (row-centred) logit variance not explained by the additive projection
+    c = lambda z: z - z.mean(1, keepdims=True)
+    return float(((c(full) - c(add)) ** 2).sum() / max((c(full) ** 2).sum(), 1e-12))
+
+
+mdl = RoleNetX('ordered')
+print(f"RoleNet parameters {sum(p.numel() for p in mdl.parameters()):,} | groups:",
+      {g: [TOK[p] for p in pos] for g, pos in GROUPS.items()})
+del mdl
+"""),
+    ("markdown", "## 3-fold episode cross-validation (5 seeds): train RoleNet, then project it"),
+    ("code", r"""
+os.makedirs(f"{OUT_DIR}/g35_ckpt", exist_ok=True)
+Z = {a: np.full((len(SEEDS), N, 7), np.nan) for a in ARMS}
+TEMP = {a: np.zeros((N_OUTER, len(SEEDS))) for a in ARMS}
+DEVZ, DEVROWS, log = {}, {}, []
+t0 = time.time()
+for f in range(N_OUTER):
+    trr, fit_rows, dev_rows, te_rows = fold_rows(f)
+    DEVROWS[f] = dev_rows
+    FACE, POOL, var = build_face_tensors(sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())))
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for a in ARMS:
+        DEVZ[(a, f)] = np.zeros((len(SEEDS), len(dev_rows), 7))
+    for si, seed in enumerate(SEEDS):
+        model, zd, zt, Tt, sel, ep, _ = train_run(lambda: RoleNetX('ordered'), tr, dev, te, seed + 1000 * f,
+                                                  f"{OUT_DIR}/g35_ckpt/fold{f}_seed{seed}.pt")
+        Pd = projections(model, dev, EMAP_M, seed=100 * f + si)
+        Pt = projections(model, te, EMAP_M, seed=100 * f + si + 50)
+        assert np.abs(Pt['full'] - zt).max() < 1e-3 and np.abs(Pd['full'] - zd).max() < 1e-3
+        yt, yd = y_all[te_rows], y_all[dev_rows]
+        row = {'fold': f, 'seed': seed, 'sel_UAR': sel, 'best_epoch': ep}
+        for a in ARMS:
+            DEVZ[(a, f)][si], Z[a][si, te_rows] = Pd[a], Pt[a]
+            TEMP[a][f, si] = fit_temperature(Pd[a], yd)
+            row[f'NLL_cal_{a}'] = nll_logits(Pt[a] / TEMP[a][f, si], yt)
+            row[f'UAR_{a}'] = war_uar(Pt[a].argmax(1), yt, 7)[1]
+        for a in ARMS[1:]:
+            row[f'share_{a}'] = interaction_share(Pt['full'], Pt[a])
+        log.append(row)
+        print(f"fold {f} seed {seed:>3}: sel UAR {sel:5.2f} (epoch {ep}) | NLL cal full {row['NLL_cal_full']:.4f} "
+              f"EMAP3 {row['NLL_cal_emap3']:.4f} | interaction share {row['share_emap3']:.3f} | "
+              f"{(time.time() - t0) / 60:.1f} min", flush=True)
+        del model
+        torch.cuda.empty_cache()
+LOG = pd.DataFrame(log)
+LOG.to_csv(f"{OUT_DIR}/g35_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g35_artifacts.npz", manifest=json.dumps(MANIFEST), sample_id=DEV.sample_id.values, fold=fold_of_row,
+         y=y_all, src=src, **{f"outer_{a}": v for a, v in Z.items()}, **{f"temp_{a}": v for a, v in TEMP.items()},
+         **{f"dev_{a}_fold{f}": v for (a, f), v in DEVZ.items()}, **{f"devrows_fold{f}": r for f, r in DEVROWS.items()})
+print("saved g35_artifacts.npz, g35_fold_seed_log.csv and g35_ckpt/")
+"""),
+    ("markdown", "## Estimands and the reading rule"),
+    ("code", r"""
+foldT = lambda a: TEMP[a][fold_of_row]
+CAL = {a: Z[a] / foldT(a).T[..., None] for a in Z}
+LOSS = {a: row_nll(v, np.broadcast_to(y_all, v.shape[:2])) for a, v in CAL.items()}
+PAIRS = {'D_int = NLL(EMAP3) - NLL(full)': ('emap3', 'full'),
+         'NLL(EMAP L|rest) - NLL(full)': ('emap_L', 'full'),
+         'NLL(EMAP H|rest) - NLL(full)': ('emap_H', 'full'),
+         'NLL(EMAP E|rest) - NLL(full)': ('emap_E', 'full')}
+point, CI = boot_pairs(LOSS, PAIRS)
+print("mean per-seed calibrated NLL:", {a: round(point[f'NLL {a}'], 4) for a in ARMS})
+print("temperature (median):", {a: round(float(np.median(TEMP[a])), 2) for a in ARMS})
+for k in PAIRS:
+    print(f"  {k:<32} {point[k]:+.4f} [{CI[k][0]:+.4f}, {CI[k][1]:+.4f}]")
+lo, hi = CI['D_int = NLL(EMAP3) - NLL(full)']
+verdict = ("INTERACTIONS: non-additive interactions among L / H / E carry forecast value" if lo > 0 else
+           f"JOINT AGGREGATION WITHOUT INTERACTION VALUE: no value from non-additive L / H / E interactions above "
+           f"{INTERACTION_MARGIN} NLL" if hi < INTERACTION_MARGIN else "INCONCLUSIVE at this budget")
+print(f"\n== G35 reading (fixed rule): {verdict} ==")
+print("\ninteraction share of the row-centred logit variance (held-out, mean over folds x seeds):",
+      {a: round(LOG[f'share_{a}'].mean(), 4) for a in ARMS[1:]})
+sm = lambda z: np.exp(z - z.max(-1, keepdims=True)) / np.exp(z - z.max(-1, keepdims=True)).sum(-1, keepdims=True)
+SUM = pd.DataFrame([{'arm': a, 'NLL_cal': point[f'NLL {a}'],
+                     'UAR_ensemble': war_uar(sm(CAL[a]).mean(0).argmax(1), y_all, 7)[1],
+                     'UAR_seed_mean': np.mean([war_uar(Z[a][s].argmax(1), y_all, 7)[1] for s in range(len(SEEDS))])}
+                    for a in ARMS])
+print(SUM.round(4).to_string(index=False))
+SUM.to_csv(f"{OUT_DIR}/g35_summary.csv", index=False)
+pd.DataFrame({k: [point[k], CI[k][0], CI[k][1]] for k in point}, index=['point', 'lo', 'hi']).T.to_csv(f"{OUT_DIR}/g35_estimands.csv")
+json.dump({'verdict': verdict, 'D_int': point['D_int = NLL(EMAP3) - NLL(full)'], 'CI': [float(lo), float(hi)]},
+          open(f"{OUT_DIR}/g35_decision.json", 'w'), indent=1)
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -11197,6 +11410,7 @@ if __name__ == "__main__":
                         ("g33b_relational_bias_cv.ipynb", G33B),
                         ("g33c_order_probe.ipynb", G33C),
                         ("g34_hypothesis_queries_cv.ipynb", G34),
+                        ("g35_group_emap_cv.ipynb", G35),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

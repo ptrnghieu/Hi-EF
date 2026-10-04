@@ -170,14 +170,46 @@ screening rounds are no longer reasons to spend compute. An experiment is run on
 4. a win would be a substantial contribution (a +0.2–0.5 UAR gain with weak novelty does not qualify);
 5. earlier results do not already lower its prior strongly.
 
-Current reading of the evidence: the bottleneck is **the right evidence being available to the model**, especially
-listener evidence and the immediately preceding context. Structural changes to attention / readout / relations
-(G12–G13, G28–G33) did not help detectably. New candidates must target the quality or availability of evidence.
+Current reading of the evidence (**working hypothesis, not an established bottleneck**): what matters is **the right
+evidence being available to the model**, especially listener evidence and the immediately preceding context.
+Structural changes to attention / readout / relations (G12–G13, G28–G33) did not help detectably, so this is the
+preferred direction. The firm evidence identifies *which sources are needed*; it does not yet identify *which error in
+acquiring or using them is fixable*.
+
+**Ablation drop ≠ recoverable headroom.** The G14 effects (Full − minus-L +2.04, Full − T-clipIIIonly +2.13) are the
+advantage of having a source over removing it. They do not show that the vanilla model under-uses that source; it may
+already extract most of its useful signal. G12 supports joint processing, but it changed grouping, encoder and fusion
+point at once, so it does not identify missing higher-order interaction as the cause.
+
+**Before a model change can be motivated, one of these must be shown (evaluation conditions, not proposals):**
+
+| To be shown | Only then is this kind of model change motivated |
+|---|---|
+| Useful signal is present in the features but lost in aggregation | changing the aggregation can recover it |
+| Evidence is noisy or missing, with observable indicators of its reliability | modelling reliability can improve inference |
+| With the same evidence, the forecasting rule makes systematic errors | changing the rule can fix exactly those errors |
+
+None of the three is established by the current results. A new direction must start from **a fixable error of the
+vanilla model**, with evidence that the information to fix it is present in the allowed inputs.
+
+**Research state (authors, after G34):** supported: listener face, preceding context and joint processing have value.
+Not supported: a specific deficiency of the vanilla forecasting function that a mathematical intervention could fix with
+a substantial effect. Comparisons: PaperBest is the only reference; all further analyses use train+val; the single test
+read (G10) is complete, and its positive plain result does not replace the not-confirmed primary LA 7-class contrast.
 
 *G34 (emotion-hypothesis queries) was withdrawn by the authors before running under this gate:* G13 showed the readout
 is insensitive; it adds no information, only another readout of the same representation; the rare-class bottleneck
 appears to lie partly in the input signal; the prior art (label-query attention, Query2Label) is close, so a small gain
 would be a weak contribution. The notebook is kept in the repo, not run.
+
+*Also withdrawn before running under this gate:*
+* **Belief-state / affective-transition forecasting with privileged previous-B labels** — F27: the value of B's earlier
+  label is persistence (X+Z ≈ Z), so a context-conditioned transition is not supported; the deployable headroom is set
+  by recognising Z from clips I/II (≈ 31%, F9; G9 pointer null) and covers 26% of MCIS.
+* **Low-rank higher-order interaction among listener / history / event evidence** — G12 does not isolate
+  non-additivity, and its CS-int arm (MLP interaction of the three path summaries, a superset of a CP-trilinear term)
+  recovered only +0.82 [−0.38, +2.08]; F7, F11 (EMAP −0.002), F16 and F24 found no interaction value; the form is LMF /
+  TFN from multimodal emotion recognition, so a small gain would be a weak contribution.
 
 ## 6. Problem statements proposed by the authors (chronological) and their status
 

@@ -12831,6 +12831,20 @@ print(f"saved {OUT_DIR}/g41_summary.csv")
 ]
 
 
+# G40/G41 need only annotation.csv from hi-ef-dataset: also accept it from any attached dataset (e.g. a small one with
+# only annotation.csv), so the large dataset does not have to be mounted.
+_ANNOT_OLD = 'ANNOT_CSV = glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF", "annotation.csv"))[0]'
+_ANNOT_NEW = """_ann = glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF", "annotation.csv"))
+_ann += [p for p in sorted(glob.glob("/kaggle/input/**/annotation.csv", recursive=True)) if 'meld' not in p.lower()]
+assert _ann, "annotation.csv not found: attach hi-ef-dataset or a small dataset that contains Hi-EF's annotation.csv"
+ANNOT_CSV = _ann[0]
+print("annotation file:", ANNOT_CSV)"""
+assert G14[2][1].count(_ANNOT_OLD) == 1
+for _L in (G40, G41):
+    _i = _L.index(G14[2])
+    _L[_i] = ("code", G14[2][1].replace(_ANNOT_OLD, _ANNOT_NEW))
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),

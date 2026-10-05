@@ -12389,6 +12389,203 @@ print("saved g39_per_mcis.csv, g39_numbers.json, g39_people.pdf/.png, g39_respon
 ]
 
 
+# ======================================================================================================================
+# G40 — Forecasting or early reaction? RoleNet with the end of clip III cut off (5-fold CV, train+val; test untouched)
+_G40_TRUNCS = [1.0, 0.8, 0.6]
+
+
+def _g40_cfg():
+    c = G14[1][1]
+    c = c.replace("SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # the three earlier seeds + seven new ones",
+                  "SEEDS = [42, 123, 456, 7, 11]    # five seeds (screening budget)")
+    head, _ = c.split("ARMS = [")
+    return head + """ARMS = [
+    ("Full",    'tok', BASE),
+    ("minus-L", 'tok', {**BASE, 'drop': ('L',)}),
+]
+EXPERIMENTS = [a for a in ARMS if a[1] == 'role']   # the token arms join after the token-model cell
+TRUNCS = """ + repr(_G40_TRUNCS) + """      # fraction of clip III (from its start) whose frames are kept
+assert TRUNCS[0] == 1.0
+OOF_ALL, VIS_ALL, KEPT_ALL = {}, {}, {}
+"""
+
+
+def _g40_role_cell():
+    c = G14[6][1]
+    old_load = """G8 = {}
+for f in sorted(glob.glob(os.path.join(G8A_DIR, '**', 'shard_*.pkl'), recursive=True)):
+    G8.update(pickle.load(open(f, 'rb')))"""
+    assert old_load in c
+    c = c.replace(old_load, """if not globals().get('G8'):                       # load the G8a shards once, reuse them for every cut level
+    G8 = {}
+    for f in sorted(glob.glob(os.path.join(G8A_DIR, '**', 'shard_*.pkl'), recursive=True)):
+        G8.update(pickle.load(open(f, 'rb')))
+
+
+def keep_t(c, j):
+    # keep a clip-III face only if it lies in the first TRUNC of the clip (G8a stores the time t of every face)
+    if TRUNC >= 1.0:
+        return True
+    d = G8[c]['meta'].get('duration') or 0.0
+    if d <= 0:
+        d = max((x['t'] for x in G8[c]['faces']), default=0.0) + 1e-3
+    return G8[c]['faces'][j]['t'] <= TRUNC * d + 1e-9""")
+    old_items = "    items = [(k, j) for k, c in enumerate(cl) for j in range(len(G8[c]['faces']))]"
+    assert old_items in c
+    c = c.replace(old_items, "    items = [(k, j) for k, c in enumerate(cl) for j in range(len(G8[c]['faces'])) if k < 2 or keep_t(c, j)]\n"
+                             "    KEPT[n] = (sum(1 for k, _ in items if k == 2), len(G8[cl[2]]['faces']))")
+    old_init = "CENT_COS = np.full(N, np.nan, np.float32)"
+    assert old_init in c
+    c = c.replace(old_init, old_init + "\nKEPT = np.zeros((N, 2), int)               # clip-III faces kept / available")
+    return ("print(f'==== clip III kept: {TRUNC * 100:.0f}% of its duration ====')\n" + c + """
+kept_frac = KEPT[:, 0].sum() / max(KEPT[:, 1].sum(), 1)
+print(f"clip-III faces kept: {kept_frac * 100:.1f}% of {KEPT[:, 1].sum()} | listener visible in III: {VIS.mean() * 100:.1f}%")
+assert TRUNC < 1.0 or KEPT[:, 0].sum() == KEPT[:, 1].sum(), "nothing may be cut at 100%"
+assert TRUNC >= 1.0 or kept_frac < 0.999, "the cut removed no clip-III face: check the face times"
+VIS_ALL[TRUNC], KEPT_ALL[TRUNC] = VIS.copy(), kept_frac
+""")
+
+
+def _g40_model_cell():
+    c = G14[8][1]
+    old = """fm = FEAT['fmask'][CLIPIDX].unsqueeze(-1).float()
+SCN = torch.cat([FEAT['ori'][CLIPIDX].mean(2), (FEAT['face'][CLIPIDX] * fm).sum(2) / fm.sum(2).clamp(min=1)], -1)"""
+    assert old in c
+    c = "EXPERIMENTS = [a for a in ARMS if a[1] == 'role']   # the token arms join again after the token-model cell\n" + c
+    return c.replace(old, """# scene token: clip-level CLIP features of 16 evenly spaced frames; for clip III keep only the first TRUNC of them
+NKEEP3 = max(1, int(round(FEAT['ori'].shape[1] * TRUNC)))
+tk = torch.ones(1, 3, FEAT['ori'].shape[1], 1, device=DEVICE); tk[:, 2, NKEEP3:] = 0
+fm = FEAT['fmask'][CLIPIDX].unsqueeze(-1).float() * tk
+SCN = torch.cat([(FEAT['ori'][CLIPIDX] * tk).sum(2) / tk.sum(2).clamp(min=1),
+                 (FEAT['face'][CLIPIDX] * fm).sum(2) / fm.sum(2).clamp(min=1)], -1)
+print(f"scene token of clip III uses {NKEEP3} of {FEAT['ori'].shape[1]} frames")""")
+
+
+def _g40_cv_cell():
+    c = G14[12][1]
+    for a, b in [('print("saved g14_oof_probs.npz and g14_fold_seed_log.csv")',
+                  'print(f"saved g40_oof_probs_p{PTAG}.npz and g40_fold_seed_log_p{PTAG}.csv")'),
+                 ('g14_fold_seed_log.csv', 'g40_fold_seed_log_p{PTAG}.csv'),
+                 ('g14_oof_probs.npz', 'g40_oof_probs_p{PTAG}.npz')]:
+        assert a in c, a
+        c = c.replace(a, b)
+    return "PTAG = f'{int(round(TRUNC * 100)):03d}'\n" + c + "\nOOF_ALL[TRUNC] = {k: v.copy() for k, v in OOF.items()}\n"
+
+
+G40 = [
+    ("markdown", r"""
+# G40 — Forecasting or early reaction? RoleNet with the end of clip III cut off (5-fold CV, train+val; test untouched)
+
+**Question.** About half of the listener's frames lie in the last fifth of clip III, close to the target turn. Is
+RoleNet's listener gain a *forecast*, or does it partly *recognise the responder's early reaction*?
+
+**Design.** RoleNet is retrained and evaluated with only the first 100% / 80% / 60% of clip III visible:
+* face frames of clip III later than the cut are removed **before** identity clustering, so the speaker A and the
+  listener L are re-assigned from the visible part only (the responder proxy never sees the cut part);
+* the scene token of clip III uses only the first 16·p of its 16 evenly spaced frames;
+* clip-level text (A's subtitle) and audio vectors cannot be cut and are kept (stated limitation);
+* clips I and II are unchanged.
+
+| Arm | Model |
+|---|---|
+| `Full` | RoleNet (as G14 `Full`) |
+| `minus-L` | RoleNet without the listener's face tokens (as G14 `minus-L`) |
+
+Both arms at each cut level, 5 seeds × 5 folds (same folds, early-stop episodes and hyper-parameters as G8b/G14),
+plain scoring. Only RoleNet is cut; no baseline is trained.
+
+**Reading rules (fixed before running).** Listener gain at cut p: G_p = UAR(Full_p) − UAR(minus-L_p), 5-seed
+ensembles, 95% two-level bootstrap over seeds and episodes (2,000 draws).
+* **Forecast, not only early reaction**: the lower bound of G_60 is above 0.
+* **Gain depends on the late frames**: the CI of G_60 includes 0 **and** G_60 < G_100 / 2.
+* Otherwise **inconclusive**.
+* Also reported: Full_p − Full_100 (how much RoleNet loses overall), G_p on the fixed subset of MCIS whose listener is
+  visible in the uncut clip III, the share of clip-III faces kept, and the listener visibility after the cut.
+"""),
+    ("code", _g40_cfg()),
+    G14[2], G14[3], G14[4],
+]
+for _p in _G40_TRUNCS:
+    G40 += [
+        ("markdown", f"\n## Clip III kept: {int(round(_p * 100))}%\n"),
+        ("code", f"TRUNC = {_p}\n"),
+        ("code", _g40_role_cell()),
+        ("code", _g40_model_cell()),
+        G14[10],
+        ("code", _g40_cv_cell()),
+    ]
+G40 += [
+    ("markdown", r"""
+## Results (plain argmax, 5-seed ensembles; two-level bootstrap over seeds and episodes)
+"""),
+    ("code", r"""
+assert sorted(OOF_ALL) == sorted(TRUNCS), f"missing cut levels: {set(TRUNCS) - set(OOF_ALL)}"
+
+
+def uar_of(pred, idx=None):
+    return war_uar(pred if idx is None else pred[idx], y_all if idx is None else y_all[idx], 7)[1]
+
+
+GROUPS_EP = [np.where(src == e)[0] for e in np.unique(src)]
+
+
+def two_level_boot(pa, pb, sub=None, n_boot=2000, seed=0):
+    # pa, pb: [n_seeds, N, 7]; resample the seeds of each arm and the episodes; 95% interval of UAR(a) − UAR(b)
+    rng = np.random.default_rng(seed)
+    d = []
+    for _ in range(n_boot):
+        ea = pa[rng.integers(0, len(pa), len(pa))].mean(0).argmax(1)
+        eb = pb[rng.integers(0, len(pb), len(pb))].mean(0).argmax(1)
+        idx = np.concatenate([GROUPS_EP[i] for i in rng.integers(0, len(GROUPS_EP), len(GROUPS_EP))])
+        if sub is not None:
+            idx = idx[sub[idx]]
+        d.append(uar_of(ea, idx) - uar_of(eb, idx))
+    return np.percentile(d, [2.5, 97.5])
+
+
+VIS100 = VIS_ALL[1.0]
+ROWS, G = [], {}
+print(f"== {N} MCIS, {len(EPS)} episodes, {len(SEEDS)} seeds ==")
+for p in TRUNCS:
+    O = OOF_ALL[p]
+    pf, pl = O['Full'].mean(0).argmax(1), O['minus-L'].mean(0).argmax(1)
+    uf, ul = uar_of(pf), uar_of(pl)
+    g_ = uf - ul
+    lo, hi = two_level_boot(O['Full'], O['minus-L'])
+    vis_idx = np.where(VIS100)[0]
+    gv = uar_of(pf, vis_idx) - uar_of(pl, vis_idx)
+    lov, hiv = two_level_boot(O['Full'], O['minus-L'], sub=VIS100)
+    folds = sum(uar_of(pf, np.where(fold_of_row == f)[0]) > uar_of(pl, np.where(fold_of_row == f)[0]) for f in range(N_OUTER))
+    if p < 1.0:
+        dlo, dhi = two_level_boot(O['Full'], OOF_ALL[1.0]['Full'])
+        dF = uf - uar_of(OOF_ALL[1.0]['Full'].mean(0).argmax(1))
+    else:
+        dlo = dhi = dF = 0.0
+    G[p] = (g_, lo, hi)
+    ROWS.append({'kept': p, 'faces_kept_III': KEPT_ALL[p], 'listener_visible_III': VIS_ALL[p].mean(),
+                 'UAR_Full': uf, 'UAR_minusL': ul, 'gain_L': g_, 'gain_L_lo': lo, 'gain_L_hi': hi,
+                 'gain_L_visible100': gv, 'gain_L_visible100_lo': lov, 'gain_L_visible100_hi': hiv,
+                 'folds_Full_better': folds, 'Full_minus_Full100': dF, 'Full_minus_Full100_lo': dlo,
+                 'Full_minus_Full100_hi': dhi})
+    print(f"kept {p * 100:3.0f}% | faces III kept {KEPT_ALL[p] * 100:5.1f}% | L visible III {VIS_ALL[p].mean() * 100:5.1f}% | "
+          f"Full {uf:5.2f}  minus-L {ul:5.2f} | listener gain {g_:+5.2f} [{lo:+5.2f},{hi:+5.2f}] "
+          f"({folds}/5 folds) | on L-visible-at-100% {gv:+5.2f} [{lov:+5.2f},{hiv:+5.2f}] | "
+          f"Full − Full100 {dF:+5.2f} [{dlo:+5.2f},{dhi:+5.2f}]")
+
+g100, (g60, lo60, hi60) = G[1.0][0], G[min(TRUNCS)]
+if lo60 > 0:
+    verdict = 'FORECAST, NOT ONLY EARLY REACTION: the listener gain survives without the last 40% of clip III'
+elif lo60 <= 0 <= hi60 and g60 < g100 / 2:
+    verdict = 'GAIN DEPENDS ON THE LATE FRAMES: the listener gain is not shown once the end of clip III is cut'
+else:
+    verdict = 'INCONCLUSIVE under the fixed rule'
+print("\nVERDICT:", verdict)
+pd.DataFrame(ROWS).to_csv(f"{OUT_DIR}/g40_summary.csv", index=False)
+print(f"saved {OUT_DIR}/g40_summary.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -12428,6 +12625,7 @@ if __name__ == "__main__":
                         ("g37_case_frames.ipynb", G37),
                         ("g38_resampling_noregress.ipynb", G38),
                         ("g39_party_statistics.ipynb", G39),
+                        ("g40_clip3_truncation_cv.ipynb", G40),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

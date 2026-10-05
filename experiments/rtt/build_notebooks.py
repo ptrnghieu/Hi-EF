@@ -12586,6 +12586,251 @@ print(f"saved {OUT_DIR}/g40_summary.csv")
 ]
 
 
+# ======================================================================================================================
+# G41 — Feature-matched baseline: the Hi-EF paper's architecture fed with RoleNet's features (5-fold CV; test untouched)
+def _g41_cfg():
+    c = G14[1][1]
+    c = c.replace("SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # the three earlier seeds + seven new ones",
+                  "SEEDS = [42, 123, 456, 7, 11]    # five seeds (screening budget)")
+    head, _ = c.split("ARMS = [")
+    return head + """PAPER_EPOCHS, PAPER_BATCH = 50, 32                 # PaperBest, as in G10
+ARMS = [("RoleNet", 'tok', BASE)]
+EXPERIMENTS = [a for a in ARMS if a[1] == 'role']   # the token arm joins after the token-model cell
+"""
+
+
+def _g41_paper_cell():
+    c = G10[11][1]
+    for a, b in [("def train_paper(tr, dev, te, seed):", "def train_paper(tr, dev, te, seed, cls=None):"),
+                 ("    model = PaperBest().to(DEVICE)", "    model = (cls or PaperBest)().to(DEVICE)")]:
+        assert c.count(a) == 1, a
+        c = c.replace(a, b)
+    return c
+
+
+G41 = [
+    ("markdown", r"""
+# G41 — Feature-matched baseline: the Hi-EF paper's architecture fed with RoleNet's features (5-fold CV; test untouched)
+
+**Question.** RoleNet uses richer pre-processing than the baseline (HSEmotion expression features, ArcFace, ECAPA).
+Does its gain come from the participant-centric (person × turn) representation, or only from these features?
+
+**Arms** (5 seeds × 5 folds, same folds, early-stop episodes and selection rule as G8b/G14; plain scoring):
+
+| Arm | Architecture | Inputs |
+|---|---|---|
+| `RoleNet` | RoleNet (person × turn tokens, set encoder) | G8a features as in the paper |
+| `PaperBest` | Hi-EF paper's best configuration (G10 code, unchanged) | original Hi-EF CLIP features |
+| `PaperBest-FM` | the same architecture, aggregated per clip as usual | **RoleNet's features** (below) |
+
+`PaperBest-FM` inputs, per clip and without any person or role information:
+* face stream: for each of the 16 evenly spaced frame slots, the largest face of that G8a frame (as the original
+  baseline takes the largest face per frame), described by RoleNet's 146-d frame vector (HSEmotion PCA fitted on the
+  training faces of the fold, expression probabilities, valence/arousal, pose, box, mouth, time), concatenated with the
+  original CLIP face feature and projected to 512;
+* audio: AudioCLIP plus a clip-level speech descriptor built from RoleNet's features (mouth–audio synchrony over all
+  faces of the clip, ECAPA voice similarity to clip III, voice found);
+* frame and text streams: the original CLIP features, as for RoleNet's scene and speech tokens.
+Role-specific parts of RoleNet (A/L/O assignment, per-role synchrony, role embeddings) are not given to the baseline:
+they are the representation under test.
+
+**Reading rules (fixed before running).** Primary contrast D = UAR(RoleNet) − UAR(PaperBest-FM), 5-seed ensembles,
+95% two-level bootstrap over seeds and episodes (2,000 draws).
+* **Gain from the representation**: the lower bound of D is above 0.
+* **Gain explained by the features**: the CI of D includes 0 **and** D is less than half of UAR(RoleNet) − UAR(PaperBest).
+* Otherwise **inconclusive**.
+* Also reported: PaperBest-FM − PaperBest (what the features alone add) and RoleNet − PaperBest.
+"""),
+    ("code", _g41_cfg()),
+    G14[2], G14[3], G14[4],
+    ("markdown", "\n## From G8a features to role-tagged slots (RoleNet)\n"),
+    G14[6],
+    ("markdown", "\n## Models: RoleNet and the paper's baseline\n"),
+    G14[8], G14[10],
+    ("code", _g41_paper_cell()),
+    ("markdown", "\n## PaperBest-FM: the same baseline with RoleNet's features, aggregated per clip\n"),
+    ("code", r"""
+# clip-level speech descriptor from RoleNet's features, without roles: [sync r, mouth std] over all faces, ECAPA cos to III, ok
+VOC = np.zeros((N, 3, 4), np.float32)
+for n, row in enumerate(DEV.itertuples()):
+    cl = [row.clip1, row.clip2, row.clip3]
+    a3 = G8[cl[2]]['audio']
+    for k, c in enumerate(cl):
+        r_, s_ = sync(c, list(range(len(G8[c]['faces']))))
+        ak = G8[c]['audio']
+        ok = a3 is not None and ak is not None and a3.get('ecapa') is not None and ak.get('ecapa') is not None
+        vcos = float(a3['ecapa'].astype(np.float32) @ ak['ecapa'].astype(np.float32)) if ok else 0.0
+        VOC[n, k] = [r_, s_, vcos, float(ok)]
+VOC = T(VOC)
+
+
+def fm_slots(c):
+    # 16 evenly spaced G8a frames; in each, the largest face (index into G8[c]['faces']) or -1
+    fs, ns = G8[c]['faces'], G8[c]['meta']['n_sampled']
+    best = {}
+    for j, d in enumerate(fs):
+        b = d['box']
+        a = (b[2] - b[0]) * (b[3] - b[1])
+        if d['frame'] not in best or a > best[d['frame']][0]:
+            best[d['frame']] = (a, j)
+    pos = np.round(np.linspace(0, ns - 1, 16)).astype(int).tolist() if ns else []
+    return [best[p][1] if p in best else -1 for p in pos] + [-1] * (16 - len(pos))
+
+
+FMSLOT = {c: fm_slots(c) for c in need}
+cover = np.mean([np.mean([j >= 0 for j in FMSLOT[c]]) for c in need])
+print(f"PaperBest-FM: {len(FMSLOT)} clips, {cover * 100:.1f}% of the 16 frame slots have a face")
+assert cover > 0.2, "almost no faces in the frame slots: check the G8a frame indices"
+
+
+def build_fm_faces(fit_clips):
+    # same fold-wise PCA of the HSEmotion embedding as build_face_tensors (same seed and sample)
+    pca = None
+    if HAS_EMB:
+        pool = np.concatenate([EMB[c] for c in fit_clips if EMB.get(c) is not None])
+        pick = np.random.default_rng(0).choice(len(pool), min(60000, len(pool)), replace=False)
+        pca = PCA(PCA_DIM, random_state=0).fit(pool[pick].astype(np.float32))
+    X = np.zeros((len(CIDX), 16, FDIM), np.float32)
+    for c in need:
+        js = [j for j in FMSLOT[c] if j >= 0]
+        if not js:
+            continue
+        fv = np.concatenate([pca.transform(EMB[c][js].astype(np.float32)), FB[c][js]], 1) if HAS_EMB else FB[c][js]
+        X[CIDX[c], [s for s, j in enumerate(FMSLOT[c]) if j >= 0]] = fv
+    return torch.tensor(X, device=DEVICE)
+
+
+FMFACE = None                                     # set per fold
+
+
+class PaperBestFM(PaperBest):
+    def __init__(self, d_model=512, n_classes=7):
+        super().__init__(d_model, n_classes)
+        self.intra_fusion.audio_proj = nn.Linear(527 + VOC.shape[-1], d_model)
+        self.face_in = nn.Sequential(nn.LayerNorm(FDIM + 512), nn.Linear(FDIM + 512, d_model))
+
+    def forward(self, ix, train=False):
+        cidx = CLIPIDX[ix]
+        feats = gather(cidx)
+        face = self.face_in(torch.cat([FMFACE[cidx], feats['face'].float()], -1))           # [B, 3, 16, 512]
+        clips = [self.intra_fusion(face[:, k], feats['ori'][:, k],  feats['text'][:, k],
+                                   torch.cat([F.normalize(feats['audio'][:, k], dim=-1), VOC[ix, k]], -1))
+                 for k in range(3)]
+        return self.classifier(self.inter_fusion(*clips)), {}
+
+
+FMFACE = build_fm_faces(sorted(set(DEV[['clip1', 'clip2', 'clip3']].values.ravel())))     # smoke test only
+with torch.no_grad():
+    _m = PaperBestFM().to(DEVICE).eval()
+    _o = _m(T(np.arange(min(8, N))))[0]
+assert _o.shape == (min(8, N), 7) and torch.isfinite(_o).all()
+print(f"PaperBest-FM parameters: {sum(p.numel() for p in _m.parameters()):,}")
+del _m, _o
+FMFACE = None
+"""),
+    ("markdown", "\n## 5-fold episode cross-validation (same folds as G8b / G14, 5 seeds)\n"),
+    ("code", r"""
+import re
+
+EXPERIMENTS = ARMS + [("PaperBest", 'paper', None), ("PaperBest-FM", 'paperfm', None)]
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index)
+random.Random(0).shuffle(order)
+order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print("fold sizes (MCIS):", load_)
+
+y_all = DEV.yB.values
+src = DEV.source_folder.values
+OOF = {name: np.full((len(SEEDS), N, 7), np.nan, np.float32) for name, _, _ in EXPERIMENTS}
+log = []
+t0 = time.time()
+for f in range(N_OUTER):
+    tr_eps = [e for e in EPS if FOLD[e] != f]
+    dev_eps = sorted(random.Random(100 + f).sample(tr_eps, N_INNER_DEV))
+    trr = np.where(np.isin(src, tr_eps))[0]
+    fit_rows = np.where(np.isin(src, tr_eps) & ~np.isin(src, dev_eps))[0]
+    dev_rows = np.where(np.isin(src, dev_eps))[0]
+    te_rows = np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    FACE, POOL, var = build_face_tensors(fit_clips)
+    FMFACE = build_fm_faces(fit_clips)
+    print(f"fold {f}: train {len(fit_rows)} | early-stop {len(dev_rows)} | eval {len(te_rows)}", flush=True)
+    tr, dev, te = T(fit_rows), T(dev_rows), T(te_rows)
+    for name, kind, cfg in EXPERIMENTS:
+        for si, seed in enumerate(SEEDS):
+            s_ = seed + 1000 * f
+            if kind == 'paper':
+                p, sel = train_paper(tr, dev, te, s_)
+            elif kind == 'paperfm':
+                p, sel = train_paper(tr, dev, te, s_, cls=PaperBestFM)
+            else:
+                p, sel = train_eval(kind, cfg, tr, dev, te, s_ + cfg.get('seed_offset', 0))
+            OOF[name][si, te_rows] = p
+            w, u = war_uar(p.argmax(1), y_all[te_rows], 7)
+            log.append({'fold': f, 'exp': name, 'seed': seed, 'sel_UAR': sel, 'UAR': u, 'WAR': w})
+            print(f"fold {f} {name:<13} seed {seed}: sel {sel:5.2f} | UAR {u:5.2f} WAR {w:5.2f} | "
+                  f"{(time.time() - t0) / 60:.1f} min", flush=True)
+            torch.cuda.empty_cache()
+
+assert all(not np.isnan(v).any() for v in OOF.values())
+safe = lambda s: re.sub(r'[^0-9A-Za-z]+', '_', s).strip('_')
+pd.DataFrame(log).to_csv(f"{OUT_DIR}/g41_fold_seed_log.csv", index=False)
+np.savez(f"{OUT_DIR}/g41_oof_probs.npz", sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,
+         **{safe(k): v for k, v in OOF.items()})
+print("saved g41_oof_probs.npz and g41_fold_seed_log.csv")
+"""),
+    ("markdown", "\n## Results (plain argmax, 5-seed ensembles; two-level bootstrap over seeds and episodes)\n"),
+    ("code", r"""
+def uar_of(pred, idx=None):
+    return war_uar(pred if idx is None else pred[idx], y_all if idx is None else y_all[idx], 7)[1]
+
+
+GROUPS_EP = [np.where(src == e)[0] for e in np.unique(src)]
+
+
+def two_level_boot(pa, pb, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    d = []
+    for _ in range(n_boot):
+        ea = pa[rng.integers(0, len(pa), len(pa))].mean(0).argmax(1)
+        eb = pb[rng.integers(0, len(pb), len(pb))].mean(0).argmax(1)
+        idx = np.concatenate([GROUPS_EP[i] for i in rng.integers(0, len(GROUPS_EP), len(GROUPS_EP))])
+        d.append(uar_of(ea, idx) - uar_of(eb, idx))
+    return np.percentile(d, [2.5, 97.5])
+
+
+PRED = {k: v.mean(0).argmax(1) for k, v in OOF.items()}
+print(f"== {N} MCIS, {len(EPS)} episodes, {len(SEEDS)} seeds ==")
+for k, v in OOF.items():
+    per = np.array([uar_of(v[s].argmax(1)) for s in range(len(v))])
+    print(f"  {k:<13} ensemble UAR {uar_of(PRED[k]):5.2f} WAR {war_uar(PRED[k], y_all, 7)[0]:5.2f} | "
+          f"per seed {per.mean():5.2f} ± {per.std(ddof=1):.2f}")
+ROWS = []
+for a, b in [('RoleNet', 'PaperBest-FM'), ('PaperBest-FM', 'PaperBest'), ('RoleNet', 'PaperBest')]:
+    d = uar_of(PRED[a]) - uar_of(PRED[b])
+    lo, hi = two_level_boot(OOF[a], OOF[b])
+    folds = sum(uar_of(PRED[a], np.where(fold_of_row == f)[0]) > uar_of(PRED[b], np.where(fold_of_row == f)[0])
+                for f in range(N_OUTER))
+    ROWS.append({'contrast': f"{a} - {b}", 'dUAR': d, 'lo': lo, 'hi': hi, 'folds_a_better': folds})
+    print(f"  {a} − {b}: {d:+5.2f} [{lo:+5.2f},{hi:+5.2f}] ({folds}/5 folds)")
+D, lo, hi = ROWS[0]['dUAR'], ROWS[0]['lo'], ROWS[0]['hi']
+if lo > 0:
+    verdict = 'GAIN FROM THE REPRESENTATION: RoleNet beats the feature-matched baseline'
+elif lo <= 0 <= hi and D < ROWS[2]['dUAR'] / 2:
+    verdict = 'GAIN EXPLAINED BY THE FEATURES: the feature-matched baseline closes most of the gap'
+else:
+    verdict = 'INCONCLUSIVE under the fixed rule'
+print("\nVERDICT:", verdict)
+pd.DataFrame(ROWS).to_csv(f"{OUT_DIR}/g41_summary.csv", index=False)
+print(f"saved {OUT_DIR}/g41_summary.csv")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -12626,6 +12871,7 @@ if __name__ == "__main__":
                         ("g38_resampling_noregress.ipynb", G38),
                         ("g39_party_statistics.ipynb", G39),
                         ("g40_clip3_truncation_cv.ipynb", G40),
+                        ("g41_feature_matched_baseline_cv.ipynb", G41),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

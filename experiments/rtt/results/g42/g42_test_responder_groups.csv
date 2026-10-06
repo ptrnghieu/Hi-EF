@@ -1,0 +1,410 @@
+sample_id,B_found_IV,B_in_I_II,B_in_III,group
+sample00162,True,False,False,none
+sample00163,True,False,False,none
+sample00164,True,False,False,none
+sample00165,True,False,False,none
+sample00166,True,True,False,history only
+sample00167,True,True,True,both
+sample00168,True,True,True,both
+sample00169,True,False,False,none
+sample00170,True,True,True,both
+sample00171,True,True,True,both
+sample00172,True,True,False,history only
+sample00173,True,True,True,both
+sample00174,True,False,False,none
+sample00175,True,True,True,both
+sample00176,True,True,True,both
+sample00177,True,True,False,history only
+sample00178,True,True,False,history only
+sample00179,True,True,False,history only
+sample00180,True,False,False,none
+sample00181,True,False,False,none
+sample00182,True,True,False,history only
+sample00183,True,False,False,none
+sample00184,True,False,False,none
+sample00185,True,False,False,none
+sample00186,True,True,False,history only
+sample00187,True,True,True,both
+sample00188,True,True,True,both
+sample00189,True,True,False,history only
+sample00190,True,True,True,both
+sample00191,True,True,False,history only
+sample00192,True,False,False,none
+sample00193,True,False,False,none
+sample00194,True,True,False,history only
+sample00195,True,True,False,history only
+sample00196,True,True,True,both
+sample00197,True,True,False,history only
+sample00198,True,False,False,none
+sample00199,True,True,True,both
+sample00200,True,True,True,both
+sample00201,True,True,True,both
+sample00202,True,True,False,history only
+sample00203,True,True,False,history only
+sample00204,True,True,False,history only
+sample00205,True,True,True,both
+sample00206,True,True,True,both
+sample00207,True,True,False,history only
+sample00208,True,True,True,both
+sample00209,True,True,True,both
+sample00210,True,True,True,both
+sample00211,True,True,True,both
+sample00212,True,False,True,current only
+sample00213,True,True,False,history only
+sample00214,True,True,True,both
+sample00215,True,True,False,history only
+sample00216,True,True,False,history only
+sample00217,True,False,False,none
+sample00218,True,False,False,none
+sample00219,True,False,False,none
+sample00220,True,True,False,history only
+sample00221,True,True,True,both
+sample00222,True,True,False,history only
+sample00223,True,True,False,history only
+sample00224,True,True,False,history only
+sample00225,True,True,True,both
+sample00226,True,False,True,current only
+sample00227,True,True,True,both
+sample00228,True,True,False,history only
+sample00229,True,True,False,history only
+sample00230,True,True,False,history only
+sample00231,True,False,False,none
+sample00232,True,True,True,both
+sample00233,True,True,False,history only
+sample00234,True,True,True,both
+sample00792,True,True,False,history only
+sample00793,True,True,False,history only
+sample00794,True,False,True,current only
+sample00795,True,True,False,history only
+sample00796,True,True,False,history only
+sample00797,True,True,False,history only
+sample00798,True,True,False,history only
+sample00799,True,False,False,none
+sample00800,True,True,False,history only
+sample00801,True,True,False,history only
+sample00802,True,True,False,history only
+sample00803,True,True,False,history only
+sample00804,True,True,False,history only
+sample00805,True,True,False,history only
+sample00806,True,True,False,history only
+sample00807,True,True,False,history only
+sample00808,True,True,False,history only
+sample00809,True,True,False,history only
+sample00810,True,True,False,history only
+sample00811,True,True,True,both
+sample00812,True,True,False,history only
+sample00813,True,True,True,both
+sample00814,True,False,False,none
+sample00815,True,True,True,both
+sample00816,True,True,False,history only
+sample00817,True,True,False,history only
+sample00818,True,True,True,both
+sample01008,True,False,True,current only
+sample01009,True,True,True,both
+sample01010,True,True,False,history only
+sample01011,True,False,True,current only
+sample01012,True,True,False,history only
+sample01013,True,True,True,both
+sample01014,True,False,True,current only
+sample01015,True,True,False,history only
+sample01016,True,True,False,history only
+sample01017,True,True,True,both
+sample01018,True,True,False,history only
+sample01019,True,True,True,both
+sample01020,True,True,True,both
+sample01021,True,True,True,both
+sample01022,True,True,True,both
+sample01023,True,False,False,none
+sample01024,True,True,True,both
+sample01025,True,True,False,history only
+sample01026,True,True,False,history only
+sample01027,True,True,True,both
+sample01028,True,False,False,none
+sample01029,True,True,True,both
+sample01030,True,True,True,both
+sample01031,True,True,True,both
+sample01032,True,True,False,history only
+sample01033,True,False,False,none
+sample01034,True,True,True,both
+sample01035,True,True,True,both
+sample01036,True,True,True,both
+sample01037,True,False,True,current only
+sample01038,True,False,True,current only
+sample01039,True,True,True,both
+sample01040,True,False,False,none
+sample01041,True,True,True,both
+sample01042,True,False,True,current only
+sample01043,True,False,True,current only
+sample01044,True,False,True,current only
+sample01045,True,True,False,history only
+sample01046,True,True,True,both
+sample01047,True,True,False,history only
+sample01048,True,False,True,current only
+sample01049,True,True,True,both
+sample01050,True,True,False,history only
+sample01051,True,True,True,both
+sample01052,True,True,True,both
+sample01053,True,True,True,both
+sample01054,True,True,True,both
+sample01055,True,True,True,both
+sample01056,True,True,True,both
+sample01057,True,True,True,both
+sample01058,True,True,True,both
+sample01059,True,True,True,both
+sample01060,True,True,False,history only
+sample01061,True,False,True,current only
+sample01062,True,True,True,both
+sample01063,True,False,True,current only
+sample01064,True,False,True,current only
+sample01065,True,False,True,current only
+sample01066,True,False,False,none
+sample01067,True,False,True,current only
+sample01068,True,True,False,history only
+sample01069,True,False,True,current only
+sample01070,True,False,True,current only
+sample01071,True,True,False,history only
+sample01072,True,True,True,both
+sample01073,True,True,False,history only
+sample01074,True,True,True,both
+sample01075,True,False,True,current only
+sample01076,True,True,True,both
+sample01077,True,True,True,both
+sample01078,True,False,False,none
+sample01079,True,True,True,both
+sample01080,True,True,False,history only
+sample01081,True,True,True,both
+sample01082,True,True,False,history only
+sample01083,True,True,False,history only
+sample01084,True,True,False,history only
+sample01085,True,False,True,current only
+sample01086,True,True,True,both
+sample01087,True,True,True,both
+sample01088,True,False,True,current only
+sample01089,True,True,True,both
+sample01090,True,True,False,history only
+sample01091,True,True,True,both
+sample01092,True,True,True,both
+sample01093,True,True,True,both
+sample01094,True,False,True,current only
+sample01095,True,True,False,history only
+sample01096,True,False,True,current only
+sample01097,True,True,True,both
+sample01305,True,True,True,both
+sample01306,True,True,True,both
+sample01307,True,True,False,history only
+sample01308,True,True,True,both
+sample01309,True,True,False,history only
+sample01310,True,True,False,history only
+sample01311,True,False,False,none
+sample01312,True,True,False,history only
+sample01313,True,False,False,none
+sample01314,True,True,False,history only
+sample01315,True,False,False,none
+sample01316,True,True,False,history only
+sample01317,True,False,True,current only
+sample01318,True,True,False,history only
+sample01319,True,False,False,none
+sample01320,True,True,False,history only
+sample01321,True,True,False,history only
+sample01322,True,True,False,history only
+sample01323,True,True,False,history only
+sample01324,True,True,True,both
+sample01325,True,True,False,history only
+sample01326,True,True,False,history only
+sample01327,True,True,False,history only
+sample01328,True,False,True,current only
+sample01329,True,True,False,history only
+sample01330,True,True,True,both
+sample01331,True,True,False,history only
+sample01332,True,True,True,both
+sample01333,True,True,False,history only
+sample01334,True,True,False,history only
+sample01335,True,True,False,history only
+sample01336,True,True,True,both
+sample01337,True,False,True,current only
+sample01338,True,True,False,history only
+sample01339,True,False,False,none
+sample01340,True,True,False,history only
+sample01341,True,False,False,none
+sample01342,True,False,False,none
+sample01343,True,True,True,both
+sample01344,True,False,False,none
+sample01345,True,False,True,current only
+sample01346,True,False,False,none
+sample01347,True,True,True,both
+sample01348,True,True,False,history only
+sample01349,True,True,False,history only
+sample01350,True,False,False,none
+sample01351,True,True,True,both
+sample01352,True,True,True,both
+sample01353,True,True,True,both
+sample01354,True,False,False,none
+sample01608,True,False,False,none
+sample01609,True,True,True,both
+sample01610,True,True,True,both
+sample01611,True,False,False,none
+sample01612,True,True,True,both
+sample01613,True,True,False,history only
+sample01614,True,True,True,both
+sample01615,True,True,False,history only
+sample01616,True,False,False,none
+sample01617,True,True,True,both
+sample01618,True,True,True,both
+sample01619,True,False,False,none
+sample01620,True,True,True,both
+sample01621,True,False,False,none
+sample01622,True,False,False,none
+sample01623,True,True,True,both
+sample01624,True,False,True,current only
+sample01625,True,False,True,current only
+sample01626,True,False,False,none
+sample01627,True,True,True,both
+sample01628,True,True,False,history only
+sample01629,True,True,False,history only
+sample01630,True,False,True,current only
+sample01631,True,True,True,both
+sample01632,True,True,False,history only
+sample01633,True,False,True,current only
+sample01634,True,False,True,current only
+sample01635,True,True,False,history only
+sample01636,True,True,True,both
+sample01637,True,True,True,both
+sample01638,True,True,True,both
+sample01639,True,True,True,both
+sample02380,True,True,True,both
+sample02381,True,False,False,none
+sample02382,True,True,False,history only
+sample02383,True,False,False,none
+sample02384,True,False,True,current only
+sample02385,True,True,True,both
+sample02386,True,True,True,both
+sample02387,True,True,False,history only
+sample02388,True,True,True,both
+sample02389,True,True,False,history only
+sample02390,True,True,True,both
+sample02391,True,False,True,current only
+sample02392,True,True,False,history only
+sample02393,True,False,False,none
+sample02394,True,True,True,both
+sample02395,True,True,False,history only
+sample02396,True,True,True,both
+sample02397,True,False,False,none
+sample02398,True,False,False,none
+sample02399,True,True,False,history only
+sample02400,True,True,False,history only
+sample02401,True,True,False,history only
+sample02402,True,True,True,both
+sample02403,True,False,False,none
+sample02404,True,False,False,none
+sample02405,True,False,False,none
+sample02406,True,True,True,both
+sample02407,True,False,False,none
+sample02408,True,True,True,both
+sample02409,True,True,False,history only
+sample02410,True,False,False,none
+sample02411,True,False,False,none
+sample02412,True,True,True,both
+sample02413,True,True,True,both
+sample02414,True,True,False,history only
+sample02415,True,True,False,history only
+sample02416,True,False,False,none
+sample02417,True,False,True,current only
+sample02418,True,True,True,both
+sample02419,True,True,True,both
+sample02420,True,True,True,both
+sample02421,True,True,False,history only
+sample02422,True,False,False,none
+sample02423,True,True,False,history only
+sample02424,True,True,False,history only
+sample02425,True,False,False,none
+sample02426,True,False,True,current only
+sample02427,True,True,True,both
+sample02428,True,True,False,history only
+sample02429,True,True,True,both
+sample02430,True,True,False,history only
+sample02431,True,False,True,current only
+sample02746,True,True,True,both
+sample02747,True,True,True,both
+sample02748,True,True,False,history only
+sample02749,True,False,True,current only
+sample02750,True,False,True,current only
+sample02751,True,True,True,both
+sample02752,True,True,True,both
+sample02753,True,True,False,history only
+sample02754,True,True,True,both
+sample02755,True,True,False,history only
+sample02756,True,True,True,both
+sample02757,True,False,False,none
+sample02758,True,True,True,both
+sample02759,True,True,False,history only
+sample02760,True,True,True,both
+sample02761,True,False,False,none
+sample02762,True,True,True,both
+sample02763,True,True,False,history only
+sample02764,True,False,True,current only
+sample02765,True,True,True,both
+sample02766,True,True,False,history only
+sample02767,True,False,True,current only
+sample02768,True,True,True,both
+sample02769,True,True,True,both
+sample02770,True,False,False,none
+sample02771,True,True,False,history only
+sample02772,True,True,True,both
+sample02773,True,True,True,both
+sample02774,True,True,False,history only
+sample02775,True,True,True,both
+sample02776,True,False,False,none
+sample02777,True,False,False,none
+sample02778,True,True,True,both
+sample02779,True,True,False,history only
+sample02780,True,True,False,history only
+sample02781,True,True,False,history only
+sample02782,True,False,True,current only
+sample02783,True,True,True,both
+sample02784,True,True,False,history only
+sample02785,True,True,False,history only
+sample02786,True,True,True,both
+sample02787,True,True,False,history only
+sample02788,True,False,True,current only
+sample02789,True,True,True,both
+sample02790,True,False,False,none
+sample02791,True,False,False,none
+sample02792,True,True,False,history only
+sample02793,True,True,False,history only
+sample02794,True,True,True,both
+sample02795,True,True,True,both
+sample02796,True,False,True,current only
+sample02797,True,False,True,current only
+sample02798,True,True,False,history only
+sample02799,True,True,False,history only
+sample02800,True,True,False,history only
+sample02801,True,True,False,history only
+sample02802,True,True,False,history only
+sample02803,True,True,False,history only
+sample02804,True,True,False,history only
+sample02805,True,True,False,history only
+sample02806,True,True,False,history only
+sample02807,True,True,False,history only
+sample02808,True,True,False,history only
+sample02809,True,True,True,both
+sample02810,True,True,False,history only
+sample02811,True,True,True,both
+sample02812,True,True,False,history only
+sample02813,True,False,True,current only
+sample02814,True,False,True,current only
+sample02815,True,False,True,current only
+sample02816,True,False,True,current only
+sample02817,True,True,False,history only
+sample02818,True,False,False,none
+sample02819,True,False,False,none
+sample02820,True,True,True,both
+sample02821,True,True,False,history only
+sample02822,True,True,True,both
+sample02823,True,True,True,both
+sample02824,True,False,False,none
+sample02825,True,True,False,history only
+sample02826,True,True,True,both
+sample02827,True,True,True,both
+sample02828,True,True,True,both
+sample02829,True,True,False,history only
+sample02830,True,False,False,none

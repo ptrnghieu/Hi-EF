@@ -961,3 +961,21 @@ the test split for RoleNet and is reported as such. Files: `results/g36/`.
 Fixed rule: no arm eligible (Up-quarter angry −11.8; Tail-median angry −6.9, sad −5.3) → **no test read**.
 Decision (authors): the paper keeps the **preregistered RoleNet (G10)**; G36b (Up-sqrt) is reported only as an analysis
 of the rare-class / angry trade-off; fear and surprise (test recall 0) are future work.
+
+## G42 results: RoleNet vs baseline by where the true responder B is visible (test, saved G10 predictions; descriptive)
+
+B = dominant clip-IV face matched to a clip I–III identity other than A (G42; clip IV used for grouping only).
+B was found in clip IV for all 409 test MCIS. Seed-ensemble predictions of G10, plain scoring; 95% CI = bootstrap
+over the 8 test episodes (internal reading only).
+
+| Group | n (%) | UAR Baseline / RoleNet | Δ UAR [95% CI] | ACC Baseline / RoleNet | Δ ACC [95% CI] |
+|---|---|---|---|---|---|
+| history only (B in I/II, not III) | 146 (35.7) | 20.38 / 23.96 | +3.57 [−1.00, +8.13] | 30.82 / 34.25 | +3.42 [−1.90, +9.09] |
+| current only (B in III, not I/II) | 50 (12.2) | 20.63 / 28.47 | +7.84 [−1.25, +14.83] | 30.00 / 38.00 | +8.00 [−3.70, +15.69] |
+| both | 144 (35.2) | 24.23 / 27.89 | +3.66 [−0.44, +9.11] | 36.11 / 39.58 | +3.47 [−0.65, +7.75] |
+| none (B not seen in I–III) | 69 (16.9) | 20.16 / 22.16 | +2.01 [−4.97, +10.95] | 30.43 / 33.33 | +2.90 [−5.88, +17.19] |
+| all | 409 | 21.40 / 25.24 | +3.84 | 32.52 / 36.43 | +3.91 |
+
+Reading: RoleNet is ahead of the baseline in every group; the gain is largest where B is visible in the current
+turn only (+7.8 UAR, 50 MCIS) and smallest where B is never seen (+2.0). No group-wise CI excludes 0 (small groups,
+8 episodes). Output: `results/g42/responder_groups_test.csv`.

@@ -12845,6 +12845,172 @@ for _L in (G40, G41):
     _L[_i] = ("code", G14[2][1].replace(_ANNOT_OLD, _ANNOT_NEW))
 
 
+# ======================================================================================================================
+# Responder-presence groups (true responder B, matched from clip IV as in G26; grouping only, never an input)
+_RESP_GROUPS_FN = r'''
+from collections import defaultdict as _dd
+from sklearn.cluster import AgglomerativeClustering as _AC
+
+RESP_GROUPS = ['history only', 'current only', 'both', 'none', 'B not found in IV']
+
+
+def _cluster(E, thr):
+    if len(E) < 2:
+        return np.zeros(len(E), int)
+    return _AC(n_clusters=None, metric='cosine', linkage='average', distance_threshold=1 - thr).fit_predict(E)
+
+
+def responder_groups(rows, G8, G84, same_cos=0.45, dom_frac=0.25):
+    # B = dominant identity of clip IV (>= dom_frac of its sampled frames), matched to a clip I-III identity other
+    # than the speaker A (as G26). history = B seen in clip I or II; current = B seen in clip III.
+    unit = lambda v: v / (np.linalg.norm(v) + 1e-9)
+    out = []
+    for row in rows.itertuples():
+        cl = [row.clip1, row.clip2, row.clip3]
+        items = [(k, j) for k, c in enumerate(cl) for j in range(len(G8.get(c, {}).get('faces', [])))]
+        E = np.stack([G8[cl[k]]['faces'][j]['arc'] for k, j in items]).astype(np.float32) if items else np.zeros((0, 512))
+        lab = _cluster(E, same_cos) if len(items) else np.zeros(0, int)
+        frames = _dd(set)
+        for (k, j), p in zip(items, lab):
+            frames[(k, p)].add(G8[cl[k]]['faces'][j]['frame'])
+        ids3 = sorted({p for (k, p) in frames if k == 2}, key=lambda p: -len(frames[(2, p)]))
+        A = ids3[0] if ids3 else None
+        found, bt = False, None
+        f4 = G84.get(row.clip4, {}).get('faces', [])
+        if f4:
+            E4 = np.stack([d['arc'] for d in f4]).astype(np.float32)
+            l4 = _cluster(E4, same_cos)
+            fr4 = _dd(set)
+            for d, p in zip(f4, l4):
+                fr4[p].add(d['frame'])
+            dom = max(fr4, key=lambda p: len(fr4[p]))
+            if len(fr4[dom]) / max(G84[row.clip4]['meta']['n_sampled'], 1) >= dom_frac:
+                found = True
+                c4 = unit(E4[l4 == dom].mean(0))
+                best, bp = same_cos, None
+                for p in set(lab.tolist()):
+                    s = float(unit(E[lab == p].mean(0)) @ c4)
+                    if s >= best:
+                        best, bp = s, p
+                bt = bp if bp is not None and bp != A else None
+        hist = bt is not None and any(k < 2 and p == bt for (k, _), p in zip(items, lab))
+        cur = bt is not None and any(k == 2 and p == bt for (k, _), p in zip(items, lab))
+        g = ('B not found in IV' if not found else 'both' if hist and cur else 'history only' if hist
+             else 'current only' if cur else 'none')
+        out.append({'sample_id': row.sample_id, 'B_found_IV': found, 'B_in_I_II': hist, 'B_in_III': cur, 'group': g})
+    return pd.DataFrame(out)
+'''
+
+# ---- G41: responder groups on development CV (needs the G26a clip-IV shards; skipped with a message if absent)
+G41 += [
+    ("markdown", r"""
+## By responder presence (development CV; B matched from clip IV as in G26, grouping only)
+
+Groups: **history only** (B seen in clip I/II, not in III), **current only** (in III, not in I/II), **both**, **none**
+(B found in clip IV but not matched to anyone in I–III other than A), and B not found in clip IV. Descriptive; needs
+the G26a output (`c4shard_*.pkl`) attached.
+"""),
+    ("code", _RESP_GROUPS_FN + r'''
+CLIP4_SHARDS = "/kaggle/input/**/c4shard_*.pkl"
+G84 = {}
+for f in sorted(glob.glob(CLIP4_SHARDS, recursive=True)):
+    G84.update(pickle.load(open(f, 'rb')))
+if not G84:
+    print("G26a clip-IV shards not attached: responder groups skipped (main result above is unaffected)")
+else:
+    RG = responder_groups(DEV, G8, G84, SAME_PERSON_COS, DOMINANT_MIN_FRAC)
+    assert (RG.sample_id.values == DEV.sample_id.values).all()
+    RG.to_csv(f"{OUT_DIR}/g41_responder_groups_dev.csv", index=False)
+    ROWS_G = []
+    for gname in RESP_GROUPS:
+        idx = np.where(RG.group.values == gname)[0]
+        if len(idx) == 0:
+            continue
+        r_ = {'group': gname, 'n': len(idx)}
+        for k in PRED:
+            r_[f'UAR_{k}'] = uar_of(PRED[k], idx)
+            r_[f'ACC_{k}'] = float((PRED[k][idx] == y_all[idx]).mean() * 100)
+        ROWS_G.append(r_)
+    TG = pd.DataFrame(ROWS_G)
+    TG.to_csv(f"{OUT_DIR}/g41_by_responder_group.csv", index=False)
+    print(TG.round(2).to_string(index=False))
+    print(f"saved {OUT_DIR}/g41_by_responder_group.csv and g41_responder_groups_dev.csv")
+'''),
+]
+
+
+# ---- G42: responder groups on the test split (clip-IV faces of test MCIS, grouping only; no label, no model)
+def _g42_cfg():
+    c = G26A[2][1]
+    return c + '''G8A_GLOB = "/kaggle/input/**/shard_*.pkl"          # G8a features of clips I-III (all splits)
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25     # as RoleNet / G26
+'''
+
+
+def _g42_setup():
+    c = G26A[3][1]
+    a = "clips = sorted(set(sp[sp.split.isin(['train', 'val'])].clip4))      # clip IV, train + val only"
+    assert a in c
+    c = c.replace(a, "TEST = sp[sp.split == 'test'].reset_index(drop=True)\n"
+                     "clips = sorted(set(TEST.clip4))      # clip IV of the test MCIS only (grouping, never an input)")
+    c = c.replace("clips IV (train+val)", "clips IV (test)")
+    return c + """
+n_miss = sum(find_media(VIDEO_ROOTS, c, ('.mp4', '.avi', '.mkv', '.mov')) is None for c in clips)
+assert n_miss <= 0.05 * len(clips), (f"{n_miss}/{len(clips)} clip-IV videos missing: attach hi-ef-dataset (videos); "
+                                     "without them every MCIS would fall into 'B not found in IV'")
+"""
+
+
+def _g42_extract():
+    c = G26A[6][1]
+    a = "'audio': analyse_audio(find_media(AUDIO_ROOTS, c, ('.mp3', '.wav', '.flac', '.m4a')))}"
+    assert a in c
+    return c.replace(a, "'audio': None}                    # faces only: the grouping needs no audio")
+
+
+G42 = [
+    ("markdown", r"""
+# G42 — Responder-presence groups on the test split (clip-IV faces for grouping only; no label, no model)
+
+For the descriptive comparison of RoleNet and the baseline by **where the true responder B is visible**, B must be
+identified on test MCIS. As in G26 (development), B is the dominant face identity of clip IV matched to an identity
+of clips I–III other than the speaker A. This notebook extracts the G8a face features of the **test clip IV** (faces
+only, no audio) and writes one group per test MCIS:
+
+* **history only**: B seen in clip I or II, not in III; **current only**: in III, not in I/II; **both**;
+* **none**: B found in clip IV but not matched in I–III; **B not found in IV**.
+
+Clip IV is never an input of any model; no label and no prediction is read here. The output CSV is combined offline
+with the saved G10 test predictions (`analysis/responder_groups_test.py`).
+
+Inputs: `hi-ef-dataset` (videos of clip IV), `hi-ef-split`, `g8a-features` (clips I–III). GPU recommended.
+"""),
+    ("code", "!pip install -q insightface onnx\n!pip uninstall -y -q onnxruntime onnxruntime-gpu\n!pip install -q \"onnxruntime-gpu==1.22.0\""),
+    ("code", _g42_cfg()),
+    ("code", _g42_setup()),
+    G26A[4],
+    ("code", _g42_extract()),
+    ("markdown", "\n## Groups\n"),
+    ("code", _RESP_GROUPS_FN + r'''
+G8 = {}
+for f in sorted(glob.glob(G8A_GLOB, recursive=True)):
+    G8.update(pickle.load(open(f, 'rb')))
+need = sorted(set(TEST[['clip1', 'clip2', 'clip3']].values.ravel()))
+miss = [c for c in need if c not in G8]
+assert not miss, f"{len(miss)} test clips I-III missing from g8a-features, e.g. {miss[:3]}"
+G84 = {}
+for f in sorted(glob.glob(f"{SHARD_DIR}/c4shard_*.pkl")):
+    G84.update(pickle.load(open(f, 'rb')))
+assert set(clips) <= set(G84), f"{len(set(clips) - set(G84))} clip-IV records missing"
+RG = responder_groups(TEST, G8, G84, SAME_PERSON_COS, DOMINANT_MIN_FRAC)
+assert len(RG) == len(TEST) == RG.sample_id.nunique()
+RG.to_csv(f"{OUT_DIR}/g42_test_responder_groups.csv", index=False)
+print(RG.group.value_counts().to_string())
+print(f"saved {OUT_DIR}/g42_test_responder_groups.csv  ->  send this file back")
+'''),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -12886,6 +13052,7 @@ if __name__ == "__main__":
                         ("g39_party_statistics.ipynb", G39),
                         ("g40_clip3_truncation_cv.ipynb", G40),
                         ("g41_feature_matched_baseline_cv.ipynb", G41),
+                        ("g42_test_responder_groups.ipynb", G42),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

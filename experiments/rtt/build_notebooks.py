@@ -13278,6 +13278,49 @@ G44 += [
 ]
 
 
+# ======================================================================================================================
+# G44a — clip-IV face features of the train+val MCIS (re-creates the G26a shards, faces only) for G44 / G41 groups
+def _g44a_setup():
+    c = G26A[3][1]
+    for a, b in [("clips = sorted(set(sp[sp.split.isin(['train', 'val'])].clip4))      # clip IV, train + val only",
+                  "clips = sorted(set(sp[sp.split.isin(['train', 'val'])].clip4))      # clip IV, train + val only (no test)")]:
+        assert a in c
+        c = c.replace(a, b)
+    return c + """
+n_miss = sum(find_media(VIDEO_ROOTS, c, ('.mp4', '.avi', '.mkv', '.mov')) is None for c in clips)
+assert n_miss <= 0.05 * len(clips), (f"{n_miss}/{len(clips)} clip-IV videos missing: attach hi-ef-dataset (videos)")
+"""
+
+
+G44A = [
+    ("markdown", r"""
+# G44a — Clip-IV face features of the train + val MCIS (faces only; re-creates the G26a shards)
+
+The unchanged G26a / G8a face extraction on the **clip IV** of every train/val MCIS (test clip IV is not read), without
+audio (G44 needs faces only). Used only to identify the true responder B for analyses (G44 oracle listener, G41
+responder groups); clip IV is never a model input and no label is read.
+
+Output: `/kaggle/working/g8a_clip4/c4shard_*.pkl` → save the notebook output (or make it a dataset) and attach it to
+G44. Inputs: `hi-ef-dataset` (videos), `hi-ef-split`. GPU recommended.
+"""),
+    ("code", "!pip install -q insightface onnx\n!pip uninstall -y -q onnxruntime onnxruntime-gpu\n!pip install -q \"onnxruntime-gpu==1.22.0\""),
+    ("code", G26A[2][1]),
+    ("code", _g44a_setup()),
+    G26A[4],
+    ("code", _g42_extract()),
+    ("code", r"""
+DATA = {}
+for f in sorted(glob.glob(f"{SHARD_DIR}/c4shard_*.pkl")):
+    DATA.update(pickle.load(open(f, 'rb')))
+assert set(clips) <= set(DATA), f"{len(set(clips) - set(DATA))} clips missing"
+nf = np.array([len(DATA[c]['faces']) for c in clips])
+print(f"clips {len(clips)} | faces per clip mean {nf.mean():.1f} | clips with no face {(nf == 0).mean() * 100:.1f}%")
+assert (nf == 0).mean() < 0.5, "most clip-IV records have no face: check the videos / the face detector"
+print(f"done: attach {SHARD_DIR} (c4shard_*.pkl) to G44")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -13321,6 +13364,7 @@ if __name__ == "__main__":
                         ("g41_feature_matched_baseline_cv.ipynb", G41),
                         ("g42_test_responder_groups.ipynb", G42),
                         ("g43_listener_history_vs_current_cv.ipynb", G43),
+                        ("g44a_clip4_faces_dev.ipynb", G44A),
                         ("g44_oracle_listener_truncation_cv.ipynb", G44),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),

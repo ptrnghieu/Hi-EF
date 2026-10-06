@@ -13132,6 +13132,152 @@ print(f"saved {OUT_DIR}/g43_summary.csv and g43_contrasts.csv")
 G43[G43.index(G14[2])] = ("code", G14[2][1].replace(_ANNOT_OLD, _ANNOT_NEW))
 
 
+# ======================================================================================================================
+# G44 — Oracle-identity truncation: L = true responder B (from clip IV, analysis only), fixed; late clip-III faces cut
+def _g44_cfg():
+    return _g40_cfg() + '''CLIP4_SHARDS = "/kaggle/input/**/c4shard_*.pkl"   # G26a output: clip-IV faces, used only to identify B
+'''
+
+
+def _g44_role_cell():
+    c = G14[6][1]
+    old_load = """G8 = {}
+for f in sorted(glob.glob(os.path.join(G8A_DIR, '**', 'shard_*.pkl'), recursive=True)):
+    G8.update(pickle.load(open(f, 'rb')))"""
+    assert old_load in c
+    c = c.replace(old_load, """if not globals().get('G8'):                       # load the G8a shards once, reuse them for every cut level
+    G8 = {}
+    for f in sorted(glob.glob(os.path.join(G8A_DIR, '**', 'shard_*.pkl'), recursive=True)):
+        G8.update(pickle.load(open(f, 'rb')))
+if not globals().get('G84'):
+    G84 = {}
+    for f in sorted(glob.glob(CLIP4_SHARDS, recursive=True)):
+        G84.update(pickle.load(open(f, 'rb')))
+assert G84, f"no clip-IV shards at {CLIP4_SHARDS}: attach the G26a output (c4shard_*.pkl)"
+_miss4 = sorted(set(DEV.clip4) - set(G84))
+assert len(_miss4) <= 0.01 * len(DEV), f"{len(_miss4)} clip-IV records missing from the G26a shards"
+
+
+def keep_t(c, j):
+    # keep a clip-III face only if it lies in the first TRUNC of the clip (G8a stores the time t of every face)
+    if TRUNC >= 1.0:
+        return True
+    d = G8[c]['meta'].get('duration') or 0.0
+    if d <= 0:
+        d = max((x['t'] for x in G8[c]['faces']), default=0.0) + 1e-3
+    return G8[c]['faces'][j]['t'] <= TRUNC * d + 1e-9
+
+
+_unit = lambda v: v / (np.linalg.norm(v) + 1e-9)
+
+
+def oracle_B(E, lab, A, clip4):
+    # true responder: dominant identity of clip IV (>= DOMINANT_MIN_FRAC of its frames) matched to a clip I-III
+    # identity other than A, as G26; None if not found / not matched. Analysis only, never an input.
+    f4 = G84.get(clip4, {}).get('faces', [])
+    if not f4:
+        return None
+    E4 = np.stack([d['arc'] for d in f4]).astype(np.float32)
+    l4 = (AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
+                                  distance_threshold=1 - SAME_PERSON_COS).fit_predict(E4) if len(E4) > 1 else np.zeros(1, int))
+    fr4 = defaultdict(set)
+    for d, p in zip(f4, l4):
+        fr4[p].add(d['frame'])
+    dom = max(fr4, key=lambda p: len(fr4[p]))
+    if len(fr4[dom]) / max(G84[clip4]['meta']['n_sampled'], 1) < DOMINANT_MIN_FRAC:
+        return None
+    c4 = _unit(E4[l4 == dom].mean(0))
+    best, bp = SAME_PERSON_COS, None
+    for p in set(lab.tolist()):
+        s = float(_unit(E[lab == p].mean(0)) @ c4)
+        if s >= best:
+            best, bp = s, p
+    return bp if bp is not None and bp != A else None""")
+    old_L = "    L = ids3[1] if len(ids3) > 1 else None\n"
+    assert old_L in c
+    c = c.replace(old_L, "    L = oracle_B(E, lab, A, row.clip4) if len(items) else None     # oracle listener = true responder B\n"
+                         "    B_MATCHED[n] = L is not None\n")
+    old_by = """    for (k, j), p in zip(items, lab):
+        by[(role(p), k)].append(j)
+        by[('pool', k)].append(j)
+"""
+    assert old_by in c
+    c = c.replace(old_by, """    for (k, j), p in zip(items, lab):
+        if k == 2 and not keep_t(cl[2], j):          # identities come from the full clips; late clip-III faces are cut
+            continue
+        by[(role(p), k)].append(j)
+        by[('pool', k)].append(j)
+    KEPT[n] = (sum(1 for k, j in items if k == 2 and keep_t(cl[2], j)), sum(1 for k, _ in items if k == 2))
+""")
+    old_init = "CENT_COS = np.full(N, np.nan, np.float32)"
+    assert old_init in c
+    c = c.replace(old_init, old_init + "\nKEPT = np.zeros((N, 2), int)               # clip-III faces kept / available"
+                                       "\nB_MATCHED = np.zeros(N, bool)")
+    return ("print(f'==== clip III kept: {TRUNC * 100:.0f}% of its duration (oracle listener) ====')\n" + c + """
+kept_frac = KEPT[:, 0].sum() / max(KEPT[:, 1].sum(), 1)
+print(f"B matched (oracle listener) {B_MATCHED.mean() * 100:.1f}% | clip-III faces kept {kept_frac * 100:.1f}% | "
+      f"oracle listener visible in III {VIS.mean() * 100:.1f}% | in I/II {FMASK[:, 1, :2].any((-1, -2)).mean() * 100:.1f}%")
+assert TRUNC < 1.0 or KEPT[:, 0].sum() == KEPT[:, 1].sum(), "nothing may be cut at 100%"
+assert TRUNC >= 1.0 or kept_frac < 0.999, "the cut removed no clip-III face: check the face times"
+if TRUNC < 1.0:
+    assert (B_MATCHED == B_MATCHED_100).all(), "the oracle listener must not depend on the cut"
+else:
+    B_MATCHED_100 = B_MATCHED.copy()
+    assert DEBUG_PER_EPISODE or B_MATCHED.mean() > 0.5, (
+        f"B matched for only {B_MATCHED.mean() * 100:.1f}% of MCIS (G26: 88%): wrong or incomplete c4shard files?")
+VIS_ALL[TRUNC], KEPT_ALL[TRUNC] = VIS.copy(), kept_frac
+""")
+
+
+def _g44_results():
+    c = G40[-1][1].replace("g40_summary.csv", "g44_summary.csv")
+    return c + """print(f"oracle listener (B) matched for {B_MATCHED_100.mean() * 100:.1f}% of MCIS; the rest have no listener token at any cut")
+"""
+
+
+G44 = [
+    ("markdown", r"""
+# G44 — Oracle-identity truncation: does the listener gain need B's late clip-III frames? (5-fold CV; test untouched)
+
+G40 cut the end of clip III **before** assigning roles, so the cut also removed the listener's *identity* (L is the
+second most visible person of clip III, and the listener mostly appears in the reaction shot at the end). G44
+separates the two: the listener is fixed to the **true responder B** for every cut level, and only the late
+clip-III **faces** are removed.
+
+* **Roles** (identical at every cut): identities clustered over the full clips I–III; A = most frames in the full clip
+  III; **L = B**, the dominant clip-IV identity matched to a clip I–III identity other than A (as G26, needs the G26a
+  output `c4shard_*.pkl`); O = everyone else. MCIS whose B is not matched have no listener token. Clip IV is used only
+  to choose *whose* face is the listener (oracle, analysis only), never as a model input.
+* **Cut**: clip-III faces later than p·duration are removed from every role cell; the clip-III scene token uses the
+  first 16·p frames; clip-level text/audio are kept (as G40).
+* Arms `Full` and `minus-L` (no listener tokens) at p = 100% / 80% / 60%, 5 seeds × 5 folds, same folds, early-stop
+  episodes and hyper-parameters as G8b/G14/G40; plain scoring.
+
+**Reading rules (fixed before running)**, as G40: listener gain G_p = UAR(Full_p) − UAR(minus-L_p), 5-seed ensembles,
+95% two-level bootstrap over seeds and episodes.
+* **B's history and early frames suffice**: the lower bound of G_60 is above 0.
+* **The gain needs B's late frames**: the CI of G_60 includes 0 **and** G_60 < G_100 / 2.
+* Otherwise **inconclusive**.
+"""),
+    ("code", _g44_cfg()),
+    ("code", G14[2][1].replace(_ANNOT_OLD, _ANNOT_NEW)),
+    G14[3], G14[4],
+]
+for _p in _G40_TRUNCS:
+    G44 += [
+        ("markdown", f"\n## Clip III kept: {int(round(_p * 100))}% (oracle listener)\n"),
+        ("code", f"TRUNC = {_p}\n"),
+        ("code", _g44_role_cell()),
+        ("code", _g40_model_cell()),
+        G14[10],
+        ("code", _g40_cv_cell().replace("g40_", "g44_")),
+    ]
+G44 += [
+    ("markdown", "\n## Results (plain argmax, 5-seed ensembles; two-level bootstrap over seeds and episodes)\n"),
+    ("code", _g44_results()),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -13175,6 +13321,7 @@ if __name__ == "__main__":
                         ("g41_feature_matched_baseline_cv.ipynb", G41),
                         ("g42_test_responder_groups.ipynb", G42),
                         ("g43_listener_history_vs_current_cv.ipynb", G43),
+                        ("g44_oracle_listener_truncation_cv.ipynb", G44),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

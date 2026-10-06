@@ -1,0 +1,146 @@
+7.2s 1 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+7.2s 2 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+7.2s 3 0.00s - to python to disable frozen modules.
+7.2s 4 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+7.8s 5 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+7.8s 6 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+7.8s 7 0.00s - to python to disable frozen modules.
+7.8s 8 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+38.2s 9 annotation file: /kaggle/input/datasets/ptrnghieu/hi-ef-dataset/Hi-EF-20260829T071606Z-1-001/Hi-EF/annotation.csv
+38.2s 10 development MCIS 2421 | episodes 45
+67.8s 11 {'face': (6756, 16, 512), 'fmask': (6756, 16), 'ori': (6756, 16, 512), 'text': (6756, 512), 'audio': (6756, 527), 'afound': (6756,)}
+73.1s 12 HSEmotion embedding available: True | frame feature dim 146
+79.6s 13 A found in III 100.0% | listener visible in III 59.9% | listener also in I/II 44.2%
+79.9s 14 parameters: {}
+80.1s 15 parameters: {'L-both': '0.709M', 'L-history only': '0.709M', 'L-current only': '0.709M', 'L-none': '0.709M'}
+80.1s 16 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+87.9s 17 fold 0: train 1733 | early-stop 207 | eval 481
+100.5s 18 fold 0 L-both         seed 42: sel 23.38 | UAR 27.92 WAR 42.20 | 0.3 min
+112.2s 19 fold 0 L-both         seed 123: sel 20.94 | UAR 25.07 WAR 34.93 | 0.5 min
+127.5s 20 fold 0 L-both         seed 456: sel 22.77 | UAR 24.78 WAR 28.90 | 0.8 min
+137.5s 21 fold 0 L-both         seed 7: sel 21.34 | UAR 25.40 WAR 33.89 | 1.0 min
+147.9s 22 fold 0 L-both         seed 11: sel 23.61 | UAR 28.39 WAR 40.54 | 1.1 min
+154.1s 23 fold 0 L-history only seed 42: sel 23.49 | UAR 27.07 WAR 41.16 | 1.2 min
+166.5s 24 fold 0 L-history only seed 123: sel 19.59 | UAR 22.50 WAR 31.19 | 1.4 min
+174.7s 25 fold 0 L-history only seed 456: sel 20.40 | UAR 25.58 WAR 37.84 | 1.6 min
+180.7s 26 fold 0 L-history only seed 7: sel 20.19 | UAR 25.23 WAR 38.88 | 1.7 min
+186.4s 27 fold 0 L-history only seed 11: sel 21.77 | UAR 24.26 WAR 38.05 | 1.8 min
+196.1s 28 fold 0 L-current only seed 42: sel 22.83 | UAR 27.01 WAR 37.42 | 1.9 min
+211.3s 29 fold 0 L-current only seed 123: sel 23.83 | UAR 24.45 WAR 29.52 | 2.2 min
+221.5s 30 fold 0 L-current only seed 456: sel 21.24 | UAR 26.26 WAR 30.98 | 2.4 min
+233.6s 31 fold 0 L-current only seed 7: sel 22.65 | UAR 27.87 WAR 36.17 | 2.6 min
+239.5s 32 fold 0 L-current only seed 11: sel 22.34 | UAR 24.57 WAR 38.25 | 2.7 min
+245.9s 33 fold 0 L-none         seed 42: sel 21.16 | UAR 25.31 WAR 37.84 | 2.8 min
+257.7s 34 fold 0 L-none         seed 123: sel 23.26 | UAR 23.68 WAR 34.30 | 3.0 min
+266.9s 35 fold 0 L-none         seed 456: sel 20.92 | UAR 23.34 WAR 31.19 | 3.1 min
+277.7s 36 fold 0 L-none         seed 7: sel 21.05 | UAR 21.72 WAR 33.26 | 3.3 min
+283.3s 37 fold 0 L-none         seed 11: sel 20.53 | UAR 24.55 WAR 39.50 | 3.4 min
+290.6s 38 fold 1: train 1667 | early-stop 267 | eval 487
+298.6s 39 fold 1 L-both         seed 42: sel 29.22 | UAR 28.47 WAR 40.45 | 3.6 min
+306.7s 40 fold 1 L-both         seed 123: sel 31.62 | UAR 28.25 WAR 42.51 | 3.8 min
+313.9s 41 fold 1 L-both         seed 456: sel 26.99 | UAR 26.74 WAR 39.22 | 3.9 min
+322.3s 42 fold 1 L-both         seed 7: sel 28.63 | UAR 29.17 WAR 40.66 | 4.0 min
+331.1s 43 fold 1 L-both         seed 11: sel 28.36 | UAR 27.36 WAR 38.81 | 4.2 min
+339.4s 44 fold 1 L-history only seed 42: sel 28.51 | UAR 27.01 WAR 38.81 | 4.3 min
+349.0s 45 fold 1 L-history only seed 123: sel 29.04 | UAR 24.43 WAR 36.55 | 4.5 min
+356.7s 46 fold 1 L-history only seed 456: sel 25.02 | UAR 27.67 WAR 38.19 | 4.6 min
+364.5s 47 fold 1 L-history only seed 7: sel 26.59 | UAR 25.55 WAR 38.81 | 4.7 min
+374.6s 48 fold 1 L-history only seed 11: sel 26.69 | UAR 25.04 WAR 37.17 | 4.9 min
+382.5s 49 fold 1 L-current only seed 42: sel 29.75 | UAR 27.13 WAR 39.01 | 5.0 min
+392.3s 50 fold 1 L-current only seed 123: sel 30.68 | UAR 24.85 WAR 36.14 | 5.2 min
+401.4s 51 fold 1 L-current only seed 456: sel 27.72 | UAR 25.20 WAR 36.14 | 5.4 min
+409.1s 52 fold 1 L-current only seed 7: sel 28.78 | UAR 26.97 WAR 41.27 | 5.5 min
+420.6s 53 fold 1 L-current only seed 11: sel 25.75 | UAR 24.96 WAR 40.25 | 5.7 min
+427.5s 54 fold 1 L-none         seed 42: sel 27.38 | UAR 26.14 WAR 40.86 | 5.8 min
+435.3s 55 fold 1 L-none         seed 123: sel 26.91 | UAR 23.71 WAR 39.22 | 5.9 min
+441.3s 56 fold 1 L-none         seed 456: sel 25.26 | UAR 24.88 WAR 39.43 | 6.0 min
+448.8s 57 fold 1 L-none         seed 7: sel 27.17 | UAR 24.32 WAR 37.17 | 6.1 min
+454.7s 58 fold 1 L-none         seed 11: sel 25.15 | UAR 22.86 WAR 39.22 | 6.2 min
+462.2s 59 fold 2: train 1634 | early-stop 308 | eval 479
+470.3s 60 fold 2 L-both         seed 42: sel 22.41 | UAR 25.99 WAR 36.95 | 6.5 min
+477.1s 61 fold 2 L-both         seed 123: sel 21.00 | UAR 24.17 WAR 35.91 | 6.6 min
+484.4s 62 fold 2 L-both         seed 456: sel 21.64 | UAR 25.81 WAR 36.74 | 6.7 min
+497.4s 63 fold 2 L-both         seed 7: sel 22.49 | UAR 23.84 WAR 31.11 | 7.0 min
+505.0s 64 fold 2 L-both         seed 11: sel 24.26 | UAR 26.48 WAR 36.53 | 7.1 min
+513.4s 65 fold 2 L-history only seed 42: sel 22.58 | UAR 24.80 WAR 35.07 | 7.2 min
+523.6s 66 fold 2 L-history only seed 123: sel 21.59 | UAR 24.53 WAR 35.70 | 7.4 min
+532.0s 67 fold 2 L-history only seed 456: sel 21.68 | UAR 25.14 WAR 35.70 | 7.5 min
+539.6s 68 fold 2 L-history only seed 7: sel 24.59 | UAR 25.43 WAR 35.49 | 7.7 min
+548.3s 69 fold 2 L-history only seed 11: sel 23.03 | UAR 23.33 WAR 31.94 | 7.8 min
+555.5s 70 fold 2 L-current only seed 42: sel 22.25 | UAR 22.41 WAR 33.61 | 7.9 min
+567.5s 71 fold 2 L-current only seed 123: sel 20.55 | UAR 23.57 WAR 33.82 | 8.1 min
+578.5s 72 fold 2 L-current only seed 456: sel 24.30 | UAR 19.91 WAR 28.39 | 8.3 min
+585.6s 73 fold 2 L-current only seed 7: sel 22.78 | UAR 22.79 WAR 33.19 | 8.4 min
+594.6s 74 fold 2 L-current only seed 11: sel 24.30 | UAR 24.03 WAR 34.03 | 8.6 min
+602.9s 75 fold 2 L-none         seed 42: sel 22.81 | UAR 23.17 WAR 32.78 | 8.7 min
+618.2s 76 fold 2 L-none         seed 123: sel 21.75 | UAR 18.23 WAR 24.84 | 9.0 min
+628.5s 77 fold 2 L-none         seed 456: sel 22.46 | UAR 21.93 WAR 30.48 | 9.1 min
+636.3s 78 fold 2 L-none         seed 7: sel 23.24 | UAR 22.31 WAR 31.52 | 9.3 min
+645.1s 79 fold 2 L-none         seed 11: sel 25.33 | UAR 21.29 WAR 29.23 | 9.4 min
+652.4s 80 fold 3: train 1713 | early-stop 229 | eval 479
+659.6s 81 fold 3 L-both         seed 42: sel 29.66 | UAR 20.48 WAR 32.78 | 9.7 min
+670.4s 82 fold 3 L-both         seed 123: sel 28.03 | UAR 19.81 WAR 28.39 | 9.8 min
+678.1s 83 fold 3 L-both         seed 456: sel 27.95 | UAR 20.23 WAR 32.15 | 10.0 min
+684.9s 84 fold 3 L-both         seed 7: sel 27.40 | UAR 19.89 WAR 32.36 | 10.1 min
+699.2s 85 fold 3 L-both         seed 11: sel 27.02 | UAR 20.66 WAR 30.27 | 10.3 min
+714.0s 86 fold 3 L-history only seed 42: sel 28.27 | UAR 18.96 WAR 26.30 | 10.6 min
+724.8s 87 fold 3 L-history only seed 123: sel 27.12 | UAR 19.25 WAR 27.14 | 10.7 min
+732.3s 88 fold 3 L-history only seed 456: sel 26.16 | UAR 19.14 WAR 30.27 | 10.9 min
+739.8s 89 fold 3 L-history only seed 7: sel 25.69 | UAR 19.80 WAR 31.32 | 11.0 min
+746.3s 90 fold 3 L-history only seed 11: sel 26.73 | UAR 20.40 WAR 32.36 | 11.1 min
+753.0s 91 fold 3 L-current only seed 42: sel 28.25 | UAR 21.51 WAR 33.40 | 11.2 min
+762.4s 92 fold 3 L-current only seed 123: sel 26.74 | UAR 21.47 WAR 30.48 | 11.4 min
+770.1s 93 fold 3 L-current only seed 456: sel 29.18 | UAR 21.02 WAR 32.78 | 11.5 min
+776.9s 94 fold 3 L-current only seed 7: sel 26.34 | UAR 19.85 WAR 31.32 | 11.6 min
+788.9s 95 fold 3 L-current only seed 11: sel 27.41 | UAR 18.67 WAR 29.23 | 11.8 min
+796.1s 96 fold 3 L-none         seed 42: sel 26.23 | UAR 21.97 WAR 33.40 | 11.9 min
+802.2s 97 fold 3 L-none         seed 123: sel 25.94 | UAR 19.49 WAR 30.69 | 12.0 min
+809.8s 98 fold 3 L-none         seed 456: sel 26.38 | UAR 20.02 WAR 30.48 | 12.2 min
+818.3s 99 fold 3 L-none         seed 7: sel 25.86 | UAR 19.15 WAR 26.93 | 12.3 min
+826.1s 100 fold 3 L-none         seed 11: sel 25.33 | UAR 19.67 WAR 29.65 | 12.4 min
+833.3s 101 fold 4: train 1567 | early-stop 359 | eval 495
+839.9s 102 fold 4 L-both         seed 42: sel 25.36 | UAR 22.88 WAR 32.73 | 12.7 min
+863.1s 103 fold 4 L-both         seed 123: sel 29.04 | UAR 23.18 WAR 28.08 | 13.1 min
+870.8s 104 fold 4 L-both         seed 456: sel 26.34 | UAR 22.08 WAR 30.71 | 13.2 min
+879.3s 105 fold 4 L-both         seed 7: sel 25.94 | UAR 22.71 WAR 34.34 | 13.3 min
+888.2s 106 fold 4 L-both         seed 11: sel 25.73 | UAR 22.85 WAR 33.74 | 13.5 min
+894.9s 107 fold 4 L-history only seed 42: sel 25.88 | UAR 22.31 WAR 32.32 | 13.6 min
+903.6s 108 fold 4 L-history only seed 123: sel 24.65 | UAR 23.70 WAR 32.12 | 13.7 min
+913.2s 109 fold 4 L-history only seed 456: sel 25.75 | UAR 21.20 WAR 31.11 | 13.9 min
+920.8s 110 fold 4 L-history only seed 7: sel 24.66 | UAR 22.13 WAR 32.73 | 14.0 min
+927.3s 111 fold 4 L-history only seed 11: sel 25.52 | UAR 21.82 WAR 31.31 | 14.1 min
+933.7s 112 fold 4 L-current only seed 42: sel 25.57 | UAR 22.37 WAR 32.73 | 14.2 min
+942.5s 113 fold 4 L-current only seed 123: sel 26.54 | UAR 23.34 WAR 32.93 | 14.4 min
+948.8s 114 fold 4 L-current only seed 456: sel 26.22 | UAR 22.52 WAR 34.75 | 14.5 min
+956.4s 115 fold 4 L-current only seed 7: sel 26.07 | UAR 24.08 WAR 35.56 | 14.6 min
+964.2s 116 fold 4 L-current only seed 11: sel 25.84 | UAR 21.31 WAR 31.11 | 14.7 min
+970.1s 117 fold 4 L-none         seed 42: sel 24.65 | UAR 19.54 WAR 28.89 | 14.8 min
+976.9s 118 fold 4 L-none         seed 123: sel 24.14 | UAR 21.39 WAR 32.32 | 14.9 min
+983.6s 119 fold 4 L-none         seed 456: sel 24.79 | UAR 22.02 WAR 30.91 | 15.1 min
+990.5s 120 fold 4 L-none         seed 7: sel 24.25 | UAR 20.84 WAR 30.51 | 15.2 min
+1001.2s 121 fold 4 L-none         seed 11: sel 25.89 | UAR 18.64 WAR 26.06 | 15.4 min
+1001.2s 122 saved g43_oof_probs.npz and g43_fold_seed_log.csv
+1001.3s 123 == 2421 MCIS, 45 episodes, 5 seeds ==
+1001.3s 124 L-both          UAR 26.62  WAR 37.92
+1001.3s 125 L-history only  UAR 25.15  WAR 36.56
+1001.3s 126 L-current only  UAR 24.86  WAR 35.98
+1001.3s 127 L-none          UAR 24.04  WAR 35.23
+1001.3s 128 
+1001.3s 129 == listener contrasts ==
+1003.3s 130 H (history value)      L-history only − L-none: +1.12 [-0.78,+2.57]
+1005.2s 131 C (current value)      L-current only − L-none: +0.83 [-0.51,+2.75]
+1007.0s 132 listener total         L-both − L-none: +2.58 [+0.05,+3.75]
+1008.9s 133 C - H                  L-current only − L-history only: -0.29 [-1.50,+1.92]
+1010.7s 134 III added to history   L-both − L-history only: +1.46 [-0.81,+2.82]
+1012.3s 135 I/II added to current  L-both − L-current only: +1.76 [-0.91,+2.74]
+1012.3s 136 
+1012.3s 137 VERDICT: INCONCLUSIVE under the fixed rule
+1012.3s 138 saved /kaggle/working/g43_summary.csv and g43_contrasts.csv
+1018.1s 139 /usr/local/lib/python3.13/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\|'
+1018.1s 140 cells[i][c] = re.sub('\\\\\|', '|', cell)
+1018.2s 141 /usr/local/lib/python3.13/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\_'
+1018.2s 142 text = re.sub(r'_', '\_', text) # Escape underscores in display text
+1019.0s 143 [NbConvertApp] Converting notebook __notebook__.ipynb to notebook
+1019.2s 144 [NbConvertApp] Writing 87966 bytes to __notebook__.ipynb
+1021.9s 145 [NbConvertApp] Converting notebook __notebook__.ipynb to html
+1022.8s 146 [NbConvertApp] Writing 572484 bytes to __results__.html

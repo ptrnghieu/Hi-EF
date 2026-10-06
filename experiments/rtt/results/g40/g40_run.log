@@ -1,0 +1,218 @@
+8.1s 1 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+8.1s 2 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+8.1s 3 0.00s - to python to disable frozen modules.
+8.1s 4 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+8.7s 5 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+8.7s 6 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+8.7s 7 0.00s - to python to disable frozen modules.
+8.7s 8 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+26.3s 9 annotation file: /kaggle/input/datasets/ptrnghieu/hi-ef-annotation/annotation.csv
+26.4s 10 development MCIS 2421 | episodes 45
+65.5s 11 {'face': (6756, 16, 512), 'fmask': (6756, 16), 'ori': (6756, 16, 512), 'text': (6756, 512), 'audio': (6756, 527), 'afound': (6756,)}
+65.7s 12 ==== clip III kept: 100% of its duration ====
+71.1s 13 HSEmotion embedding available: True | frame feature dim 146
+77.4s 14 A found in III 100.0% | listener visible in III 59.9% | listener also in I/II 44.2%
+77.4s 15 clip-III faces kept: 100.0% of 23222 | listener visible in III: 59.9%
+77.8s 16 scene token of clip III uses 16 of 16 frames
+77.8s 17 parameters: {}
+77.9s 18 parameters: {'Full': '0.709M', 'minus-L': '0.709M'}
+78.0s 19 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+85.3s 20 fold 0: train 1733 | early-stop 207 | eval 481
+98.9s 21 fold 0 Full           seed 42: sel 23.38 | UAR 27.92 WAR 42.20 | 0.3 min
+110.8s 22 fold 0 Full           seed 123: sel 20.94 | UAR 25.07 WAR 34.93 | 0.5 min
+126.4s 23 fold 0 Full           seed 456: sel 22.77 | UAR 24.78 WAR 28.90 | 0.8 min
+136.6s 24 fold 0 Full           seed 7: sel 21.34 | UAR 25.40 WAR 33.89 | 1.0 min
+147.0s 25 fold 0 Full           seed 11: sel 23.61 | UAR 28.39 WAR 40.54 | 1.2 min
+153.2s 26 fold 0 minus-L        seed 42: sel 21.16 | UAR 25.31 WAR 37.84 | 1.3 min
+165.0s 27 fold 0 minus-L        seed 123: sel 23.26 | UAR 23.68 WAR 34.30 | 1.5 min
+174.4s 28 fold 0 minus-L        seed 456: sel 20.92 | UAR 23.34 WAR 31.19 | 1.6 min
+186.3s 29 fold 0 minus-L        seed 7: sel 21.05 | UAR 21.72 WAR 33.26 | 1.8 min
+192.1s 30 fold 0 minus-L        seed 11: sel 20.53 | UAR 24.55 WAR 39.50 | 1.9 min
+199.3s 31 fold 1: train 1667 | early-stop 267 | eval 487
+207.3s 32 fold 1 Full           seed 42: sel 29.22 | UAR 28.47 WAR 40.45 | 2.2 min
+215.4s 33 fold 1 Full           seed 123: sel 31.62 | UAR 28.25 WAR 42.51 | 2.3 min
+222.7s 34 fold 1 Full           seed 456: sel 26.99 | UAR 26.74 WAR 39.22 | 2.4 min
+230.9s 35 fold 1 Full           seed 7: sel 28.63 | UAR 29.17 WAR 40.66 | 2.5 min
+239.9s 36 fold 1 Full           seed 11: sel 28.36 | UAR 27.36 WAR 38.81 | 2.7 min
+246.9s 37 fold 1 minus-L        seed 42: sel 27.38 | UAR 26.14 WAR 40.86 | 2.8 min
+255.0s 38 fold 1 minus-L        seed 123: sel 26.91 | UAR 23.71 WAR 39.22 | 3.0 min
+260.9s 39 fold 1 minus-L        seed 456: sel 25.26 | UAR 24.88 WAR 39.43 | 3.0 min
+268.5s 40 fold 1 minus-L        seed 7: sel 27.17 | UAR 24.32 WAR 37.17 | 3.2 min
+274.6s 41 fold 1 minus-L        seed 11: sel 25.15 | UAR 22.86 WAR 39.22 | 3.3 min
+281.9s 42 fold 2: train 1634 | early-stop 308 | eval 479
+290.0s 43 fold 2 Full           seed 42: sel 22.41 | UAR 25.99 WAR 36.95 | 3.5 min
+296.5s 44 fold 2 Full           seed 123: sel 21.00 | UAR 24.17 WAR 35.91 | 3.6 min
+303.8s 45 fold 2 Full           seed 456: sel 21.64 | UAR 25.81 WAR 36.74 | 3.8 min
+316.9s 46 fold 2 Full           seed 7: sel 22.49 | UAR 23.84 WAR 31.11 | 4.0 min
+324.9s 47 fold 2 Full           seed 11: sel 24.26 | UAR 26.48 WAR 36.53 | 4.1 min
+333.1s 48 fold 2 minus-L        seed 42: sel 22.81 | UAR 23.17 WAR 32.78 | 4.3 min
+348.3s 49 fold 2 minus-L        seed 123: sel 21.75 | UAR 18.23 WAR 24.84 | 4.5 min
+358.7s 50 fold 2 minus-L        seed 456: sel 22.46 | UAR 21.93 WAR 30.48 | 4.7 min
+366.5s 51 fold 2 minus-L        seed 7: sel 23.24 | UAR 22.31 WAR 31.52 | 4.8 min
+375.4s 52 fold 2 minus-L        seed 11: sel 25.33 | UAR 21.29 WAR 29.23 | 5.0 min
+382.6s 53 fold 3: train 1713 | early-stop 229 | eval 479
+389.6s 54 fold 3 Full           seed 42: sel 29.66 | UAR 20.48 WAR 32.78 | 5.2 min
+400.4s 55 fold 3 Full           seed 123: sel 28.03 | UAR 19.81 WAR 28.39 | 5.4 min
+408.2s 56 fold 3 Full           seed 456: sel 27.95 | UAR 20.23 WAR 32.15 | 5.5 min
+415.0s 57 fold 3 Full           seed 7: sel 27.40 | UAR 19.89 WAR 32.36 | 5.6 min
+428.9s 58 fold 3 Full           seed 11: sel 27.02 | UAR 20.66 WAR 30.27 | 5.8 min
+436.0s 59 fold 3 minus-L        seed 42: sel 26.23 | UAR 21.97 WAR 33.40 | 6.0 min
+442.0s 60 fold 3 minus-L        seed 123: sel 25.94 | UAR 19.49 WAR 30.69 | 6.1 min
+449.5s 61 fold 3 minus-L        seed 456: sel 26.38 | UAR 20.02 WAR 30.48 | 6.2 min
+458.3s 62 fold 3 minus-L        seed 7: sel 25.86 | UAR 19.15 WAR 26.93 | 6.3 min
+466.1s 63 fold 3 minus-L        seed 11: sel 25.33 | UAR 19.67 WAR 29.65 | 6.5 min
+473.6s 64 fold 4: train 1567 | early-stop 359 | eval 495
+480.0s 65 fold 4 Full           seed 42: sel 25.36 | UAR 22.88 WAR 32.73 | 6.7 min
+503.3s 66 fold 4 Full           seed 123: sel 29.04 | UAR 23.18 WAR 28.08 | 7.1 min
+510.7s 67 fold 4 Full           seed 456: sel 26.34 | UAR 22.08 WAR 30.71 | 7.2 min
+518.8s 68 fold 4 Full           seed 7: sel 25.94 | UAR 22.71 WAR 34.34 | 7.3 min
+527.7s 69 fold 4 Full           seed 11: sel 25.73 | UAR 22.85 WAR 33.74 | 7.5 min
+533.8s 70 fold 4 minus-L        seed 42: sel 24.65 | UAR 19.54 WAR 28.89 | 7.6 min
+540.5s 71 fold 4 minus-L        seed 123: sel 24.14 | UAR 21.39 WAR 32.32 | 7.7 min
+547.0s 72 fold 4 minus-L        seed 456: sel 24.79 | UAR 22.02 WAR 30.91 | 7.8 min
+553.9s 73 fold 4 minus-L        seed 7: sel 24.25 | UAR 20.84 WAR 30.51 | 7.9 min
+564.4s 74 fold 4 minus-L        seed 11: sel 25.89 | UAR 18.64 WAR 26.06 | 8.1 min
+564.4s 75 saved g40_oof_probs_p100.npz and g40_fold_seed_log_p100.csv
+564.6s 76 ==== clip III kept: 80% of its duration ====
+565.4s 77 HSEmotion embedding available: True | frame feature dim 146
+571.0s 78 A found in III 100.0% | listener visible in III 33.0% | listener also in I/II 23.7%
+571.0s 79 clip-III faces kept: 79.4% of 23222 | listener visible in III: 33.0%
+571.1s 80 scene token of clip III uses 13 of 16 frames
+571.1s 81 parameters: {}
+571.2s 82 parameters: {'Full': '0.709M', 'minus-L': '0.709M'}
+571.2s 83 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+578.4s 84 fold 0: train 1733 | early-stop 207 | eval 481
+586.8s 85 fold 0 Full           seed 42: sel 21.98 | UAR 27.52 WAR 41.16 | 0.3 min
+594.2s 86 fold 0 Full           seed 123: sel 21.71 | UAR 27.59 WAR 39.71 | 0.4 min
+611.2s 87 fold 0 Full           seed 456: sel 20.52 | UAR 23.92 WAR 31.39 | 0.7 min
+617.1s 88 fold 0 Full           seed 7: sel 20.48 | UAR 21.13 WAR 35.97 | 0.8 min
+622.9s 89 fold 0 Full           seed 11: sel 22.63 | UAR 23.27 WAR 36.38 | 0.9 min
+629.8s 90 fold 0 minus-L        seed 42: sel 19.93 | UAR 26.62 WAR 39.29 | 1.0 min
+635.3s 91 fold 0 minus-L        seed 123: sel 19.05 | UAR 18.88 WAR 35.76 | 1.1 min
+646.4s 92 fold 0 minus-L        seed 456: sel 22.06 | UAR 23.67 WAR 29.73 | 1.3 min
+657.4s 93 fold 0 minus-L        seed 7: sel 20.79 | UAR 23.34 WAR 34.51 | 1.4 min
+663.4s 94 fold 0 minus-L        seed 11: sel 22.63 | UAR 24.90 WAR 37.42 | 1.5 min
+670.6s 95 fold 1: train 1667 | early-stop 267 | eval 487
+678.3s 96 fold 1 Full           seed 42: sel 27.11 | UAR 28.10 WAR 42.30 | 1.8 min
+687.0s 97 fold 1 Full           seed 123: sel 30.57 | UAR 26.25 WAR 36.14 | 1.9 min
+693.0s 98 fold 1 Full           seed 456: sel 25.84 | UAR 27.31 WAR 42.71 | 2.0 min
+700.6s 99 fold 1 Full           seed 7: sel 27.54 | UAR 26.86 WAR 40.66 | 2.2 min
+709.7s 100 fold 1 Full           seed 11: sel 27.93 | UAR 27.09 WAR 38.60 | 2.3 min
+718.4s 101 fold 1 minus-L        seed 42: sel 28.22 | UAR 25.20 WAR 38.81 | 2.5 min
+725.4s 102 fold 1 minus-L        seed 123: sel 28.72 | UAR 24.91 WAR 39.43 | 2.6 min
+734.7s 103 fold 1 minus-L        seed 456: sel 26.19 | UAR 23.91 WAR 34.29 | 2.7 min
+742.3s 104 fold 1 minus-L        seed 7: sel 27.84 | UAR 25.24 WAR 37.99 | 2.9 min
+749.5s 105 fold 1 minus-L        seed 11: sel 25.78 | UAR 26.07 WAR 38.19 | 3.0 min
+756.6s 106 fold 2: train 1634 | early-stop 308 | eval 479
+764.9s 107 fold 2 Full           seed 42: sel 23.51 | UAR 24.63 WAR 35.07 | 3.2 min
+773.1s 108 fold 2 Full           seed 123: sel 20.63 | UAR 24.12 WAR 33.40 | 3.4 min
+783.8s 109 fold 2 Full           seed 456: sel 23.36 | UAR 23.03 WAR 33.19 | 3.5 min
+791.7s 110 fold 2 Full           seed 7: sel 23.71 | UAR 24.79 WAR 34.45 | 3.7 min
+800.6s 111 fold 2 Full           seed 11: sel 23.45 | UAR 24.15 WAR 33.40 | 3.8 min
+808.7s 112 fold 2 minus-L        seed 42: sel 22.61 | UAR 25.10 WAR 35.91 | 4.0 min
+815.3s 113 fold 2 minus-L        seed 123: sel 20.17 | UAR 22.42 WAR 33.40 | 4.1 min
+824.9s 114 fold 2 minus-L        seed 456: sel 23.86 | UAR 23.50 WAR 32.78 | 4.2 min
+831.3s 115 fold 2 minus-L        seed 7: sel 22.44 | UAR 22.26 WAR 32.99 | 4.3 min
+839.0s 116 fold 2 minus-L        seed 11: sel 23.41 | UAR 26.48 WAR 35.91 | 4.5 min
+845.8s 117 fold 3: train 1713 | early-stop 229 | eval 479
+858.4s 118 fold 3 Full           seed 42: sel 28.31 | UAR 20.24 WAR 28.60 | 4.8 min
+870.7s 119 fold 3 Full           seed 123: sel 27.13 | UAR 19.76 WAR 27.14 | 5.0 min
+878.3s 120 fold 3 Full           seed 456: sel 26.22 | UAR 20.02 WAR 31.94 | 5.1 min
+888.3s 121 fold 3 Full           seed 7: sel 25.99 | UAR 20.17 WAR 29.23 | 5.3 min
+894.8s 122 fold 3 Full           seed 11: sel 26.58 | UAR 20.37 WAR 31.94 | 5.4 min
+902.6s 123 fold 3 minus-L        seed 42: sel 26.43 | UAR 20.00 WAR 30.69 | 5.5 min
+908.6s 124 fold 3 minus-L        seed 123: sel 24.86 | UAR 20.49 WAR 31.73 | 5.6 min
+914.8s 125 fold 3 minus-L        seed 456: sel 26.48 | UAR 20.59 WAR 30.90 | 5.7 min
+921.1s 126 fold 3 minus-L        seed 7: sel 25.27 | UAR 21.90 WAR 34.24 | 5.8 min
+929.2s 127 fold 3 minus-L        seed 11: sel 25.67 | UAR 20.21 WAR 30.90 | 6.0 min
+936.5s 128 fold 4: train 1567 | early-stop 359 | eval 495
+942.9s 129 fold 4 Full           seed 42: sel 25.98 | UAR 21.88 WAR 32.32 | 6.2 min
+951.8s 130 fold 4 Full           seed 123: sel 24.39 | UAR 21.97 WAR 29.70 | 6.3 min
+959.6s 131 fold 4 Full           seed 456: sel 25.25 | UAR 22.75 WAR 31.52 | 6.5 min
+969.3s 132 fold 4 Full           seed 7: sel 25.43 | UAR 20.90 WAR 29.29 | 6.6 min
+975.7s 133 fold 4 Full           seed 11: sel 26.56 | UAR 23.19 WAR 33.33 | 6.7 min
+981.7s 134 fold 4 minus-L        seed 42: sel 23.87 | UAR 20.64 WAR 29.29 | 6.8 min
+988.8s 135 fold 4 minus-L        seed 123: sel 25.40 | UAR 21.47 WAR 32.73 | 7.0 min
+997.0s 136 fold 4 minus-L        seed 456: sel 25.50 | UAR 21.60 WAR 29.70 | 7.1 min
+1007.3s 137 fold 4 minus-L        seed 7: sel 23.86 | UAR 19.63 WAR 27.88 | 7.3 min
+1016.8s 138 fold 4 minus-L        seed 11: sel 25.68 | UAR 21.96 WAR 29.70 | 7.4 min
+1016.8s 139 saved g40_oof_probs_p080.npz and g40_fold_seed_log_p080.csv
+1017.0s 140 ==== clip III kept: 60% of its duration ====
+1017.8s 141 HSEmotion embedding available: True | frame feature dim 146
+1023.6s 142 A found in III 100.0% | listener visible in III 25.1% | listener also in I/II 18.5%
+1023.6s 143 clip-III faces kept: 60.7% of 23222 | listener visible in III: 25.1%
+1023.7s 144 scene token of clip III uses 10 of 16 frames
+1023.7s 145 parameters: {}
+1023.7s 146 parameters: {'Full': '0.709M', 'minus-L': '0.709M'}
+1023.8s 147 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+1030.9s 148 fold 0: train 1733 | early-stop 207 | eval 481
+1038.8s 149 fold 0 Full           seed 42: sel 21.41 | UAR 26.02 WAR 39.92 | 0.3 min
+1052.8s 150 fold 0 Full           seed 123: sel 23.59 | UAR 24.82 WAR 29.73 | 0.5 min
+1064.3s 151 fold 0 Full           seed 456: sel 20.26 | UAR 25.74 WAR 32.43 | 0.7 min
+1072.6s 152 fold 0 Full           seed 7: sel 20.44 | UAR 23.07 WAR 32.43 | 0.8 min
+1079.1s 153 fold 0 Full           seed 11: sel 22.20 | UAR 26.34 WAR 40.12 | 0.9 min
+1085.5s 154 fold 0 minus-L        seed 42: sel 21.29 | UAR 25.40 WAR 38.88 | 1.0 min
+1100.3s 155 fold 0 minus-L        seed 123: sel 21.94 | UAR 23.53 WAR 34.30 | 1.3 min
+1111.4s 156 fold 0 minus-L        seed 456: sel 21.87 | UAR 24.65 WAR 30.35 | 1.5 min
+1123.9s 157 fold 0 minus-L        seed 7: sel 20.57 | UAR 25.84 WAR 35.76 | 1.7 min
+1130.3s 158 fold 0 minus-L        seed 11: sel 20.98 | UAR 26.25 WAR 40.54 | 1.8 min
+1137.4s 159 fold 1: train 1667 | early-stop 267 | eval 487
+1145.3s 160 fold 1 Full           seed 42: sel 28.37 | UAR 28.19 WAR 41.68 | 2.0 min
+1153.4s 161 fold 1 Full           seed 123: sel 30.12 | UAR 25.30 WAR 39.43 | 2.2 min
+1159.5s 162 fold 1 Full           seed 456: sel 26.41 | UAR 26.19 WAR 41.07 | 2.3 min
+1167.3s 163 fold 1 Full           seed 7: sel 26.86 | UAR 25.68 WAR 39.22 | 2.4 min
+1178.5s 164 fold 1 Full           seed 11: sel 26.84 | UAR 24.66 WAR 37.58 | 2.6 min
+1186.9s 165 fold 1 minus-L        seed 42: sel 26.15 | UAR 24.59 WAR 36.96 | 2.7 min
+1195.2s 166 fold 1 minus-L        seed 123: sel 28.75 | UAR 22.85 WAR 38.19 | 2.9 min
+1203.1s 167 fold 1 minus-L        seed 456: sel 27.06 | UAR 25.31 WAR 35.52 | 3.0 min
+1210.9s 168 fold 1 minus-L        seed 7: sel 28.01 | UAR 25.06 WAR 37.99 | 3.1 min
+1217.0s 169 fold 1 minus-L        seed 11: sel 26.25 | UAR 23.73 WAR 39.43 | 3.2 min
+1224.2s 170 fold 2: train 1634 | early-stop 308 | eval 479
+1232.6s 171 fold 2 Full           seed 42: sel 23.42 | UAR 24.89 WAR 35.28 | 3.5 min
+1241.3s 172 fold 2 Full           seed 123: sel 21.17 | UAR 24.60 WAR 34.24 | 3.6 min
+1251.1s 173 fold 2 Full           seed 456: sel 21.16 | UAR 23.86 WAR 32.99 | 3.8 min
+1257.7s 174 fold 2 Full           seed 7: sel 23.28 | UAR 23.00 WAR 33.82 | 3.9 min
+1266.9s 175 fold 2 Full           seed 11: sel 22.70 | UAR 21.96 WAR 29.85 | 4.1 min
+1275.5s 176 fold 2 minus-L        seed 42: sel 22.60 | UAR 25.60 WAR 36.74 | 4.2 min
+1282.0s 177 fold 2 minus-L        seed 123: sel 20.92 | UAR 25.22 WAR 36.53 | 4.3 min
+1291.3s 178 fold 2 minus-L        seed 456: sel 21.86 | UAR 23.83 WAR 33.82 | 4.5 min
+1298.1s 179 fold 2 minus-L        seed 7: sel 22.20 | UAR 23.09 WAR 34.24 | 4.6 min
+1305.8s 180 fold 2 minus-L        seed 11: sel 22.97 | UAR 27.22 WAR 36.74 | 4.7 min
+1312.9s 181 fold 3: train 1713 | early-stop 229 | eval 479
+1322.8s 182 fold 3 Full           seed 42: sel 28.93 | UAR 22.29 WAR 31.32 | 5.0 min
+1332.0s 183 fold 3 Full           seed 123: sel 26.22 | UAR 21.43 WAR 31.11 | 5.1 min
+1339.7s 184 fold 3 Full           seed 456: sel 26.12 | UAR 19.04 WAR 30.90 | 5.3 min
+1347.6s 185 fold 3 Full           seed 7: sel 25.53 | UAR 19.51 WAR 30.90 | 5.4 min
+1354.3s 186 fold 3 Full           seed 11: sel 25.76 | UAR 20.92 WAR 32.78 | 5.5 min
+1360.8s 187 fold 3 minus-L        seed 42: sel 26.48 | UAR 19.49 WAR 29.23 | 5.6 min
+1367.2s 188 fold 3 minus-L        seed 123: sel 25.44 | UAR 20.05 WAR 31.94 | 5.7 min
+1373.7s 189 fold 3 minus-L        seed 456: sel 26.31 | UAR 19.40 WAR 30.69 | 5.8 min
+1380.5s 190 fold 3 minus-L        seed 7: sel 25.80 | UAR 20.43 WAR 32.15 | 5.9 min
+1388.5s 191 fold 3 minus-L        seed 11: sel 25.79 | UAR 20.10 WAR 30.48 | 6.1 min
+1395.5s 192 fold 4: train 1567 | early-stop 359 | eval 495
+1402.5s 193 fold 4 Full           seed 42: sel 24.47 | UAR 22.68 WAR 33.13 | 6.3 min
+1410.4s 194 fold 4 Full           seed 123: sel 24.96 | UAR 23.22 WAR 34.34 | 6.4 min
+1417.4s 195 fold 4 Full           seed 456: sel 25.58 | UAR 24.19 WAR 31.72 | 6.6 min
+1428.5s 196 fold 4 Full           seed 7: sel 24.98 | UAR 18.62 WAR 28.08 | 6.7 min
+1434.9s 197 fold 4 Full           seed 11: sel 25.11 | UAR 21.67 WAR 31.52 | 6.9 min
+1441.1s 198 fold 4 minus-L        seed 42: sel 24.73 | UAR 22.38 WAR 31.31 | 7.0 min
+1447.9s 199 fold 4 minus-L        seed 123: sel 24.37 | UAR 23.06 WAR 34.55 | 7.1 min
+1462.2s 200 fold 4 minus-L        seed 456: sel 26.59 | UAR 19.01 WAR 23.23 | 7.3 min
+1470.1s 201 fold 4 minus-L        seed 7: sel 23.47 | UAR 22.86 WAR 33.54 | 7.4 min
+1479.9s 202 fold 4 minus-L        seed 11: sel 25.92 | UAR 22.22 WAR 31.92 | 7.6 min
+1479.9s 203 saved g40_oof_probs_p060.npz and g40_fold_seed_log_p060.csv
+1480.0s 204 == 2421 MCIS, 45 episodes, 5 seeds ==
+1483.5s 205 kept 100% | faces III kept 100.0% | L visible III  59.9% | Full 26.62  minus-L 24.04 | listener gain +2.58 [+0.05,+3.75] (5/5 folds) | on L-visible-at-100% +3.50 [+0.43,+5.17] | Full − Full100 +0.00 [+0.00,+0.00]
+1488.6s 206 kept  80% | faces III kept  79.4% | L visible III  33.0% | Full 25.73  minus-L 24.58 | listener gain +1.15 [-1.40,+2.47] (4/5 folds) | on L-visible-at-100% +1.05 [-1.78,+2.84] | Full − Full100 -0.89 [-2.42,+1.36]
+1493.9s 207 kept  60% | faces III kept  60.7% | L visible III  25.1% | Full 25.08  minus-L 25.21 | listener gain -0.13 [-1.72,+2.29] (2/5 folds) | on L-visible-at-100% +0.94 [-1.95,+3.13] | Full − Full100 -1.54 [-2.82,+1.25]
+1493.9s 208 
+1493.9s 209 VERDICT: GAIN DEPENDS ON THE LATE FRAMES: the listener gain is not shown once the end of clip III is cut
+1493.9s 210 saved /kaggle/working/g40_summary.csv
+1499.3s 211 /usr/local/lib/python3.13/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\|'
+1499.3s 212 cells[i][c] = re.sub('\\\\\|', '|', cell)
+1499.5s 213 /usr/local/lib/python3.13/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\_'
+1499.5s 214 text = re.sub(r'_', '\_', text) # Escape underscores in display text
+1500.3s 215 [NbConvertApp] Converting notebook __notebook__.ipynb to notebook
+1500.4s 216 [NbConvertApp] Writing 184339 bytes to __notebook__.ipynb
+1503.2s 217 [NbConvertApp] Converting notebook __notebook__.ipynb to html
+1504.3s 218 [NbConvertApp] Writing 972142 bytes to __results__.html

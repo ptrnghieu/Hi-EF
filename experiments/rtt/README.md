@@ -980,3 +980,52 @@ over the 8 test episodes (internal reading only).
 Reading: RoleNet is ahead of the baseline in every group; the gain is largest where B is visible in the current
 turn only (+7.8 UAR, 50 MCIS) and smallest where B is never seen (+2.0). No group-wise CI excludes 0 (small groups,
 8 episodes). Output: `results/g42/responder_groups_test.csv`.
+
+## G41 results: feature-matched baseline (5-fold CV, 2,421 MCIS, 5 seeds; test untouched)
+
+| Contrast (UAR, 5-seed ensembles) | Δ [95% two-level CI] | folds |
+|---|---|---|
+| **RoleNet − PaperBest-FM (primary)** | **+3.37 [+0.68, +5.09]** | 5/5 |
+| PaperBest-FM − PaperBest | +1.98 [−0.23, +4.09] | 4/5 |
+| RoleNet − PaperBest | +5.35 [+2.34, +7.37] | 5/5 |
+
+Fixed rule: **GAIN FROM THE REPRESENTATION** (lower bound of RoleNet − PaperBest-FM above 0). Giving the paper's
+architecture RoleNet's G8a features recovers about 2 of the 5.35 UAR points (n.s.); about 3.4 remain and come from the
+person × turn representation. RoleNet here = 26.62 (same seeds/folds as G40 `Full` p100 and G43 `L-both`, which are
+identical seed by seed), so PaperBest-FM ≈ 23.25 and PaperBest ≈ 21.27 on development CV.
+
+## G40 results: clip III truncation (5-fold CV, 2,421 MCIS, 5 seeds; test untouched)
+
+| Clip III kept | faces III kept | listener visible in III | Full | minus-L | listener gain [95% CI] | folds | gain on L-visible-at-100% | Full − Full100 |
+|---|---|---|---|---|---|---|---|---|
+| 100% | 100% | 59.9% | 26.62 | 24.04 | +2.58 [+0.05, +3.75] | 5/5 | +3.50 [+0.43, +5.17] | — |
+| 80% | 79.4% | 33.0% | 25.73 | 24.58 | +1.15 [−1.40, +2.47] | 4/5 | +1.05 [−1.78, +2.84] | −0.89 [−2.42, +1.36] |
+| 60% | 60.7% | 25.1% | 25.08 | 25.21 | −0.13 [−1.72, +2.29] | 2/5 | +0.94 [−1.95, +3.13] | −1.54 [−2.82, +1.25] |
+
+Fixed rule: **GAIN DEPENDS ON THE LATE FRAMES**. Caveat for the reading: cutting the last 20% of clip III removes
+only 21% of its faces but the listener from almost half of the MCIS (59.9% → 33.0%), and with it the listener's clip
+I/II tokens (44.2% → 23.7%), because L is assigned from clip III. The cut therefore removes the listener's identity,
+not only late reactions; the listener mostly appears in the reaction shot at the end of clip III. RoleNet itself
+loses only 0.9 / 1.5 UAR (n.s.) and stays well above the full-clip baselines of G41 (≈ 23.25 / 21.27).
+
+## G43 results: listener history vs current turn (5-fold CV, 2,421 MCIS, 5 seeds; test untouched)
+
+| Arm | UAR | WAR |
+|---|---|---|
+| L-both (= RoleNet) | 26.62 | 37.92 |
+| L-history only | 25.15 | 36.56 |
+| L-current only | 24.86 | 35.98 |
+| L-none | 24.04 | 35.23 |
+
+| Contrast | Δ UAR [95% CI] |
+|---|---|
+| H = history only − none | +1.12 [−0.78, +2.57] |
+| C = current only − none | +0.83 [−0.51, +2.75] |
+| listener total = both − none | +2.58 [+0.05, +3.75] |
+| C − H | −0.29 [−1.50, +1.92] |
+| clip III added to history (both − history only) | +1.46 [−0.81, +2.82] |
+| clips I/II added to current (both − current only) | +1.76 [−0.91, +2.74] |
+
+Fixed rule: **INCONCLUSIVE**. Neither part alone is established; only both together (+2.58) are. History and current
+turn contribute about equally and complement each other. Note that `L-history only` still uses clip III to *identify*
+the listener (the proxy rule), only its clip-III face token is masked.

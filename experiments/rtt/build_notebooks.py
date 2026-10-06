@@ -13011,6 +13011,153 @@ print(f"saved {OUT_DIR}/g42_test_responder_groups.csv  ->  send this file back")
 ]
 
 
+# ======================================================================================================================
+# G43 — Where does the listener help: history (I/II) vs current turn (III)? Four listener-token variants, one run
+def _g43_cfg():
+    c = G14[1][1]
+    c = c.replace("SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # the three earlier seeds + seven new ones",
+                  "SEEDS = [42, 123, 456, 7, 11]    # five seeds, the same as G41 (its PaperBest is the baseline here)")
+    head, _ = c.split("ARMS = [")
+    return head + """ARMS = [
+    ("L-both",         'tok', BASE),                              # RoleNet: listener tokens of clips I, II and III
+    ("L-history only", 'tok', {**BASE, 'drop': ('L3',)}),         # listener tokens of clips I/II only
+    ("L-current only", 'tok', {**BASE, 'drop': ('L12',)}),        # listener token of clip III only
+    ("L-none",         'tok', {**BASE, 'drop': ('L',)}),          # no listener token (G14 minus-L)
+]
+EXPERIMENTS = [a for a in ARMS if a[1] == 'role']   # the token arms join after the token-model cell
+# baseline: PaperBest out-of-fold predictions of G41 (same folds, seeds, early-stop episodes); not retrained here
+G41_OOF_GLOB = "/kaggle/input/**/g41_oof_probs.npz"
+"""
+
+
+def _g43_tok_cell():
+    c = G14[10][1]
+    a = """        if 'L' in cfg['drop']:
+            kf[3:6] = False                                                   # listener tokens, all clips (G11 minus-L)
+"""
+    assert a in c
+    return c.replace(a, a + """        if 'L12' in cfg['drop']:
+            kf[3:5] = False                                                   # listener tokens of clips I and II
+        if 'L3' in cfg['drop']:
+            kf[5] = False                                                     # listener token of clip III
+""")
+
+
+G43 = [
+    ("markdown", r"""
+# G43 — Where does the listener help: history (clips I/II) or the current turn (clip III)? (5-fold CV; test untouched)
+
+RoleNet is retrained four times in **one run** (same folds, seeds, early-stop episodes, hyper-parameters as G8b/G14),
+changing only which listener face tokens exist. Removed tokens are masked out of attention and of the auxiliary
+heads, at training and at evaluation; all other tokens are unchanged.
+
+| Arm | Listener tokens kept |
+|---|---|
+| `L-both` | clips I, II and III (= RoleNet) |
+| `L-history only` | clips I and II |
+| `L-current only` | clip III |
+| `L-none` | none |
+
+**Baseline.** Not retrained: the out-of-fold predictions of `PaperBest` from **G41** (same 5 folds and 5 seeds) are
+loaded and aligned by `sample_id`; attach the G41 output (`g41_oof_probs.npz`). The notebook stops at once without it.
+
+**Reading rules (fixed before running).** 5-seed ensembles, plain argmax UAR, 95% two-level bootstrap over seeds and
+episodes (2,000 draws).
+* History value H = UAR(L-history only) − UAR(L-none); current value C = UAR(L-current only) − UAR(L-none).
+* **Listener signal mainly in the history**: lower bound of H > 0 and the CI of C includes 0.
+* **Mainly in the current turn**: lower bound of C > 0 and the CI of H includes 0.
+* **Both carry signal**: both lower bounds > 0. Otherwise **inconclusive**.
+* Also reported: every arm against the baseline (UAR, WAR, Δ), and C − H.
+"""),
+    ("code", _g43_cfg()),
+    G14[2],
+    ("code", r"""
+# fail fast: the baseline predictions of G41 must be attached before anything is trained
+_g41 = sorted(glob.glob(G41_OOF_GLOB, recursive=True))
+assert _g41, "g41_oof_probs.npz not found: attach the G41 output (its PaperBest predictions are the baseline)"
+Z41 = np.load(_g41[0], allow_pickle=True)
+assert 'PaperBest' in Z41.files, f"no PaperBest predictions in {_g41[0]}: {Z41.files}"
+assert DEBUG_PER_EPISODE or len(Z41['sample_id']) == N, (len(Z41['sample_id']), N)
+print(f"baseline: {_g41[0]} | PaperBest {Z41['PaperBest'].shape}")
+"""),
+    G14[3], G14[4],
+    ("markdown", "\n## From G8a features to role-tagged slots\n"),
+    G14[6],
+    ("markdown", "\n## Models\n"),
+    G14[8],
+    ("code", _g43_tok_cell()),
+    ("markdown", "\n## 5-fold episode cross-validation (same folds as G8b / G14 / G41, 5 seeds)\n"),
+    ("code", G14[12][1].replace("g14_", "g43_")),
+    ("markdown", "\n## Results (plain argmax, 5-seed ensembles; two-level bootstrap over seeds and episodes)\n"),
+    ("code", r"""
+# baseline aligned to this run's MCIS order; folds must match
+pos = {s: i for i, s in enumerate(Z41['sample_id'])}
+missing = [s for s in DEV.sample_id.values if s not in pos]
+assert not missing, f"{len(missing)} MCIS missing from the G41 predictions"
+ix41 = np.array([pos[s] for s in DEV.sample_id.values])
+assert (Z41['fold'][ix41] == fold_of_row).all(), "G41 used different folds: the baseline would not be comparable"
+OOF['Baseline'] = Z41['PaperBest'][:, ix41].astype(np.float32)
+
+
+def uar_of(pred, idx=None):
+    return war_uar(pred if idx is None else pred[idx], y_all if idx is None else y_all[idx], 7)[1]
+
+
+GROUPS_EP = [np.where(src == e)[0] for e in np.unique(src)]
+
+
+def two_level_boot(pa, pb, n_boot=2000, seed=0):
+    rng = np.random.default_rng(seed)
+    d = []
+    for _ in range(n_boot):
+        ea = pa[rng.integers(0, len(pa), len(pa))].mean(0).argmax(1)
+        eb = pb[rng.integers(0, len(pb), len(pb))].mean(0).argmax(1)
+        idx = np.concatenate([GROUPS_EP[i] for i in rng.integers(0, len(GROUPS_EP), len(GROUPS_EP))])
+        d.append(uar_of(ea, idx) - uar_of(eb, idx))
+    return np.percentile(d, [2.5, 97.5])
+
+
+PRED = {k: v.mean(0).argmax(1) for k, v in OOF.items()}
+U = {k: uar_of(p) for k, p in PRED.items()}
+print(f"== {N} MCIS, {len(EPS)} episodes, {len(SEEDS)} seeds ==")
+ROWS = []
+for k in [a[0] for a in ARMS] + ['Baseline']:
+    w = war_uar(PRED[k], y_all, 7)[0]
+    r = {'arm': k, 'UAR': U[k], 'WAR': w}
+    if k != 'Baseline':
+        lo, hi = two_level_boot(OOF[k], OOF['Baseline'])
+        r.update({'dUAR_vs_baseline': U[k] - U['Baseline'], 'lo': lo, 'hi': hi})
+    ROWS.append(r)
+    print(f"  {k:<15} UAR {U[k]:5.2f}  WAR {w:5.2f}" + (f" | vs baseline {r['dUAR_vs_baseline']:+5.2f} [{r['lo']:+5.2f},{r['hi']:+5.2f}]"
+                                                          if k != 'Baseline' else ''))
+
+print("\n== listener contrasts ==")
+C_ROWS = []
+for a, b, name in [('L-history only', 'L-none', 'H (history value)'), ('L-current only', 'L-none', 'C (current value)'),
+                   ('L-both', 'L-none', 'listener total'), ('L-current only', 'L-history only', 'C - H'),
+                   ('L-both', 'L-history only', 'III added to history'), ('L-both', 'L-current only', 'I/II added to current')]:
+    d = U[a] - U[b]
+    lo, hi = two_level_boot(OOF[a], OOF[b])
+    C_ROWS.append({'contrast': name, 'a': a, 'b': b, 'dUAR': d, 'lo': lo, 'hi': hi})
+    print(f"  {name:<22} {a} − {b}: {d:+5.2f} [{lo:+5.2f},{hi:+5.2f}]")
+H, C = C_ROWS[0], C_ROWS[1]
+if H['lo'] > 0 and C['lo'] > 0:
+    verdict = 'BOTH CARRY SIGNAL: history and current-turn listener tokens each help'
+elif H['lo'] > 0 and C['lo'] <= 0 <= C['hi']:
+    verdict = 'MAINLY HISTORY: the listener helps through clips I/II'
+elif C['lo'] > 0 and H['lo'] <= 0 <= H['hi']:
+    verdict = 'MAINLY CURRENT TURN: the listener helps through clip III'
+else:
+    verdict = 'INCONCLUSIVE under the fixed rule'
+print("\nVERDICT:", verdict)
+pd.DataFrame(ROWS).to_csv(f"{OUT_DIR}/g43_summary.csv", index=False)
+pd.DataFrame(C_ROWS).to_csv(f"{OUT_DIR}/g43_contrasts.csv", index=False)
+print(f"saved {OUT_DIR}/g43_summary.csv and g43_contrasts.csv")
+"""),
+]
+G43[G43.index(G14[2])] = ("code", G14[2][1].replace(_ANNOT_OLD, _ANNOT_NEW))
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -13053,6 +13200,7 @@ if __name__ == "__main__":
                         ("g40_clip3_truncation_cv.ipynb", G40),
                         ("g41_feature_matched_baseline_cv.ipynb", G41),
                         ("g42_test_responder_groups.ipynb", G42),
+                        ("g43_listener_history_vs_current_cv.ipynb", G43),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

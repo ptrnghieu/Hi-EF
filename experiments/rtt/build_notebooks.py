@@ -13016,7 +13016,7 @@ print(f"saved {OUT_DIR}/g42_test_responder_groups.csv  ->  send this file back")
 def _g43_cfg():
     c = G14[1][1]
     c = c.replace("SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]    # the three earlier seeds + seven new ones",
-                  "SEEDS = [42, 123, 456, 7, 11]    # five seeds, the same as G41 (its PaperBest is the baseline here)")
+                  "SEEDS = [42, 123, 456, 7, 11]    # five seeds (screening budget)")
     head, _ = c.split("ARMS = [")
     return head + """ARMS = [
     ("L-both",         'tok', BASE),                              # RoleNet: listener tokens of clips I, II and III
@@ -13025,8 +13025,6 @@ def _g43_cfg():
     ("L-none",         'tok', {**BASE, 'drop': ('L',)}),          # no listener token (G14 minus-L)
 ]
 EXPERIMENTS = [a for a in ARMS if a[1] == 'role']   # the token arms join after the token-model cell
-# baseline: PaperBest out-of-fold predictions of G41 (same folds, seeds, early-stop episodes); not retrained here
-G41_OOF_GLOB = "/kaggle/input/**/g41_oof_probs.npz"
 """
 
 
@@ -13058,8 +13056,7 @@ heads, at training and at evaluation; all other tokens are unchanged.
 | `L-current only` | clip III |
 | `L-none` | none |
 
-**Baseline.** Not retrained: the out-of-fold predictions of `PaperBest` from **G41** (same 5 folds and 5 seeds) are
-loaded and aligned by `sample_id`; attach the G41 output (`g41_oof_probs.npz`). The notebook stops at once without it.
+No baseline is trained here; the comparison table with the baseline is built afterwards from existing results.
 
 **Reading rules (fixed before running).** 5-seed ensembles, plain argmax UAR, 95% two-level bootstrap over seeds and
 episodes (2,000 draws).
@@ -13067,19 +13064,10 @@ episodes (2,000 draws).
 * **Listener signal mainly in the history**: lower bound of H > 0 and the CI of C includes 0.
 * **Mainly in the current turn**: lower bound of C > 0 and the CI of H includes 0.
 * **Both carry signal**: both lower bounds > 0. Otherwise **inconclusive**.
-* Also reported: every arm against the baseline (UAR, WAR, Δ), and C − H.
+* Also reported: UAR / WAR of every arm and C − H.
 """),
     ("code", _g43_cfg()),
     G14[2],
-    ("code", r"""
-# fail fast: the baseline predictions of G41 must be attached before anything is trained
-_g41 = sorted(glob.glob(G41_OOF_GLOB, recursive=True))
-assert _g41, "g41_oof_probs.npz not found: attach the G41 output (its PaperBest predictions are the baseline)"
-Z41 = np.load(_g41[0], allow_pickle=True)
-assert 'PaperBest' in Z41.files, f"no PaperBest predictions in {_g41[0]}: {Z41.files}"
-assert DEBUG_PER_EPISODE or len(Z41['sample_id']) == N, (len(Z41['sample_id']), N)
-print(f"baseline: {_g41[0]} | PaperBest {Z41['PaperBest'].shape}")
-"""),
     G14[3], G14[4],
     ("markdown", "\n## From G8a features to role-tagged slots\n"),
     G14[6],
@@ -13090,15 +13078,6 @@ print(f"baseline: {_g41[0]} | PaperBest {Z41['PaperBest'].shape}")
     ("code", G14[12][1].replace("g14_", "g43_")),
     ("markdown", "\n## Results (plain argmax, 5-seed ensembles; two-level bootstrap over seeds and episodes)\n"),
     ("code", r"""
-# baseline aligned to this run's MCIS order; folds must match
-pos = {s: i for i, s in enumerate(Z41['sample_id'])}
-missing = [s for s in DEV.sample_id.values if s not in pos]
-assert not missing, f"{len(missing)} MCIS missing from the G41 predictions"
-ix41 = np.array([pos[s] for s in DEV.sample_id.values])
-assert (Z41['fold'][ix41] == fold_of_row).all(), "G41 used different folds: the baseline would not be comparable"
-OOF['Baseline'] = Z41['PaperBest'][:, ix41].astype(np.float32)
-
-
 def uar_of(pred, idx=None):
     return war_uar(pred if idx is None else pred[idx], y_all if idx is None else y_all[idx], 7)[1]
 
@@ -13121,15 +13100,10 @@ PRED = {k: v.mean(0).argmax(1) for k, v in OOF.items()}
 U = {k: uar_of(p) for k, p in PRED.items()}
 print(f"== {N} MCIS, {len(EPS)} episodes, {len(SEEDS)} seeds ==")
 ROWS = []
-for k in [a[0] for a in ARMS] + ['Baseline']:
+for k in [a[0] for a in ARMS]:
     w = war_uar(PRED[k], y_all, 7)[0]
-    r = {'arm': k, 'UAR': U[k], 'WAR': w}
-    if k != 'Baseline':
-        lo, hi = two_level_boot(OOF[k], OOF['Baseline'])
-        r.update({'dUAR_vs_baseline': U[k] - U['Baseline'], 'lo': lo, 'hi': hi})
-    ROWS.append(r)
-    print(f"  {k:<15} UAR {U[k]:5.2f}  WAR {w:5.2f}" + (f" | vs baseline {r['dUAR_vs_baseline']:+5.2f} [{r['lo']:+5.2f},{r['hi']:+5.2f}]"
-                                                          if k != 'Baseline' else ''))
+    ROWS.append({'arm': k, 'UAR': U[k], 'WAR': w})
+    print(f"  {k:<15} UAR {U[k]:5.2f}  WAR {w:5.2f}")
 
 print("\n== listener contrasts ==")
 C_ROWS = []

@@ -13321,6 +13321,365 @@ print(f"done: attach {SHARD_DIR} (c4shard_*.pkl) to G44")
 ]
 
 
+# ======================================================================================================================
+# G45 — Emotion-specific speech and text features: do they recognise the participants' states better, and does that
+# carry to the forecast? (gate before any RoleNet change; development CV; test untouched)
+G45 = [
+    ("markdown", r"""
+# G45 — Emotion-specific speech/text features: recognition and forecast gate (development CV; test untouched)
+
+**Why.** RoleNet's speech token uses CLIP text, AudioCLIP sound events and ECAPA speaker embeddings — none of them is
+emotion-specific. The forecast's bottleneck is recognising the participants' states (F9, F27; B keeps their own emotion
+in 48.9% of the MCIS where it is known, but RoleNet predicts B's previous emotion only 56.6% of the time on those).
+
+**What.** Frozen, off-the-shelf emotion models (no pre-training, no fine-tuning, neither trained on MELD):
+* speech: `audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim` (MSP-Podcast; pooled hidden state 1024 +
+  arousal/dominance/valence);
+* text: `SamLowe/roberta-base-go_emotions` (GoEmotions, Reddit; 28 emotion probabilities + mean hidden state 768).
+
+Features are extracted for every clip I–III of the 2,421 development MCIS (clip IV and test are not read), then two
+linear probes compare **current** clip features (CLIP text, AudioCLIP, ECAPA, mean HSEmotion of the faces) with
+**current + emotion** features, using the same episode folds as G8b/G14 (standardisation and PCA fitted on training
+folds only; logistic regression, C = 1, balanced classes; no tuning):
+
+1. **Recognition** of each labelled clip's own emotion (2,843 clips). Reported on all clips, on clip III (A's turn)
+   and on **B's previous turn** (the clip I/II where B spoke, from the G16 voice table; analysis only).
+2. **Forecast** of B's clip-IV emotion from clips I–III. Reported on all MCIS, on MCIS where B keeps their previous
+   emotion, and on MCIS where B does not mirror A.
+
+**Reading rule (fixed before running)**, ΔUAR = current+emotion − current, 95% bootstrap over episodes (2,000):
+* **PASS → G46** (the features enter RoleNet): Δ recognition on B's previous turn ≥ +5 with a lower bound > 0,
+  **and** a lower bound > 0 for the forecast Δ on all MCIS or on B-keeps.
+* **Information present, not used**: the recognition condition holds, the forecast condition does not.
+* **STOP**: the recognition condition fails.
+Also reported: speech-only and text-only additions.
+
+Inputs: `hi-ef-dataset` (audio + annotation), `hi-ef-features-v2`, `hi-ef-split`, `g8a-features`, and a dataset with
+`g16_per_mcis.csv`. Internet on (model download). GPU.
+"""),
+    ("code", r"""
+# ======== CONFIG ========
+import os, glob
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_GLOB = "/kaggle/input/**/source_folder_split_seed42.csv"
+G8A_GLOB = "/kaggle/input/**/shard_*.pkl"
+G16_GLOB = "/kaggle/input/**/g16_per_mcis.csv"
+OUT_DIR = "/kaggle/working"
+SER_MODEL = "audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim"
+TXT_MODEL = "SamLowe/roberta-base-go_emotions"
+FAKE_MODELS = False              # dry runs only: random stand-ins for the two downloaded models
+N_OUTER, N_BOOT, LR_C = 5, 2000, 1.0
+PCA = {'clip_text': 64, 'audioclip': 64, 'ecapa': 32, 'face_emb': 32, 'ser_h': 64, 'txt_h': 64}
+MIN_AUDIO_COVER = 0.8
+EMO = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+E2I = {e: i for i, e in enumerate(EMO)}
+"""),
+    ("code", r"""
+import pickle, random, time, re
+import numpy as np, pandas as pd, torch
+from tqdm.auto import tqdm
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def one(pattern, what):
+    hits = sorted(glob.glob(pattern, recursive=True))
+    assert hits, f"{what} not found ({pattern})"
+    return hits[0]
+
+
+_ann = glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF", "annotation.csv"))
+_ann += [p for p in sorted(glob.glob("/kaggle/input/**/annotation.csv", recursive=True)) if 'meld' not in p.lower()]
+assert _ann, "annotation.csv not found"
+ann = pd.read_csv(_ann[0], header=None, dtype=str).set_index(0)
+sp = pd.read_csv(one(SPLIT_GLOB, "split csv"), dtype=str)
+DEV = sp[sp.split.isin(['train', 'val'])].reset_index(drop=True)
+assert 'test' not in set(DEV.split)
+N = len(DEV)
+CLIPS = sorted(set(DEV[['clip1', 'clip2', 'clip3']].values.ravel()))
+LAB = {c: E2I[ann.at[c, 7]] for c in CLIPS if c in ann.index and isinstance(ann.at[c, 7], str) and ann.at[c, 7] in E2I}
+TEXT = {c: (ann.at[c, 1] if c in ann.index and isinstance(ann.at[c, 1], str) else '') for c in CLIPS}
+y4 = DEV.clip4_emotion.map(E2I).values
+yA = DEV.clip3_emotion.map(E2I).values
+src = DEV.source_folder.values
+g16 = pd.read_csv(one(G16_GLOB, "g16_per_mcis.csv"), dtype={'sample_id': str}).set_index('sample_id').loc[DEV.sample_id.values]
+assert (g16.y.values == y4).all(), "G16 table and split disagree"
+near = g16.B_spoke_II.values.astype(bool) & (g16.y_II.values >= 0)
+far = g16.B_spoke_I.values.astype(bool) & (g16.y_I.values >= 0) & ~near
+BPREV_CLIP = np.where(near, DEV.clip2.values, np.where(far, DEV.clip1.values, ''))
+yprev = np.where(near, g16.y_II.values, np.where(far, g16.y_I.values, -1)).astype(int)
+print(f"development MCIS {N} | clips I-III {len(CLIPS)} | labelled {len(LAB)} | B's previous turn known {(yprev >= 0).sum()}")
+
+# episode folds, identical to G8b / G14
+sizes = DEV.source_folder.value_counts()
+order = list(sizes.index); random.Random(0).shuffle(order); order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+clip_ep = lambda c: c.split('/')[0]
+"""),
+    ("code", r"""
+# ---- the two emotion models (fail fast: both are loaded and run once before the long extraction)
+import torch.nn as nn
+roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
+AUDIO_ROOTS = [os.path.join(r, "audio") for r in roots if os.path.isdir(os.path.join(r, "audio"))]
+
+
+def audio_path(clip):
+    ep, num = clip.split('/')
+    for root in AUDIO_ROOTS:
+        for ext in ('.mp3', '.wav', '.flac', '.m4a'):
+            p = os.path.join(root, ep, num + ext)
+            if os.path.exists(p):
+                return p
+    return None
+
+
+cover = np.mean([audio_path(c) is not None for c in CLIPS])
+print(f"audio files found for {cover * 100:.1f}% of the clips")
+assert cover >= MIN_AUDIO_COVER, "audio missing: attach hi-ef-dataset (Hi-EF/audio)"
+
+if not FAKE_MODELS:
+    from transformers import Wav2Vec2Processor, AutoTokenizer, AutoModelForSequenceClassification
+    from transformers.models.wav2vec2.modeling_wav2vec2 import Wav2Vec2Model, Wav2Vec2PreTrainedModel
+
+    class RegressionHead(nn.Module):                     # as in the model card
+        def __init__(self, config):
+            super().__init__()
+            self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+            self.dropout = nn.Dropout(config.final_dropout)
+            self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
+
+        def forward(self, x):
+            return self.out_proj(self.dropout(torch.tanh(self.dense(self.dropout(x)))))
+
+    class EmotionModel(Wav2Vec2PreTrainedModel):
+        def __init__(self, config):
+            super().__init__(config)
+            self.wav2vec2 = Wav2Vec2Model(config)
+            self.classifier = RegressionHead(config)
+            self.init_weights()
+
+        def forward(self, input_values):
+            h = self.wav2vec2(input_values)[0].mean(1)
+            return h, self.classifier(h)
+
+    ser_proc = Wav2Vec2Processor.from_pretrained(SER_MODEL)
+    ser = EmotionModel.from_pretrained(SER_MODEL).to(DEVICE).eval()
+    tok = AutoTokenizer.from_pretrained(TXT_MODEL)
+    txt = AutoModelForSequenceClassification.from_pretrained(TXT_MODEL, output_hidden_states=True).to(DEVICE).eval()
+
+    def ser_feat(wav):
+        x = ser_proc(wav, sampling_rate=16000, return_tensors='pt').input_values.to(DEVICE)
+        with torch.no_grad():
+            h, avd = ser(x)
+        return np.concatenate([h[0].cpu().numpy(), avd[0].cpu().numpy()]).astype(np.float32)
+
+    def txt_feat(t):
+        enc = tok(t or ' ', return_tensors='pt', truncation=True, max_length=128).to(DEVICE)
+        with torch.no_grad():
+            o = txt(**enc)
+        p = torch.sigmoid(o.logits)[0].cpu().numpy()                          # multi-label model: sigmoid
+        h = o.hidden_states[-1][0].mean(0).cpu().numpy()
+        return np.concatenate([p, h]).astype(np.float32)
+else:
+    _r = np.random.default_rng(0)
+    _Ws, _Wt = _r.normal(size=(1, 1027)), _r.normal(size=(1, 796))
+    ser_feat = lambda wav: (np.tanh(_Ws * float(np.mean(wav)))[0]).astype(np.float32)
+    txt_feat = lambda t: (np.tanh(_Wt * (len(t or '') / 50.0))[0]).astype(np.float32)
+
+import librosa
+_c0 = next(c for c in CLIPS if audio_path(c))
+_w0, _ = librosa.load(audio_path(_c0), sr=16000, mono=True)
+_s0, _t0 = ser_feat(_w0[:16000 * 8]), txt_feat(TEXT[_c0])
+assert _s0.shape == (1027,) and np.isfinite(_s0).all(), _s0.shape
+assert _t0.shape == (796,) and np.isfinite(_t0).all(), _t0.shape
+print("emotion models OK:", SER_MODEL if not FAKE_MODELS else 'FAKE', "|", TXT_MODEL if not FAKE_MODELS else 'FAKE')
+"""),
+    ("code", r"""
+# ---- extraction (cached; resumes from OUT_DIR/g45_emofeat.pkl)
+CACHE = f"{OUT_DIR}/g45_emofeat.pkl"
+EF = pickle.load(open(CACHE, 'rb')) if os.path.exists(CACHE) else {}
+todo = [c for c in CLIPS if c not in EF]
+print(f"cached {len(EF)} | to do {len(todo)}")
+t0 = time.time()
+for i, c in enumerate(tqdm(todo)):
+    p = audio_path(c)
+    s, ok = np.zeros(1027, np.float32), 0.0
+    if p is not None:
+        try:
+            w, _ = librosa.load(p, sr=16000, mono=True)
+            if len(w) >= 1600:
+                s, ok = ser_feat(w[:16000 * 8]), 1.0
+        except Exception as e:
+            print("audio error", c, e)
+    EF[c] = {'ser': s, 'ser_ok': ok, 'txt': txt_feat(TEXT[c])}
+    if (i + 1) % 500 == 0:
+        pickle.dump(EF, open(CACHE, 'wb'))
+pickle.dump(EF, open(CACHE, 'wb'))
+ok_rate = np.mean([EF[c]['ser_ok'] for c in CLIPS])
+print(f"done in {(time.time() - t0) / 60:.1f} min | speech features for {ok_rate * 100:.1f}% of the clips")
+assert ok_rate >= MIN_AUDIO_COVER * 0.9, "too few clips with speech features"
+"""),
+    ("code", r"""
+# ---- current clip features: CLIP text, AudioCLIP (hi-ef-features-v2), ECAPA and mean HSEmotion of the faces (G8a)
+G8 = {}
+for f in sorted(glob.glob(G8A_GLOB, recursive=True)):
+    G8.update(pickle.load(open(f, 'rb')))
+miss = [c for c in CLIPS if c not in G8]
+assert not miss, f"{len(miss)} clips missing from g8a-features"
+
+
+def softmax(z):
+    e = np.exp(z - z.max(-1, keepdims=True)); return e / e.sum(-1, keepdims=True)
+
+
+BLK = {k: {} for k in ('clip_text', 'audioclip', 'afound', 'ecapa', 'face10', 'face_emb', 'ser_h', 'ser_avd', 'txt_p', 'txt_h')}
+for c in tqdm(CLIPS, desc='blocks'):
+    d = torch.load(os.path.join(FEATURES_DIR, c.replace('/', '_') + '.pt'), map_location='cpu')
+    BLK['clip_text'][c] = d['text_feature'].float().numpy().reshape(-1)
+    a = d.get('audio_feature', torch.zeros(527)).float().numpy().reshape(-1)
+    BLK['audioclip'][c] = a / (np.linalg.norm(a) + 1e-9)
+    BLK['afound'][c] = np.array([float(bool(d.get('audio_found', True)))], np.float32)
+    au = G8[c].get('audio')
+    BLK['ecapa'][c] = (au['ecapa'].astype(np.float32) if au is not None and au.get('ecapa') is not None
+                       else np.zeros(192, np.float32))
+    fs = G8[c]['faces']
+    if fs:
+        fer = np.stack([x['fer'] for x in fs]).astype(np.float32)
+        BLK['face10'][c] = np.concatenate([softmax(fer[:, :8]), fer[:, 8:10]], 1).mean(0)
+        BLK['face_emb'][c] = (np.stack([x['fer_emb'] for x in fs]).astype(np.float32).mean(0)
+                              if all('fer_emb' in x for x in fs) else np.zeros(1280, np.float32))
+    else:
+        BLK['face10'][c] = np.zeros(10, np.float32); BLK['face_emb'][c] = np.zeros(1280, np.float32)
+    BLK['ser_h'][c] = EF[c]['ser'][:1024]
+    BLK['ser_avd'][c] = np.concatenate([EF[c]['ser'][1024:], [EF[c]['ser_ok']]]).astype(np.float32)
+    BLK['txt_p'][c] = EF[c]['txt'][:28]
+    BLK['txt_h'][c] = EF[c]['txt'][28:]
+CUR = ['clip_text', 'audioclip', 'afound', 'ecapa', 'face10', 'face_emb']
+SPEECH, TXTB = ['ser_h', 'ser_avd'], ['txt_p', 'txt_h']
+SETS = {'current': CUR, '+speech': CUR + SPEECH, '+text': CUR + TXTB, '+speech+text': CUR + SPEECH + TXTB}
+print({k: next(iter(v.values())).shape for k, v in BLK.items()})
+"""),
+    ("code", r"""
+# ---- probes (standardisation and PCA fitted on the training folds only)
+from sklearn.decomposition import PCA as _PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+import warnings; warnings.filterwarnings('ignore')
+
+
+def uar(p, t):
+    return np.mean([(p[t == c] == c).mean() * 100 for c in range(7) if (t == c).any()])
+
+
+def block_matrix(clips, blocks, fit_clips):
+    # per block: standardise (+ PCA for the large ones) on fit_clips, transform clips
+    out = []
+    for b in blocks:
+        Xf = np.stack([BLK[b][c] for c in fit_clips]); X = np.stack([BLK[b][c] for c in clips])
+        sc = StandardScaler().fit(Xf); Xf, X = sc.transform(Xf), sc.transform(X)
+        if b in PCA:
+            pc = _PCA(min(PCA[b], Xf.shape[1], len(Xf) - 1), random_state=0).fit(Xf); X = pc.transform(X)
+        out.append(X)
+    return np.concatenate(out, 1)
+
+
+def fit_predict(Xtr, ytr, Xte):
+    m = LogisticRegression(C=LR_C, max_iter=3000, class_weight='balanced').fit(Xtr, ytr)
+    return m.predict(Xte)
+
+
+# 1) recognition of each labelled clip's own emotion; clip folds = fold of the clip's episode
+RC = sorted(LAB); ry = np.array([LAB[c] for c in RC]); rep = np.array([clip_ep(c) for c in RC])
+ep_fold = {e: FOLD[e] for e in FOLD}
+rfold = np.array([ep_fold.get(e, -1) for e in rep]); assert (rfold >= 0).all()
+REC = {}
+for name, blocks in SETS.items():
+    pr = np.zeros(len(RC), int)
+    for f in range(N_OUTER):
+        tr, te = rfold != f, rfold == f
+        Xtr = block_matrix([RC[i] for i in np.where(tr)[0]], blocks, [RC[i] for i in np.where(tr)[0]])
+        Xte = block_matrix([RC[i] for i in np.where(te)[0]], blocks, [RC[i] for i in np.where(tr)[0]])
+        pr[te] = fit_predict(Xtr, ry[tr], Xte)
+    REC[name] = pr
+    print(f"recognition {name:<13} UAR {uar(pr, ry):5.2f}", flush=True)
+rpos = {c: i for i, c in enumerate(RC)}
+idx_A = np.array(sorted({rpos[c] for c in DEV.clip3.values if c in rpos}))
+idx_B = np.array(sorted({rpos[c] for c in BPREV_CLIP if c in rpos}))
+print(f"recognition subsets: clip III {len(idx_A)} | B's previous turn {len(idx_B)}")
+
+# 2) forecast of B's clip-IV emotion from clips I-III (MCIS folds as G8b / G14)
+FC = {}
+for name, blocks in SETS.items():
+    pr = np.zeros(N, int)
+    for f in range(N_OUTER):
+        tr, te = np.where(fold_of_row != f)[0], np.where(fold_of_row == f)[0]
+        fit_clips = sorted(set(DEV.iloc[tr][['clip1', 'clip2', 'clip3']].values.ravel()))
+        mats = []
+        for col in ('clip1', 'clip2', 'clip3'):
+            allm = block_matrix(list(DEV[col].values), blocks, fit_clips)
+            mats.append(allm)
+        X = np.concatenate(mats, 1)
+        pr[te] = fit_predict(X[tr], y4[tr], X[te])
+    FC[name] = pr
+    print(f"forecast    {name:<13} UAR {uar(pr, y4):5.2f}", flush=True)
+"""),
+    ("code", r"""
+# ---- results and the fixed rule (bootstrap over episodes)
+rng = np.random.default_rng(0)
+R_EPS = np.unique(rep); M_EPS = np.unique(src)
+
+
+def boot_delta(pa, pb, t, ep, sub, n=N_BOOT):
+    groups = {e: np.where((ep == e) & sub)[0] for e in np.unique(ep)}
+    keys = list(groups); d = []
+    for _ in range(n):
+        idx = np.concatenate([groups[keys[i]] for i in rng.integers(0, len(keys), len(keys))])
+        if len(idx) == 0:
+            continue
+        d.append(uar(pa[idx], t[idx]) - uar(pb[idx], t[idx]))
+    return np.percentile(d, [2.5, 97.5])
+
+
+ROWS = []
+rsub = {'all clips': np.ones(len(RC), bool), 'clip III (A)': np.isin(np.arange(len(RC)), idx_A),
+        "B's previous turn": np.isin(np.arange(len(RC)), idx_B)}
+keep = (yprev >= 0) & (yprev == y4)
+fsub = {'all MCIS': np.ones(N, bool), 'B keeps own emotion': keep, 'B not mirroring A': yA != y4}
+for name in ('+speech', '+text', '+speech+text'):
+    for sname, m in rsub.items():
+        d = uar(REC[name][m], ry[m]) - uar(REC['current'][m], ry[m])
+        lo, hi = boot_delta(REC[name], REC['current'], ry, rep, m)
+        ROWS.append({'probe': 'recognition', 'set': name, 'subset': sname, 'n': int(m.sum()),
+                     'UAR_current': uar(REC['current'][m], ry[m]), 'UAR_new': uar(REC[name][m], ry[m]), 'dUAR': d, 'lo': lo, 'hi': hi})
+    for sname, m in fsub.items():
+        d = uar(FC[name][m], y4[m]) - uar(FC['current'][m], y4[m])
+        lo, hi = boot_delta(FC[name], FC['current'], y4, src, m)
+        ROWS.append({'probe': 'forecast', 'set': name, 'subset': sname, 'n': int(m.sum()),
+                     'UAR_current': uar(FC['current'][m], y4[m]), 'UAR_new': uar(FC[name][m], y4[m]), 'dUAR': d, 'lo': lo, 'hi': hi})
+T = pd.DataFrame(ROWS)
+pd.set_option('display.width', 200)
+print(T.round(2).to_string(index=False))
+T.to_csv(f"{OUT_DIR}/g45_summary.csv", index=False)
+
+pick = lambda probe, subset: T[(T.probe == probe) & (T.set == '+speech+text') & (T.subset == subset)].iloc[0]
+rB = pick('recognition', "B's previous turn")
+fA, fK = pick('forecast', 'all MCIS'), pick('forecast', 'B keeps own emotion')
+rec_ok = rB.dUAR >= 5 and rB.lo > 0
+fc_ok = fA.lo > 0 or fK.lo > 0
+verdict = ('PASS -> G46: the emotion features enter RoleNet' if rec_ok and fc_ok else
+           'INFORMATION PRESENT, NOT USED by the linear forecast' if rec_ok else
+           'STOP: the emotion features do not recognise B\'s previous turn better')
+print(f"\nB's previous turn: recognition {rB.UAR_current:.2f} -> {rB.UAR_new:.2f} ({rB.dUAR:+.2f} [{rB.lo:+.2f},{rB.hi:+.2f}])")
+print(f"forecast all {fA.dUAR:+.2f} [{fA.lo:+.2f},{fA.hi:+.2f}] | B keeps {fK.dUAR:+.2f} [{fK.lo:+.2f},{fK.hi:+.2f}]")
+print("VERDICT:", verdict)
+print(f"saved {OUT_DIR}/g45_summary.csv and {CACHE}")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -13366,6 +13725,7 @@ if __name__ == "__main__":
                         ("g43_listener_history_vs_current_cv.ipynb", G43),
                         ("g44a_clip4_faces_dev.ipynb", G44A),
                         ("g44_oracle_listener_truncation_cv.ipynb", G44),
+                        ("g45_emotion_features_gate_cv.ipynb", G45),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

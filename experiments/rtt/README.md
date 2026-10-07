@@ -1114,3 +1114,20 @@ On the 654 MCIS with a known previous emotion Z of B, adding Z next to RoleNet's
 current clip recognizer, F9). A skip connection carrying a *recognised* earlier state therefore cannot help unless
 recognition of B's earlier emotion reaches far above what the present features allow; it would also need to know
 which earlier turn is B's, which at inference is itself uncertain.
+
+## G45 results: emotion-specific speech/text features (linear probes; development CV, 2,421 MCIS; test untouched)
+Frozen MSP-Podcast wav2vec2 (speech) and GoEmotions RoBERTa (text) features were added to the current clip features
+(CLIP text, AudioCLIP, ECAPA, HSEmotion). ΔUAR vs current, 95% episode bootstrap (log: `results/g45/g45_run.log`).
+
+| probe | subset | n | current | +speech | +text | +speech+text |
+|---|---|---|---|---|---|---|
+| recognition | all clips | 2843 | 29.78 | +1.74 [−0.23, +3.76] | +1.38 [−0.54, +3.44] | +1.68 [−0.14, +3.74] |
+| recognition | clip III (A) | 2421 | 29.26 | +1.60 [−0.29, +3.39] | +2.31 [+0.38, +4.59] | +2.07 [+0.15, +4.31] |
+| recognition | B's previous turn | 652 | 27.19 | +4.50 [−0.09, +9.82] | +3.38 [−0.07, +6.38] | +2.47 [−1.27, +5.58] |
+| forecast | all MCIS | 2421 | 18.86 | +0.83 [−1.01, +2.70] | −0.50 [−2.34, +1.30] | +0.06 [−1.49, +1.76] |
+| forecast | B keeps own emotion | 320 | 37.00 | −11.54 [−16.13, +8.19] | −12.14 [−16.18, +5.85] | −14.80 [−18.19, +2.70] |
+| forecast | B not mirroring A | 1561 | 17.97 | −0.61 [−2.41, +1.12] | −0.95 [−3.01, +1.05] | −1.63 [−3.54, +0.56] |
+
+Verdict by the fixed rule: **STOP** (B's previous turn +2.47, below +5 and the interval includes 0). The emotion
+models add about 1.5–2 UAR to clip-level recognition (significant only on clip III), not enough to change what can be
+known about B's earlier state, and nothing to the forecast. No G46.

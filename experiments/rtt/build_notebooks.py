@@ -13683,6 +13683,292 @@ print(f"saved {OUT_DIR}/g45_summary.csv and {CACHE}")
 ]
 
 
+# G46a — Privileged future target: can B's clip-IV face (training-time target only) shape a better forecaster?
+# Linear gate before any RoleNet change; development CV; test untouched; clip IV is never an input.
+G46A = [
+    ("markdown", r"""
+# G46a — Learning from B's future face (training-time target only): linear gate (development CV; test untouched)
+
+**Why.** The forecast is trained from one 7-way label per MCIS (2,421 MCIS). B's face in clip IV — the moment the
+label describes — carries much more information per sample (G23: clip-IV faces separate negative emotions far better
+than the forecast). Using it as a **target during training only** (learning using privileged information) could shape
+a better forecaster. Clip IV is **never an input** of the forecaster; the authors allowed this training-time use.
+RoleNet's existing face auxiliary head (G30) predicts the 7-way label, not a clip-IV representation.
+
+**Target.** The dominant identity of clip IV (≥ 25% of its sampled frames; ArcFace clustering as in G26/G44) = B, the
+clip-IV speaker. T = mean over B's clip-IV faces of [HSEmotion 8 softmax + valence/arousal] (10) and of the HSEmotion
+embedding (1280 → PCA 32, fitted on training folds).
+
+**Linear form of the idea.** Inputs X = current clip features of clips I–III (as G45: CLIP text, AudioCLIP, ECAPA,
+mean HSEmotion of the faces). In each outer fold: a ridge regression X → T is fitted on the training MCIS (alpha by inner
+episode CV); its predictions T̂ are cross-fitted on the training rows (inner episode folds) so training and held-out T̂
+have the same quality. Then logistic regressions (C = 1, balanced) on:
+
+| Arm | Inputs |
+|---|---|
+| `X` | X (reference) |
+| `X+T̂` | X + predicted future face (**main**) |
+| `X+T̂shuf` | X + prediction of a ridge fitted to T **shuffled** across training MCIS (control: same pipeline and dimensions, no future information) |
+| `X+T` | X + the true T (oracle, analysis only: is the target informative at all?) |
+| `T` | true T only (analysis only: how well B's clip-IV face recognises the label) |
+
+**Reading rule (fixed before running)**, ΔUAR with 95% bootstrap over episodes (2,000):
+* **VALIDITY**: the oracle `X+T` − `X` lower bound > 0. Otherwise **STOP** (the target carries no label information).
+* **PASS → G46** (RoleNet + an auxiliary head predicting T, 5 seeds × 5 folds): `X+T̂` − `X` lower bound > 0 **and**
+  `X+T̂` − `X+T̂shuf` lower bound > 0.
+* Otherwise **STOP**.
+Also reported: ridge R² of T̂ per block, subsets (B keeps / changes own emotion from the G16 table, not mirroring A).
+A linear gate is a proxy: RoleNet would use T as an auxiliary loss, not as a stacked feature.
+
+Inputs: `hi-ef-dataset` (annotation), `hi-ef-features-v2`, `hi-ef-split`, `g8a-features`, the G44a output
+(`c4shard_*.pkl`), the dataset with `g16_per_mcis.csv`. CPU is enough.
+"""),
+    ("code", r"""
+# ======== CONFIG ========
+import os, glob
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+FEATURES_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-features-v2"
+SPLIT_GLOB = "/kaggle/input/**/source_folder_split_seed42.csv"
+G8A_GLOB = "/kaggle/input/**/shard_*.pkl"          # clips I-III (G8a); does not match c4shard_*
+C4_GLOB = "/kaggle/input/**/c4shard_*.pkl"         # clip IV faces (G44a): training target / analysis only
+G16_GLOB = "/kaggle/input/**/g16_per_mcis.csv"
+OUT_DIR = "/kaggle/working"
+N_OUTER, N_INNER, N_BOOT, LR_C = 5, 5, 2000, 1.0
+PCA = {'clip_text': 64, 'audioclip': 64, 'ecapa': 32, 'face_emb': 32}
+T_EMB_PCA = 32
+RIDGE_ALPHAS = [1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0]
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25
+EMO = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+E2I = {e: i for i, e in enumerate(EMO)}
+"""),
+    ("code", r"""
+import pickle, random
+import numpy as np, pandas as pd, torch
+from tqdm.auto import tqdm
+
+
+def one(pattern, what):
+    hits = sorted(glob.glob(pattern, recursive=True))
+    assert hits, f"{what} not found ({pattern})"
+    return hits[0]
+
+
+sp = pd.read_csv(one(SPLIT_GLOB, "split csv"), dtype=str)
+DEV = sp[sp.split.isin(['train', 'val'])].reset_index(drop=True)
+assert 'test' not in set(DEV.split)
+N = len(DEV)
+CLIPS = sorted(set(DEV[['clip1', 'clip2', 'clip3']].values.ravel()))
+y4 = DEV.clip4_emotion.map(E2I).values
+yA = DEV.clip3_emotion.map(E2I).values
+src = DEV.source_folder.values
+g16 = pd.read_csv(one(G16_GLOB, "g16_per_mcis.csv"), dtype={'sample_id': str}).set_index('sample_id').loc[DEV.sample_id.values]
+assert (g16.y.values == y4).all(), "G16 table and split disagree"
+near = g16.B_spoke_II.values.astype(bool) & (g16.y_II.values >= 0)
+far = g16.B_spoke_I.values.astype(bool) & (g16.y_I.values >= 0) & ~near
+yprev = np.where(near, g16.y_II.values, np.where(far, g16.y_I.values, -1)).astype(int)
+
+sizes = DEV.source_folder.value_counts()                   # episode folds, identical to G8b / G14 / G45
+order = list(sizes.index); random.Random(0).shuffle(order); order = sorted(order, key=lambda e: -sizes[e])
+load_, FOLD = [0] * N_OUTER, {}
+for e in order:
+    f = int(np.argmin(load_)); FOLD[e] = f; load_[f] += sizes[e]
+fold_of_row = DEV.source_folder.map(FOLD).values
+print(f"development MCIS {N} | clips I-III {len(CLIPS)} | B's previous emotion known {(yprev >= 0).sum()}")
+"""),
+    ("code", r"""
+# ---- inputs X (clips I-III, as G45 'current') and the clip-IV target T (B = dominant clip-IV identity)
+from sklearn.cluster import AgglomerativeClustering
+G8 = {}
+for f in sorted(glob.glob(G8A_GLOB, recursive=True)):
+    G8.update(pickle.load(open(f, 'rb')))
+miss = [c for c in CLIPS if c not in G8]
+assert not miss, f"{len(miss)} clips missing from g8a-features"
+G84 = {}
+for f in sorted(glob.glob(C4_GLOB, recursive=True)):
+    G84.update(pickle.load(open(f, 'rb')))
+miss4 = [c for c in DEV.clip4 if c not in G84]
+assert len(miss4) <= 0.01 * N, f"{len(miss4)} clip-IV records missing: attach the G44a output (c4shard_*.pkl)"
+
+
+def softmax(z):
+    e = np.exp(z - z.max(-1, keepdims=True)); return e / e.sum(-1, keepdims=True)
+
+
+def face10(fs):
+    fer = np.stack([x['fer'] for x in fs]).astype(np.float32)
+    return np.concatenate([softmax(fer[:, :8]), fer[:, 8:10]], 1).mean(0)
+
+
+BLK = {k: {} for k in ('clip_text', 'audioclip', 'afound', 'ecapa', 'face10', 'face_emb')}
+for c in tqdm(CLIPS, desc='blocks'):
+    d = torch.load(os.path.join(FEATURES_DIR, c.replace('/', '_') + '.pt'), map_location='cpu')
+    BLK['clip_text'][c] = d['text_feature'].float().numpy().reshape(-1)
+    a = d.get('audio_feature', torch.zeros(527)).float().numpy().reshape(-1)
+    BLK['audioclip'][c] = a / (np.linalg.norm(a) + 1e-9)
+    BLK['afound'][c] = np.array([float(bool(d.get('audio_found', True)))], np.float32)
+    au = G8[c].get('audio')
+    BLK['ecapa'][c] = (au['ecapa'].astype(np.float32) if au is not None and au.get('ecapa') is not None
+                       else np.zeros(192, np.float32))
+    fs = G8[c]['faces']
+    BLK['face10'][c] = face10(fs) if fs else np.zeros(10, np.float32)
+    BLK['face_emb'][c] = (np.stack([x['fer_emb'] for x in fs]).astype(np.float32).mean(0) if fs
+                          else np.zeros(1280, np.float32))
+CUR = list(BLK)
+
+# target: B's clip-IV face (dominant identity); NaN rows = no dominant face
+T10 = np.full((N, 10), np.nan, np.float32); TEMB = np.full((N, 1280), np.nan, np.float32)
+for n, c4 in enumerate(tqdm(DEV.clip4.values, desc='clip IV')):
+    f4 = G84.get(c4, {}).get('faces', [])
+    if not f4:
+        continue
+    E4 = np.stack([d['arc'] for d in f4]).astype(np.float32)
+    l4 = (AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
+                                  distance_threshold=1 - SAME_PERSON_COS).fit_predict(E4) if len(E4) > 1 else np.zeros(1, int))
+    frames = {p: {d['frame'] for d, q in zip(f4, l4) if q == p} for p in set(l4.tolist())}
+    dom = max(frames, key=lambda p: len(frames[p]))
+    if len(frames[dom]) / max(G84[c4]['meta']['n_sampled'], 1) < DOMINANT_MIN_FRAC:
+        continue
+    fb = [d for d, q in zip(f4, l4) if q == dom]
+    T10[n] = face10(fb); TEMB[n] = np.stack([d['fer_emb'] for d in fb]).astype(np.float32).mean(0)
+HAS_T = ~np.isnan(T10[:, 0])
+print(f"B's clip-IV face (dominant identity) found for {HAS_T.mean() * 100:.1f}% of MCIS")
+assert HAS_T.mean() > 0.5, "too few clip-IV targets: wrong c4shard files?"
+"""),
+    ("code", r"""
+# ---- probes
+from sklearn.decomposition import PCA as _PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression, Ridge
+import warnings; warnings.filterwarnings('ignore')
+
+
+def uar(p, t):
+    return np.mean([(p[t == c] == c).mean() * 100 for c in range(7) if (t == c).any()])
+
+
+def block_matrix(clips, blocks, fit_clips):
+    out = []
+    for b in blocks:
+        Xf = np.stack([BLK[b][c] for c in fit_clips]); X = np.stack([BLK[b][c] for c in clips])
+        sc = StandardScaler().fit(Xf); Xf, X = sc.transform(Xf), sc.transform(X)
+        if b in PCA:
+            pc = _PCA(min(PCA[b], Xf.shape[1], len(Xf) - 1), random_state=0).fit(Xf); X = pc.transform(X)
+        out.append(X)
+    return np.concatenate(out, 1)
+
+
+def target_matrix(tr):
+    # T on all rows, preprocessing fitted on training rows that have a target; rows without target stay NaN
+    fit = tr[HAS_T[tr]]
+    s10 = StandardScaler().fit(T10[fit])
+    se = StandardScaler().fit(TEMB[fit]); pe = _PCA(T_EMB_PCA, random_state=0).fit(se.transform(TEMB[fit]))
+    T = np.full((N, 10 + T_EMB_PCA), np.nan, np.float32)
+    T[HAS_T] = np.concatenate([s10.transform(T10[HAS_T]), pe.transform(se.transform(TEMB[HAS_T]))], 1)
+    return T
+
+
+def inner_folds(rows):
+    eps = sorted(set(src[rows])); rng = random.Random(1); rng.shuffle(eps)
+    g = {e: i % N_INNER for i, e in enumerate(eps)}
+    return np.array([g[e] for e in src[rows]])
+
+
+def ridge_crossfit(X, T, tr, te):
+    # alpha by inner episode CV (mean R^2); T-hat for training rows out-of-fold, for held-out rows from all training rows
+    trT = tr[HAS_T[tr]]; ifo = inner_folds(trT)
+    def r2(a):
+        s = []
+        for k in range(N_INNER):
+            fi, vi = trT[ifo != k], trT[ifo == k]
+            p = Ridge(alpha=a).fit(X[fi], T[fi]).predict(X[vi])
+            s.append(1 - ((p - T[vi]) ** 2).sum() / ((T[vi] - T[fi].mean(0)) ** 2).sum())
+        return np.mean(s)
+    scores = {a: r2(a) for a in RIDGE_ALPHAS}; a = max(scores, key=scores.get)
+    That = np.zeros((N, T.shape[1]), np.float32)
+    ifa = inner_folds(tr)
+    for k in range(N_INNER):                               # cross-fit on all training rows (with or without target)
+        fi = tr[(ifa != k) & HAS_T[tr]]; vi = tr[ifa == k]
+        That[vi] = Ridge(alpha=a).fit(X[fi], T[fi]).predict(X[vi])
+    That[te] = Ridge(alpha=a).fit(X[trT], T[trT]).predict(X[te])
+    return That, a, scores[a]
+
+
+def lr(Xtr, ytr, Xte):
+    sc = StandardScaler().fit(Xtr)
+    return LogisticRegression(C=LR_C, max_iter=3000, class_weight='balanced').fit(sc.transform(Xtr), ytr).predict(sc.transform(Xte))
+
+
+ARMS = ['X', 'X+T̂', 'X+T̂shuf', 'X+T', 'T']
+PRED = {k: np.full(N, -1, int) for k in ARMS}
+R2 = []
+for f in range(N_OUTER):
+    tr, te = np.where(fold_of_row != f)[0], np.where(fold_of_row == f)[0]
+    fit_clips = sorted(set(DEV.iloc[tr][['clip1', 'clip2', 'clip3']].values.ravel()))
+    X = np.concatenate([block_matrix(list(DEV[col].values), CUR, fit_clips) for col in ('clip1', 'clip2', 'clip3')], 1)
+    T = target_matrix(tr)
+    That, a, r2 = ridge_crossfit(X, T, tr, te)
+    Tsh = T.copy(); rows = tr[HAS_T[tr]]
+    Tsh[rows] = T[np.random.default_rng(f).permutation(rows)]          # shuffle targets among training MCIS
+    Tshat, a_s, r2_s = ridge_crossfit(X, Tsh, tr, te)
+    Tz = np.nan_to_num(T); m = HAS_T.astype(np.float32)[:, None]        # oracle: missing target -> zeros + flag
+    PRED['X'][te] = lr(X[tr], y4[tr], X[te])
+    PRED['X+T̂'][te] = lr(np.c_[X, That][tr], y4[tr], np.c_[X, That][te])
+    PRED['X+T̂shuf'][te] = lr(np.c_[X, Tshat][tr], y4[tr], np.c_[X, Tshat][te])
+    PRED['X+T'][te] = lr(np.c_[X, Tz, m][tr], y4[tr], np.c_[X, Tz, m][te])
+    PRED['T'][te] = lr(np.c_[Tz, m][tr], y4[tr], np.c_[Tz, m][te])
+    hv = te[HAS_T[te]]                                                   # held-out R^2 of T-hat
+    r2_te = 1 - ((That[hv] - T[hv]) ** 2).sum() / ((T[hv] - T[tr[HAS_T[tr]]].mean(0)) ** 2).sum()
+    R2.append({'fold': f, 'alpha': a, 'inner_R2': r2, 'heldout_R2': r2_te, 'alpha_shuf': a_s, 'inner_R2_shuf': r2_s})
+    print(f"fold {f}: ridge alpha {a:g} | inner R2 {r2:.3f} | held-out R2 {r2_te:.3f} | shuffled inner R2 {r2_s:.3f} | "
+          + " | ".join(f"{k} {uar(PRED[k][te], y4[te]):.2f}" for k in ARMS), flush=True)
+assert all((PRED[k] >= 0).all() for k in ARMS)
+print(pd.DataFrame(R2).round(3).to_string(index=False))
+"""),
+    ("code", r"""
+# ---- results and the fixed rule (bootstrap over episodes)
+rng = np.random.default_rng(0)
+EPS = np.unique(src); GI = {e: np.where(src == e)[0] for e in EPS}
+
+
+def boot_delta(a, b, sub, n=N_BOOT):
+    d = []
+    for _ in range(n):
+        idx = np.concatenate([GI[e] for e in rng.choice(EPS, len(EPS))]); idx = idx[sub[idx]]
+        d.append(uar(PRED[a][idx], y4[idx]) - uar(PRED[b][idx], y4[idx]))
+    return np.percentile(d, [2.5, 97.5])
+
+
+keep = (yprev >= 0) & (yprev == y4); change = (yprev >= 0) & (yprev != y4)
+SUBS = {'all MCIS': np.ones(N, bool), 'B keeps own emotion': keep, 'B changes own emotion': change,
+        'B not mirroring A': yA != y4}
+print("UAR by arm:")
+print(pd.DataFrame({s: {k: uar(PRED[k][m], y4[m]) for k in ARMS} for s, m in SUBS.items()}).round(2).to_string())
+ROWS = []
+for a, b in [('X+T̂', 'X'), ('X+T̂', 'X+T̂shuf'), ('X+T̂shuf', 'X'), ('X+T', 'X')]:
+    for s, m in SUBS.items():
+        lo, hi = boot_delta(a, b, m)
+        ROWS.append({'contrast': f'{a} - {b}', 'subset': s, 'n': int(m.sum()),
+                     'dUAR': uar(PRED[a][m], y4[m]) - uar(PRED[b][m], y4[m]), 'lo': lo, 'hi': hi})
+Tb = pd.DataFrame(ROWS)
+print(Tb.round(2).to_string(index=False))
+Tb.to_csv(f"{OUT_DIR}/g46a_summary.csv", index=False)
+pd.DataFrame(R2).to_csv(f"{OUT_DIR}/g46a_ridge.csv", index=False)
+np.savez(f"{OUT_DIR}/g46a_oof_pred.npz", y=y4, fold=fold_of_row, **{k.replace('̂', 'hat').replace('+', '_'): v for k, v in PRED.items()})
+
+row = lambda c: Tb[(Tb.contrast == c) & (Tb.subset == 'all MCIS')].iloc[0]
+orc, main, ctl = row('X+T - X'), row('X+T̂ - X'), row('X+T̂ - X+T̂shuf')
+valid = orc.lo > 0
+passed = valid and main.lo > 0 and ctl.lo > 0
+verdict = ('PASS -> G46: RoleNet + auxiliary head predicting B\'s clip-IV face' if passed else
+           'STOP: the future-face target carries no label information beyond X (validity failed)' if not valid else
+           'STOP: the predicted future face does not improve the linear forecast')
+print(f"\noracle X+T - X {orc.dUAR:+.2f} [{orc.lo:+.2f},{orc.hi:+.2f}] | main X+T̂ - X {main.dUAR:+.2f} "
+      f"[{main.lo:+.2f},{main.hi:+.2f}] | vs shuffled {ctl.dUAR:+.2f} [{ctl.lo:+.2f},{ctl.hi:+.2f}]")
+print("VERDICT:", verdict)
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -13729,6 +14015,7 @@ if __name__ == "__main__":
                         ("g44a_clip4_faces_dev.ipynb", G44A),
                         ("g44_oracle_listener_truncation_cv.ipynb", G44),
                         ("g45_emotion_features_gate_cv.ipynb", G45),
+                        ("g46a_future_face_target_gate.ipynb", G46A),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

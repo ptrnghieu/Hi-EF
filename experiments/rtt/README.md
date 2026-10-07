@@ -1083,3 +1083,25 @@ label) would raise UAR from 26.62 to 31.79, but after the exclusion the true lab
 threshold tuned on the same data, the gain is +0.35 UAR (+1.15 at AUC 0.80, +2.37 at 0.90). A shift-aware decision rule
 therefore fails the run gate (criteria 3–4): the bottleneck is knowing *that* and *into what* the responder shifts,
 i.e. the input signal, not the decision rule.
+
+## B's own emotion change (development CV, analysis only; `analysis/b_self_shift.py` → `results/b_shift/b_self_shift.csv`)
+
+"Shift" in F14 / the paper means B does not mirror A. B's *own* change needs B's previous emotion: the gold label of B's
+latest earlier turn where B spoke in clip I/II (voice match, G15/G16; analysis only) — known for 654 MCIS (27.0%).
+B keeps their own emotion in 48.9% of them (B mirrors A in 35.5% of all MCIS). Copying B's previous emotion gives
+accuracy 48.9 / UAR 39.18 on this subset (RoleNet 41.9 / 27.4).
+
+| Subset | n | ACC PaperBest / PaperBest-FM / RoleNet | RoleNet − PaperBest (acc) | RoleNet predicts B's previous emotion |
+|---|---|---|---|---|
+| B keeps own emotion | 320 | 46.2 / 45.6 / 56.6 | +10.3 [−0.7, +18.1] | 56.6% |
+| B changes own emotion | 334 | 26.9 / 26.9 / 27.8 | +0.9 [−5.2, +5.9] | 30.8% |
+| keeps & mirrors A | 145 | 55.9 / 53.8 / 71.0 | +15.2 [−0.6, +27.9] | |
+| keeps, not mirroring A | 175 | 38.3 / 38.9 / 44.6 | +6.3 [−6.0, +14.7] | |
+| changes & mirrors A | 90 | 41.1 / 36.7 / 43.3 | +2.2 [−11.8, +16.7] | |
+| changes, not mirroring A | 244 | 21.7 / 23.4 / 22.1 | +0.4 [−6.8, +6.2] | |
+| B's previous emotion unknown | 1,767 | 29.9 / 31.5 / 36.4 | +6.5 [+1.9, +10.4] | |
+
+Reading: RoleNet's advantage is in persistence (B keeps their own emotion, especially when it also matches A); when
+B changes their own emotion to one nobody showed, all models are near chance (UAR ≈ 17–18, chance 14.3). On the keep
+cases RoleNet predicts B's previous emotion only 56.6% of the time although copying it would be right every time: the
+model under-recognises B's own earlier state — the recognition bottleneck (F8/F9).

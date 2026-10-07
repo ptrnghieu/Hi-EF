@@ -13459,14 +13459,17 @@ if not FAKE_MODELS:
             super().__init__(config)
             self.wav2vec2 = Wav2Vec2Model(config)
             self.classifier = RegressionHead(config)
-            self.init_weights()
+            self.post_init()                             # transformers >= 5 (init_weights() alone breaks loading)
 
         def forward(self, input_values):
             h = self.wav2vec2(input_values)[0].mean(1)
             return h, self.classifier(h)
 
     ser_proc = Wav2Vec2Processor.from_pretrained(SER_MODEL)
-    ser = EmotionModel.from_pretrained(SER_MODEL).to(DEVICE).eval()
+    ser, _info = EmotionModel.from_pretrained(SER_MODEL, output_loading_info=True)
+    _miss = [k for k in _info['missing_keys'] if 'classifier' in k or 'encoder' in k]
+    assert not _miss, f"speech emotion weights not loaded: {_miss[:5]}"
+    ser = ser.to(DEVICE).eval()
     tok = AutoTokenizer.from_pretrained(TXT_MODEL)
     txt = AutoModelForSequenceClassification.from_pretrained(TXT_MODEL, output_hidden_states=True).to(DEVICE).eval()
 

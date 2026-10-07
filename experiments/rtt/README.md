@@ -1073,3 +1073,13 @@ clip III. PaperBest 21.27 UAR, PaperBest-FM 23.25.
 Every RoleNet variant beats the original baseline; RoleNet with the last 40% of clip III removed still beats the
 feature-matched baseline that sees the full clip (lower bounds +0.13 proxy, +0.00 oracle). Without listener tokens the
 advantage over the feature-matched baseline is not established (+0.79). minus-L arms of G40/G44 are in the CSV.
+
+## Shift headroom (development CV, analysis only; `analysis/shift_headroom.py`)
+
+RoleNet: accuracy 55.9% on mirror MCIS (35.5%) vs 28.0% on shifts; on shifts it still predicts A's clip-III label 29.3%
+of the time (PaperBest: 45.6% / 24.0% / 26.8%). Excluding A's label on every true shift (oracle: known shift and gold A
+label) would raise UAR from 26.62 to 31.79, but after the exclusion the true label is still ranked third or lower in
+43.5% of shifts. With a shift detector of the measured quality (AUC 0.70, F14), even with A's gold label and the
+threshold tuned on the same data, the gain is +0.35 UAR (+1.15 at AUC 0.80, +2.37 at 0.90). A shift-aware decision rule
+therefore fails the run gate (criteria 3–4): the bottleneck is knowing *that* and *into what* the responder shifts,
+i.e. the input signal, not the decision rule.

@@ -1105,3 +1105,11 @@ Reading: RoleNet's advantage is in persistence (B keeps their own emotion, espec
 B changes their own emotion to one nobody showed, all models are near chance (UAR ≈ 17–18, chance 14.3). On the keep
 cases RoleNet predicts B's previous emotion only 56.6% of the time although copying it would be right every time: the
 model under-recognises B's own earlier state — the recognition bottleneck (F8/F9).
+
+## Skip connection with B's previous emotion (simulation; `analysis/skip_prevB_sim.py`)
+
+On the 654 MCIS with a known previous emotion Z of B, adding Z next to RoleNet's output (episode-fold LR) gains
++8.15 UAR on that subset when Z is exact (≈ +2.2 overall), −0.12 at 60% accuracy, −1.10 at 45%, −2.46 at 31% (the
+current clip recognizer, F9). A skip connection carrying a *recognised* earlier state therefore cannot help unless
+recognition of B's earlier emotion reaches far above what the present features allow; it would also need to know
+which earlier turn is B's, which at inference is itself uncertain.

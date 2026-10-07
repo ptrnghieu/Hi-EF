@@ -1031,3 +1031,23 @@ loses only 0.9 / 1.5 UAR (n.s.) and stays well above the full-clip baselines of 
 Fixed rule: **INCONCLUSIVE**. Neither part alone is established; only both together (+2.58) are. History and current
 turn contribute about equally and complement each other. Note that `L-history only` still uses clip III to *identify*
 the listener (the proxy rule), only its clip-III face token is masked.
+
+## G44 results: clip III truncation with the listener fixed to the true responder (oracle identity; 5-fold CV, 2,421 MCIS, 5 seeds; test untouched)
+
+B matched for 87.9% of MCIS (as G26). B is seen in clips I/II in 77.2% of MCIS at every cut.
+
+| Clip III kept | faces III kept | B visible in III | Full | minus-L | listener gain [95% CI] | folds | gain on B-visible-at-100% | Full − Full100 |
+|---|---|---|---|---|---|---|---|---|
+| 100% | 100% | 50.0% | 26.44 | 23.59 | +2.85 [+0.80, +4.95] | 5/5 | +3.59 [+0.83, +6.42] | — |
+| 80% | 79.4% | 19.0% | 25.30 | 23.73 | +1.57 [−0.64, +3.75] | 4/5 | +2.25 [−1.19, +5.13] | −1.14 [−3.18, +0.83] |
+| 60% | 60.7% | 10.7% | 25.31 | 24.10 | +1.21 [−0.96, +3.88] | 4/5 | +1.68 [−1.31, +5.29] | −1.13 [−3.07, +0.75] |
+
+Fixed rule: **GAIN DEPENDS ON THE LATE FRAMES**, narrowly (G_60 = +1.21 < G_100 / 2 = +1.43; CI includes 0).
+Reading together with G40 and G43:
+* B's faces in clip III are mostly late: B is visible in III in 50% of MCIS, 19% after cutting the last 20%.
+* With the identity fixed, about 40–55% of the listener gain survives without the late frames (+1.21 to +1.57,
+  4/5 folds, not significant). In G40, where the cut also removed the listener's identity, nothing survived (−0.13):
+  most of G40's collapse was identity loss.
+* The surviving part matches G43's history value (L-history only − L-none = +1.12, n.s.); the late clip-III frames
+  add the rest (≈ +1.4–1.6). The listener gain is established only with both.
+* Oracle Full at 100% (26.44) ≈ proxy RoleNet (26.62), as in G26.

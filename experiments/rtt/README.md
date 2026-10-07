@@ -1051,3 +1051,25 @@ Reading together with G40 and G43:
 * The surviving part matches G43's history value (L-history only − L-none = +1.12, n.s.); the late clip-III frames
   add the rest (≈ +1.4–1.6). The listener gain is established only with both.
 * Oracle Full at 100% (26.44) ≈ proxy RoleNet (26.62), as in G26.
+
+## All development-CV variants against the baseline (G41 PaperBest / PaperBest-FM out-of-fold predictions; not retrained)
+
+`analysis/cv_vs_baseline.py` → `results/cv_vs_baseline/cv_vs_baseline.csv`. Same 5 folds and 5 seeds everywhere;
+Δ UAR with 95% two-level bootstrap (seeds of both arms × 45 episodes, 2,000 draws); the baseline always sees the full
+clip III. PaperBest 21.27 UAR, PaperBest-FM 23.25.
+
+| Variant | UAR | Δ vs PaperBest | Δ vs PaperBest-FM |
+|---|---|---|---|
+| RoleNet (= L-both, = G40/G44-proxy 100%) | 26.62 | +5.35 [+2.34, +7.37] | +3.37 [+0.68, +5.09] |
+| L-history only | 25.15 | +3.89 [+1.28, +6.03] | +1.91 [−0.12, +3.72] |
+| L-current only | 24.86 | +3.60 [+1.79, +6.00] | +1.61 [−0.03, +3.92] |
+| L-none | 24.04 | +2.77 [+0.81, +4.96] | +0.79 [−1.14, +2.85] |
+| RoleNet, clip III 80% (proxy listener) | 25.73 | +4.46 [+2.00, +6.71] | +2.48 [+0.31, +4.49] |
+| RoleNet, clip III 60% (proxy listener) | 25.08 | +3.81 [+1.84, +6.23] | +1.83 [+0.13, +3.99] |
+| RoleNet, clip III 100% (oracle listener) | 26.44 | +5.17 [+2.83, +7.65] | +3.19 [+1.00, +5.38] |
+| RoleNet, clip III 80% (oracle listener) | 25.30 | +4.03 [+1.59, +6.30] | +2.05 [+0.03, +4.02] |
+| RoleNet, clip III 60% (oracle listener) | 25.31 | +4.04 [+1.73, +6.31] | +2.06 [+0.00, +3.97] |
+
+Every RoleNet variant beats the original baseline; RoleNet with the last 40% of clip III removed still beats the
+feature-matched baseline that sees the full clip (lower bounds +0.13 proxy, +0.00 oracle). Without listener tokens the
+advantage over the feature-matched baseline is not established (+0.79). minus-L arms of G40/G44 are in the CSV.

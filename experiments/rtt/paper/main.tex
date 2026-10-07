@@ -87,9 +87,10 @@ encoder reads the tokens jointly and a query token pools them into a forecast. W
 test split was read once under a preregistered plan. \model{} improves unweighted average recall (UAR) over the
 strongest configuration of \citet{wang2026hief}, retrained on the same split, by 3.84 points and wins seven of eight
 test episodes.
-\item Controlled analyses explain the gain: the proxy loses nothing against the true responder, the listener's face
-and the preceding context are each worth about two UAR points, the encoder needs no explicit temporal order or
-relation biases, and the remaining errors lie in recognising conversational states before a shift.
+\item Controlled analyses explain the gain: it persists against the baseline given the same features and after
+the end of the current turn is removed, the proxy loses nothing against the true responder, the listener's face and
+the preceding context are each worth about two UAR points, the encoder needs no explicit temporal order or relation
+biases, and the remaining errors lie in recognising conversational states before a shift.
 \end{itemize}
 
 % ======================================================================================================
@@ -466,6 +467,50 @@ an identity-free selection of the evidence suffices.
 \begin{table}[t]
 \centering\small
 \begin{adjustbox}{max width=\columnwidth}
+\begin{tabular}{lcc}
+\toprule
+Model (development CV) & UAR & WAR \\
+\midrule
+Baseline, original features & 21.27 & 31.68 \\
+Baseline, \model{}'s features & 23.25 & 32.71 \\
+\midrule
+\model{} & \textbf{26.62} & \textbf{37.92} \\
+\quad listener tokens of clips I/II only & 25.15 & 36.56 \\
+\quad listener token of clip III only & 24.86 & 35.98 \\
+\quad no listener tokens & 24.04 & 35.23 \\
+\midrule
+\model{}, clip III cut to 80\% & 25.73 & 37.01 \\
+\model{}, clip III cut to 60\% & 25.08 & 36.14 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Where the gain over the baseline comes from. All models are trained in one run on the same folds and seeds.
+The feature-matched baseline is the architecture of \citet{wang2026hief} fed with \model{}'s face, synchrony and voice
+features, aggregated per clip. In the cut variants only \model{} loses the end of clip III; the baselines see the
+full clip.}
+\label{tab:origin}
+\end{table}
+
+Table~\ref{tab:origin} asks where the gain over the baseline comes from. Feeding the baseline architecture
+\model{}'s features, aggregated per clip as usual, raises its UAR from 21.27 to 23.25, but \model{} stays 3.37
+points ahead, significantly and in all five folds: the gain comes from the participant-centric representation, not
+only from the richer pre-processing. Most of this advantage lies in the listener tokens. Without them, \model{} is no
+longer distinguishable from the feature-matched baseline, whereas the listener's tokens of clips I/II alone or of
+clip III alone each recover part of the margin and both together recover all of it.
+
+About half of the listener's frames lie in the last fifth of clip III, close to the target turn. We therefore retrain
+\model{} with the end of clip III removed: faces after the cut are discarded before roles are assigned, and the scene
+token uses only the remaining frames, while the baselines keep the full clip. With 80\% or 60\% of clip III,
+\model{} still exceeds the full-clip baseline by 4.46 and 3.81 points and the feature-matched baseline by 2.48 and
+1.83 points, all significant. The listener's own contribution shrinks with the cut. When the listener is fixed to the
+true responder (the oracle above), so that the cut removes frames but not the identity, about half of it survives
+without the late frames, in line with the value of the listener's clips I/II alone; neither half is significant on
+its own. The forecast thus draws on the responder's earlier appearances and, to a similar extent, on their reaction
+late in the current turn.
+
+\begin{table}[t]
+\centering\small
+\begin{adjustbox}{max width=\columnwidth}
 \begin{tabular}{lc}
 \toprule
 Change to \model{} (development CV) & $\Delta$NLL \\
@@ -554,9 +599,10 @@ numbers come from the single preregistered run. The test set is small: eight epi
 \emph{fear} example is worth 2.38 UAR points, and \model{} never forecasts \emph{fear} or \emph{surprise} correctly.
 The design of \model{} was informed by analyses on the same development episodes used for cross-validation.
 
-About half of the listener frames fall in the last fifth of clip III, close to the target turn. They are valid
-inputs under the benchmark protocol, but part of the gain may come from recognising the responder's early reaction
-rather than from forecasting further ahead. The true responder used by the oracle is approximated by the dominant
+About half of the listener's frames fall in the last fifth of clip III, close to the target turn. They are valid
+inputs under the benchmark protocol and carry part of the listener's contribution: without them \model{} still beats
+the baselines, but the listener's own gain is no longer significant (Section~\ref{sec:ablation}), so part of it
+reflects the responder's early reaction rather than forecasting further ahead. The true responder used by the oracle is approximated by the dominant
 face of clip IV matched by face identity, so matching errors would blur the proxy--oracle comparison. Text and audio
 come from general-purpose encoders (CLIP, AudioCLIP sound events), not from emotion- or prosody-specific models, and
 conclusions about which evidence matters are conditional on them. Hi-EF and MELD consist of scripted TV series with

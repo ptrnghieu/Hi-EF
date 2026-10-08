@@ -133,7 +133,7 @@ def acc_ci(m):
     return ok[m].mean() * 100, *np.percentile(v, [2.5, 97.5])
 
 
-groups = [('mirror', mir), ('shift', ~mir), ('listener visible', vis), ('listener not visible', ~vis),
+groups = [('mirror', mir), ('non-mirror', ~mir), ('listener visible', vis), ('listener not visible', ~vis),
           ('certain label', cert == '1'), ('uncertain label', cert == '3')]
 rows = [(n, m.sum(), *acc_ci(m)) for n, m in groups]
 NUM['cv_accuracy_by_group'] = {n: {'n': int(c), 'acc': round(a, 1), 'ci': [round(l, 1), round(h, 1)]} for n, c, a, l, h in rows}

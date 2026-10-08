@@ -90,7 +90,8 @@ test episodes.
 \item Controlled analyses explain the gain: it persists against the baseline given the same features and after
 the end of the current turn is removed, the proxy loses nothing against the true responder, the listener's face and
 the preceding context are each worth about two UAR points, the encoder needs no explicit temporal order or relation
-biases, and the remaining errors lie in recognising conversational states before a shift.
+biases, and the advantage lies in responders who keep their own earlier emotion, while a change to a new emotion
+remains hard for every model.
 \end{itemize}
 
 % ======================================================================================================
@@ -285,7 +286,8 @@ development episodes with five seeds, and the test split was read once under a p
 (models, seeds, metrics and the order of confirmatory contrasts). Earlier, unrelated model families had been
 evaluated on the same test split; Appendix~\ref{app:extra} lists every access. On MELD, both models are trained with
 three seeds, using the training windows for fitting, the dev windows for early stopping and the test windows for the
-comparison. Hyper-parameters are listed in Appendix~\ref{app:extra}.
+comparison. Apart from Table~\ref{tab:main} and Figure~\ref{fig:confusion}, all Hi-EF results use development CV only.
+Hyper-parameters are listed in Appendix~\ref{app:extra}.
 
 \subsection{Evaluation Criteria}
 
@@ -556,22 +558,34 @@ limitation in Section~\ref{sec:conclusion}.
 
 Most successful forecasts are cases of mirroring. B's emotion equals A's clip III emotion in 35.5\% of development
 MCIS (34.7\% in our MELD windows). On these \emph{mirror} cases \model{} is correct 56.9\% of the time, but only
-27.7\% on \emph{shifts}, where it still predicts A's emotion 29\% of the time; the listener's tokens help mostly on
-mirror cases. Whether a shift will happen is partly predictable (AUC 0.70), but which emotion follows a shift is
-not: recall on shifts is 1.6\% for \emph{disgust}, 2.8\% for \emph{surprise} and 0\% for \emph{fear}.
+27.7\% on \emph{non-mirror} cases, where it still predicts A's emotion 29\% of the time; the listener's tokens help
+mostly on mirror cases. Whether B will depart from A's emotion is partly predictable (AUC 0.70), but which emotion
+follows is not: recall on non-mirror cases is 1.6\% for \emph{disgust}, 2.8\% for \emph{surprise} and 0\% for
+\emph{fear}.
 
-The errors are of two kinds (Figure~\ref{fig:groups}). Some are objective: on a shift the next emotion is not
-determined by what is visible, and accuracy halves. Others are subjective: when the annotators marked B's label as
+The responder's own inertia tells a similar story. In 27\% of development MCIS B also spoke in clip I or II with a
+labelled emotion (B found by voice in clip IV; analysis only), and in 48.9\% of these B keeps that emotion in clip IV.
+In the run of Table~\ref{tab:origin}, \model{}'s advantage lies in these \emph{keep} cases: it is correct 56.6\% of
+the time against 46.2\% for the baseline, and 71.0\% against 55.9\% when the kept emotion also mirrors A. When B
+\emph{shifts} to another emotion, all models are correct about 27\% of the time, and about 22\% when the new emotion
+also differs from A's. Even on keep cases, where repeating B's earlier emotion would always be right, \model{} does
+so only 56.6\% of the time.
+
+The errors are of two kinds (Figure~\ref{fig:groups}). Some are objective: when B does not mirror A, the next emotion
+is not determined by what is visible, and accuracy halves. Others are subjective: when the annotators marked B's label as
 uncertain, accuracy falls from 40.5\% to 25.2\%, a ceiling set by label ambiguity rather than by the model. Accuracy
 does not depend on whether a listener is visible in clip III (38.0\% either way), which is consistent with the model
 falling back on context and on the speaker when the listener is absent.
 
 Two oracle analyses show that the missing information is a recognition problem. With A's true clip III emotion added
-to \model{}'s outputs, UAR rises from 24.73 to 27.51 and NLL falls by 0.036; with A's emotion estimated by a
-recogniser from clip III, the gain disappears. On the 26\% of MCIS where B's own earlier turn is labelled, simply
-copying B's earlier emotion gives 39.07 UAR against 27.98 for \model{}, and adding \model{}'s outputs to that label
-adds nothing detectable. The useful signal is the participants' current emotional states, which the fixed feature
-extractors recognise poorly; better ways of combining the same tokens cannot recover it.
+to \model{}'s outputs, the UAR of a linear model on these outputs rises from 24.73 to 27.51 and NLL falls by 0.036;
+with A's emotion estimated by a recogniser from clip III, the gain disappears. On the MCIS where B's own earlier turn
+is labelled, simply copying B's earlier emotion gives 39.18 UAR against 27.39 for \model{}, and adding \model{}'s
+outputs to that label adds nothing detectable. The useful signal is the participants' current emotional states,
+which the fixed feature extractors recognise poorly; better ways of combining the same tokens cannot recover it.
+Off-the-shelf emotion encoders do not close this gap either. Adding frozen speech emotion features
+\citep{wagner2023dawn} and text emotion features \citep{demszky2020goemotions} to the clip features raises a linear
+recogniser of B's earlier turn only from 27.2 to 29.7 UAR, and a linear forecast stays at 18.9.
 
 % ======================================================================================================
 \section{Conclusion and Future Work}
@@ -580,14 +594,15 @@ extractors recognise poorly; better ways of combining the same tokens cannot rec
 Forecasting a responder's emotion on Hi-EF is mostly a matter of looking at the right person. An identity-free
 listener proxy and a participant-centric evidence set read by a small set encoder outperform the published
 configuration on a locked test split, the proxy loses nothing against the true responder, and additional
-structure in the encoder does not help. The remaining errors point to recognising the participants' current
-emotional states, especially before a shift, as the next problem to solve.
+structure in the encoder does not help. The gain comes mostly from responders who mirror the speaker or keep their
+own emotion; the remaining errors point to recognising the participants' current emotional states, in particular the
+responder's own earlier state, as the next problem to solve.
 
 Two classes remain unsolved: \model{} recalls none of the \emph{fear} and \emph{surprise} responses on test, and only
-2.5\% of \emph{disgust}. These classes are rare and mostly arise as shifts away from the speaker's emotion, where the
-visible evidence says little about the next state. In future work we will address them with better recognition of
-the participants' current states, for example emotion- and prosody-aware encoders, and with more training examples
-of these reactions.
+2.5\% of \emph{disgust}. These classes are rare and mostly arise when the responder departs from the speaker's
+emotion, where the visible evidence says little about the next state. Frozen emotion encoders were not enough in our
+probe, so in future work we will address them with recognisers adapted to multi-party video and with more training
+examples of these reactions.
 
 % ======================================================================================================
 \section*{Limitations}
@@ -603,9 +618,11 @@ About half of the listener's frames fall in the last fifth of clip III, close to
 inputs under the benchmark protocol and carry part of the listener's contribution: without them \model{} still beats
 the baselines, but the listener's own gain is no longer significant (Section~\ref{sec:ablation}), so part of it
 reflects the responder's early reaction rather than forecasting further ahead. The true responder used by the oracle is approximated by the dominant
-face of clip IV matched by face identity, so matching errors would blur the proxy--oracle comparison. Text and audio
-come from general-purpose encoders (CLIP, AudioCLIP sound events), not from emotion- or prosody-specific models, and
-conclusions about which evidence matters are conditional on them. Hi-EF and MELD consist of scripted TV series with
+face of clip IV matched by face identity, so matching errors would blur the proxy--oracle comparison; the same holds
+for B's earlier emotion, which is known only where B's voice matches an earlier turn (27\% of MCIS). Text and audio
+come from general-purpose encoders (CLIP, AudioCLIP sound events), and conclusions about which evidence matters are
+conditional on them. Frozen emotion-specific encoders improved recognition only slightly in a linear probe; fine-tuned
+or conversation-specific recognisers were not tested. Hi-EF and MELD consist of scripted TV series with
 shot/reaction-shot editing; the listener proxy relies on this editing style and may not transfer to fixed-camera
 recordings. On MELD the gain is small and not significant, and the MELD test set was read twice: the first run failed
 on three non-finite feature values, which were set to zero before the second run.

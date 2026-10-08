@@ -14427,8 +14427,10 @@ def video_path(clip):
 
 
 def crop(clip, face, pad=0.35):
+    if clip is None or face is None:                 # no such person (e.g. no proxy L) -> grey placeholder
+        return np.full((96, 96, 3), 230, np.uint8)
     p = video_path(clip)
-    if p is None or face is None:
+    if p is None:
         return np.full((96, 96, 3), 230, np.uint8)
     cap = cv2.VideoCapture(p)
     cap.set(cv2.CAP_PROP_POS_MSEC, max(face['t'], 0) * 1000)

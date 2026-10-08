@@ -1,0 +1,12 @@
+subset,n,predictor,UAR,WAR
+all MCIS,2421,majority (training folds),10.817069569748089,17.59603469640644
+all MCIS,2421,copy A (oracle),27.115719528289983,35.52251135894259
+all MCIS,2421,Baseline,21.265409073882157,31.681123502684844
+all MCIS,2421,"Baseline, RoleNet features",23.247738016769233,32.71375464684015
+all MCIS,2421,RoleNet,26.6166759139463,37.9182156133829
+B's previous emotion known,654,majority (training folds),10.55104315973881,19.571865443425075
+B's previous emotion known,654,copy A (oracle),26.183581391213643,35.932721712538225
+B's previous emotion known,654,copy previous B (oracle),39.18488931829508,48.92966360856269
+B's previous emotion known,654,Baseline,22.742627319286356,36.391437308868504
+B's previous emotion known,654,"Baseline, RoleNet features",24.01652878163849,36.08562691131498
+B's previous emotion known,654,RoleNet,27.39331506998757,41.896024464831804

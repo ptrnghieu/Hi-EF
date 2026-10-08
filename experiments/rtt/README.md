@@ -63,6 +63,8 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `g44_oracle_listener_truncation_cv.ipynb` | G44: oracle-identity version of G40 — the listener is fixed to the true responder B (dominant clip-IV identity matched to a clip I–III identity other than A, as G26; analysis only, never an input) and identities come from the full clips, so the cut (100% / 80% / 60% of clip III) removes only late clip-III faces (and scene frames), not the listener's identity; arms `Full` / `minus-L`, 5 seeds × 5 folds, development CV, test untouched; reading rule as G40; needs the G26a output (`c4shard_*.pkl`); outputs `g44_oof_probs_p{100,080,060}.npz`, `g44_summary.csv`; GPU |
 | `g45_emotion_features_gate_cv.ipynb` | G45: gate for emotion-specific speech/text features — frozen off-the-shelf models not trained on MELD (`audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim`, `SamLowe/roberta-base-go_emotions`) on clips I–III of the development MCIS (clip IV and test not read); linear probes (episode folds as G8b/G14) compare current clip features with current + emotion features for recognition (all clips, clip III, B's previous turn from the G16 voice table) and forecast (all MCIS, B keeps, B not mirroring A); fixed reading rule PASS → G46 / information present / STOP; inputs `hi-ef-dataset` (audio + annotation), `hi-ef-features-v2`, `hi-ef-split`, `g8a-features`, a dataset with `g16_per_mcis.csv`; internet on; outputs `g45_emofeat.pkl`, `g45_summary.csv`; GPU |
 | `g46a_future_face_target_gate.ipynb` | G46a: linear gate for a privileged training-time target — B's clip-IV face (dominant clip-IV identity; HSEmotion 10-d + embedding PCA 32) is predicted from clips I–III by a cross-fitted ridge and stacked into the forecast LR; arms X / X+T̂ / X+T̂shuf (shuffled-target control) / X+T and T (oracle, analysis only); clip IV is never an input of a forecaster (training target / analysis only, allowed by the authors); fixed rule VALIDITY → PASS (G46: RoleNet + future-face auxiliary head) / STOP; inputs `hi-ef-split`, `hi-ef-features-v2`, `g8a-features`, G44a output (`c4shard_*.pkl`), the dataset with `g16_per_mcis.csv`; outputs `g46a_summary.csv`, `g46a_ridge.csv`, `g46a_oof_pred.npz`; CPU |
+| `g47_organisation_controls_cv.ipynb` | G47: controls for what RoleNet's organisation contributes, one run, 10 seeds × 5 folds (G14 seeds/folds), every arm retrained — (1) participant tokens vs clip pooling in the same class, with and without auxiliary losses (`RoleNet[R]` / `ClipPool`, `-noAux`; ClipPool also pools the mouth–audio sync per clip); (2) `noRoleEmb` and `RoleShuffle` (A↔L swapped in a random half of the MCIS, consistent across clips, A's auxiliary head still on A's token); (3) `RandomL-0/1/2` (random non-speaker of clip III as L, three draws) and `noL`, main subset ≥ 2 non-speaker candidates; mean ± SD, paired per-seed Δ, two-level bootstrap; fixed reading rules; outputs `g47_oof_probs_<mode>.npz` (string ids), `g47_summary.csv`, `g47_contrasts.csv`; GPU (~1.5–2 h) |
+| `g48_proxy_oracle_groups.ipynb` | G48: proxy vs true responder by group (B seen = proxy / B seen ≠ proxy / B not seen / uncertain matching, with clip-IV dominant fraction, best cosine and margin; analysis only) and a manual-check sheet (24 images + `g48_manual_check.csv`); performance by group afterwards with `analysis/proxy_oracle_groups.py` from the G41 / G44 / G43 predictions; inputs `hi-ef-dataset` (video), `hi-ef-split`, `g8a-features`, G44a output; CPU |
 | `m1_meld_prepare_features.ipynb` | M1: MELD in the Hi-EF format — MCIS windows (I–III → IV by a different speaker), Hi-EF-layout annotation file, `hi-ef-features-v2`-style clip features (CLIP ViT-B/32 face/frame/text, AudioCLIP ESResNeXt-FBSP 527) for clips I–III |
 | `m2_meld_g8a_features.ipynb` | M2: the unchanged G8a face/voice extraction on MELD clips I–III, split into chunks (`N_CHUNKS`, `CHUNK`) |
 | `m3_meld_rolenet.ipynb` | M3: G10's RoleNet / RoleNet-noRole / B1 / LateFusion / PaperBest on MELD (train → fit, dev → early stopping, test once; 3 seeds; no speaker names as input), plus mirroring-vs-shift analysis |
@@ -1132,3 +1134,24 @@ Frozen MSP-Podcast wav2vec2 (speech) and GoEmotions RoBERTa (text) features were
 Verdict by the fixed rule: **STOP** (B's previous turn +2.47, below +5 and the interval includes 0). The emotion
 models add about 1.5–2 UAR to clip-level recognition (significant only on clip III), not enough to change what can be
 known about B's earlier state, and nothing to the forecast. No G46.
+
+## Diagnostic baselines (development CV, G41 run; `analysis/copy_baselines.py` → `results/copy_baselines/`)
+
+Oracle baselines use gold labels and are diagnostics only. "Copy previous B" needs B's own earlier labelled turn
+(G16 voice table; 654 MCIS). Mirroring = B's label equals A's clip-III label; persistence = B keeps their own earlier
+label. The majority baseline is below 1/7 UAR because the majority class differs between folds (happy in 2, neutral in 3).
+
+| Predictor | all MCIS UAR / WAR | B's previous emotion known (654) UAR / WAR |
+|---|---|---|
+| majority (training folds) | 10.82 / 17.60 | 10.55 / 19.57 |
+| copy A (oracle) | 27.12 / 35.52 | 26.18 / 35.93 |
+| copy previous B (oracle) | — | 39.18 / 48.93 |
+| Baseline (PaperBest) | 21.27 / 31.68 | 22.74 / 36.39 |
+| Baseline, RoleNet features | 23.25 / 32.71 | 24.02 / 36.09 |
+| RoleNet | 26.62 / 37.92 | 27.39 / 41.90 |
+
+Protocol checks for the controls: folds are episode-level; the HSEmotion PCA is fitted on the training clips of each
+fold (`build_face_tensors(fit_clips)`); the test split takes no part in model selection; every ablation in the paper's
+ablation table is retrained (G11 masks tokens at training and evaluation); `noRole` (G8b/G14) is the clip-pooled control
+(10 seeds: 26.24 vs 25.80, per seed UAR 24.74 ± 0.97 vs 24.11 ± 0.78, WAR 35.15 ± 1.51 vs 35.04 ± 1.28, Δ +0.44
+[−1.21, +2.16], 4/5 folds) but has no auxiliary head for A, hence the no-aux pair in G47.

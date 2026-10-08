@@ -13969,6 +13969,522 @@ print("VERDICT:", verdict)
 ]
 
 
+# ======================================================================================================================
+# G47 — What does RoleNet's organisation contribute? Participant tokens vs clip pooling (with / without auxiliary
+# losses), role information (embeddings, per-sample A/L shuffle), listener proxy vs a random non-speaker.
+_G47_MODES = ['proxy', 'swapAL', 'randL0', 'randL1', 'randL2']
+
+
+def _g47_cfg():
+    c = G14[1][1]
+    head, _ = c.split("ARMS = [")
+    return head + """SWAP_SEED, RAND_SEED, N_BOOT = 4701, 4702, 2000
+MODES = """ + repr(_G47_MODES) + """
+ARMS_BY_MODE = {
+    'proxy': [
+        ("RoleNet",          'tok',  BASE),                            # reference for the role and listener arms (G14 Full)
+        ("noRoleEmb",        'tok',  {**BASE, 'role_emb': False}),     # face cells kept, A/L/O role embeddings removed
+        ("noL",              'tok',  {**BASE, 'drop': ('L',)}),        # no listener tokens (G14 minus-L)
+        ("RoleNet[R]",       'role', FULL),                            # participant tokens, G8b implementation
+        ("RoleNet[R]-noAux", 'role', {**FULL, 'aux': False}),
+        ("ClipPool",         'role', {**FULL, 'role': False}),         # one pooled face token per clip
+        ("ClipPool-noAux",   'role', {**FULL, 'role': False, 'aux': False}),
+    ],
+    'swapAL': [("RoleShuffle", 'tok', BASE)],                          # A and L swapped in a random half of the MCIS
+    'randL0': [("RandomL-0", 'tok', BASE)],                            # L = random non-speaker of clip III
+    'randL1': [("RandomL-1", 'tok', BASE)],
+    'randL2': [("RandomL-2", 'tok', BASE)],
+}
+assert all(k == 'tok' for m in MODES if m != 'proxy' for _, k, _ in ARMS_BY_MODE[m]), "role-class arms only with the proxy"
+OOF_ALL, INFO_ALL = {}, {}
+"""
+
+
+def _g47_mode_cell(mode):
+    return f"""MODE = {mode!r}
+ARMS = ARMS_BY_MODE[MODE]
+EXPERIMENTS = [a for a in ARMS if a[1] == 'role']   # the token arms join after the token-model cell
+print(f"==== assignment mode: {{MODE}} | arms: {{[a[0] for a in ARMS]}} ====")
+"""
+
+
+def _g47_role_cell():
+    c = G14[6][1]
+    reps = [
+        ("""G8 = {}
+for f in sorted(glob.glob(os.path.join(G8A_DIR, '**', 'shard_*.pkl'), recursive=True)):
+    G8.update(pickle.load(open(f, 'rb')))""",
+         """if not globals().get('G8'):                       # load the G8a shards once, reuse them for every mode
+    G8 = {}
+    for f in sorted(glob.glob(os.path.join(G8A_DIR, '**', 'shard_*.pkl'), recursive=True)):
+        G8.update(pickle.load(open(f, 'rb')))"""),
+        ("CENT_COS = np.full(N, np.nan, np.float32)",
+         "CENT_COS = np.full(N, np.nan, np.float32)\n"
+         "VOI_POOL = np.zeros_like(VOI)             # clip-pooled mouth-audio sync, for the clip-pooled arms\n"
+         "NC3 = np.zeros(N, int)                    # non-speaker candidates in clip III\n"
+         "L_IS_PROXY = np.ones(N, bool); SWAPPED = np.zeros(N, bool)\n"
+         "LFR = np.zeros((N, 2), int)               # frames of the chosen L in clip III / in clips I-II"),
+        ("    L = ids3[1] if len(ids3) > 1 else None\n",
+         "    L = ids3[1] if len(ids3) > 1 else None\n"
+         "    NC3[n] = max(len(ids3) - 1, 0)\n"
+         "    if MODE.startswith('randL') and len(ids3) > 2:     # random non-speaker of clip III, fixed per MCIS and draw\n"
+         "        L = ids3[1:][int(np.random.default_rng([RAND_SEED, int(MODE[5:]), n]).integers(len(ids3) - 1))]\n"
+         "    L_IS_PROXY[n] = L == (ids3[1] if len(ids3) > 1 else None)\n"),
+        ("    role = lambda p: 0 if p == A else (1 if p == L else 2)\n",
+         "    swap = MODE == 'swapAL' and np.random.default_rng([SWAP_SEED, n]).random() < 0.5\n"
+         "    SWAPPED[n] = swap                                   # A and L exchange slots in every clip of this MCIS\n"
+         "    ra, rl = (1, 0) if swap else (0, 1)\n"
+         "    role = lambda p: ra if p == A else (rl if p == L else 2)\n"),
+        ("        VOI[n, k] = v + [vcos, float(ok), len(set(lab)) / 5.0]\n",
+         "        VOI[n, k] = v + [vcos, float(ok), len(set(lab)) / 5.0]\n"
+         "        VOI_POOL[n, k] = list(sync(c, by[('pool', k)])) + [0.0] * 4 + [vcos, float(ok), len(set(lab)) / 5.0]\n"),
+        ("    LRF[n] = np.concatenate(blocks)\n",
+         "    LRF[n] = np.concatenate(blocks)\n"
+         "    if L is not None:\n"
+         "        LFR[n] = (len(frames[(2, L)]), len(frames[(0, L)]) + len(frames[(1, L)]))\n"),
+    ]
+    for a, b in reps:
+        assert c.count(a) == 1, a
+        c = c.replace(a, b)
+    return c + """
+ASLOT = SWAPPED.astype(np.int64)             # slot that holds A's faces (1 where A and L were swapped)
+MULTI = NC3 >= 2
+print(f"mode {MODE}: >= 2 non-speaker candidates in clip III {MULTI.mean() * 100:.1f}% | L differs from the proxy "
+      f"{(~L_IS_PROXY).mean() * 100:.1f}% (on the >= 2 subset {(~L_IS_PROXY[MULTI]).mean() * 100:.1f}%) | swapped "
+      f"{SWAPPED.mean() * 100:.1f}% | L frames in III / I-II (mean, MCIS with L) {LFR[LFR.sum(1) > 0].mean(0).round(2)}")
+if MODE == 'proxy':
+    assert L_IS_PROXY.all() and not SWAPPED.any()
+elif MODE == 'swapAL':
+    assert L_IS_PROXY.all() and (DEBUG_PER_EPISODE or 0.45 < SWAPPED.mean() < 0.55), SWAPPED.mean()
+else:
+    assert not SWAPPED.any() and L_IS_PROXY[~MULTI].all() and (~L_IS_PROXY).any(), "random L must differ somewhere"
+INFO_ALL[MODE] = dict(NC3=NC3.copy(), L_IS_PROXY=L_IS_PROXY.copy(), SWAPPED=SWAPPED.copy(), LFR=LFR.copy(), VIS=VIS.copy())
+"""
+
+
+def _g47_model_cell():
+    c = G14[8][1]
+    reps = [
+        ("FMASK, PMASK, VOI = T(FMASK), T(PMASK), T(VOI)",
+         "FMASK, PMASK, VOI = T(FMASK), T(PMASK), T(VOI)\nVOI_POOL, ASLOT_T = T(VOI_POOL), T(ASLOT)"),
+        ("+ self.voice(VOI[ix]) + self.ctx_role[0]",
+         "+ self.voice((VOI if self.R == 3 else VOI_POOL)[ix]) + self.ctx_role[0]"),
+    ]
+    for a, b in reps:
+        assert c.count(a) == 1, a
+        c = c.replace(a, b)
+    return c
+
+
+def _g47_tok_cell():
+    c = G14[10][1]
+    reps = [
+        ("        if not bool(kf[2]):                                                  # A's clip-III token gone\n"
+         "            self.head_A = None\n",
+         "        if not bool(kf[2]):                                                  # A's clip-III token gone\n"
+         "            self.head_A = None\n"
+         "        if not cfg.get('aux', True):\n"
+         "            self.head_face = self.head_ctx = self.head_A = None\n"),
+        ("        if self.head_A is not None:\n"
+         "            tA = torch.where(present[:, 0, 2], YA[ix], torch.full_like(YA[ix], -100))\n"
+         "            aux['A'] = (self.head_A(h[:, 0, 2]), tA, RN['a_w'])\n",
+         "        if self.head_A is not None:                                          # A's clip-III token (slot 1 if swapped)\n"
+         "            bi, ia = torch.arange(B, device=DEVICE), ASLOT_T[ix]\n"
+         "            tA = torch.where(present[bi, ia, 2], YA[ix], torch.full_like(YA[ix], -100))\n"
+         "            aux['A'] = (self.head_A(h[bi, ia, 2]), tA, RN['a_w'])\n"),
+    ]
+    for a, b in reps:
+        assert c.count(a) == 1, a
+        c = c.replace(a, b)
+    return c
+
+
+def _g47_cv_cell():
+    c = G14[12][1]
+    reps = [('print("saved g14_oof_probs.npz and g14_fold_seed_log.csv")',
+             'print(f"saved g47_oof_probs_{MODE}.npz and g47_fold_seed_log_{MODE}.csv")'),
+            ('g14_fold_seed_log.csv', 'g47_fold_seed_log_{MODE}.csv'),
+            ('g14_oof_probs.npz', 'g47_oof_probs_{MODE}.npz'),
+            ('sample_id=DEV.sample_id.values, fold=fold_of_row, y=y_all, src=src,',
+             'sample_id=DEV.sample_id.values.astype(str), fold=fold_of_row, y=y_all, src=src.astype(str),')]
+    for a, b in reps:
+        assert c.count(a) == 1, a
+        c = c.replace(a, b)
+    return c + "\nOOF_ALL[MODE] = {k: v.copy() for k, v in OOF.items()}\n"
+
+
+G47 = [
+    ("markdown", r"""
+# G47 — What does RoleNet's organisation contribute? (5-fold CV, train+val, 10 seeds; test untouched)
+
+The architecture stays as it is. One run, same folds, early-stop episodes, seeds (the ten G14 seeds) and
+hyper-parameters as G8b/G14; every arm is **retrained** (removed tokens are masked at training and evaluation, never only
+at test time).
+
+**1. Participant tokens vs clip pooling, same features and protocol.** `RoleNet[R]` (A/L/O × clip face tokens) vs
+`ClipPool` (one face token per clip, all faces pooled; as G14 `noRole`, but the mouth–audio sync in the speech token is
+also pooled per clip instead of per role). Both use the same class, features, frame pooling, modality dropout and
+training. `ClipPool` has no auxiliary head for A's emotion (it has no A token), so the pair is also run **without any
+auxiliary loss** (`-noAux`, modality dropout kept).
+
+**2. Role information.** `noRoleEmb`: face cells kept, A/L/O embeddings removed (only tests the embeddings).
+`RoleShuffle`: in a random half of the MCIS (fixed per MCIS, at training and evaluation) A and L exchange their slots
+in all three clips, together with their per-role sync values; the auxiliary head for A still reads A's own token. A
+global swap would only rename the slots, so the shuffle is per sample.
+
+**3. Listener proxy vs a random non-speaker.** `RandomL-r` (r = 0, 1, 2): L is a random identity among the
+non-speakers visible in clip III (the proxy's own candidate set), fixed per MCIS and draw; with fewer than two
+candidates it equals the proxy. `noL`: no listener tokens. Main subset: MCIS with ≥ 2 non-speaker candidates.
+
+**Reported.** Seed-ensemble UAR / WAR, per-seed mean ± SD, paired per-seed differences (same seed and fold), ensemble
+ΔUAR with a 95% two-level bootstrap over seeds and episodes (2,000 draws), folds better; for item 3 also the share of
+MCIS where the random L equals the proxy and the frames of the chosen L.
+
+**Reading rules (fixed before running).**
+* **Participant tokens supported** iff the lower bounds of `RoleNet[R]` − `ClipPool` **and** of `RoleNet[R]-noAux` −
+  `ClipPool-noAux` are > 0; one of the two only → *depends on the auxiliary losses*; otherwise *not established*.
+* **Role assignment carries information** iff the lower bound of `RoleNet` − `RoleShuffle` is > 0.
+* **The listener choice matters** iff, on MCIS with ≥ 2 candidates, the lower bound of `RoleNet` − `RandomL` (three draws
+  pooled) is > 0. Also reported: `RandomL` − `noL` (does any extra participant help?).
+
+Inputs: `hi-ef-dataset` (annotation), `hi-ef-features-v2`, `hi-ef-split`, `g8a-features`. GPU.
+"""),
+    ("code", _g47_cfg()),
+    G14[2], G14[3], G14[4],
+]
+for _m in _G47_MODES:
+    G47 += [
+        ("markdown", f"\n## Assignment mode: {_m}\n"),
+        ("code", _g47_mode_cell(_m)),
+        ("code", _g47_role_cell()),
+        ("code", _g47_model_cell()),
+        ("code", _g47_tok_cell()),
+        ("code", _g47_cv_cell()),
+    ]
+G47 += [
+    ("markdown", "\n## Results (plain argmax; 10-seed ensembles; two-level bootstrap over seeds and episodes)\n"),
+    ("code", r"""
+assert sorted(OOF_ALL) == sorted(MODES), f"missing modes: {set(MODES) - set(OOF_ALL)}"
+O = {}
+for m in MODES:
+    O.update(OOF_ALL[m])
+RAND = [f'RandomL-{r}' for r in range(3)]
+O['RandomL'] = np.concatenate([O[k] for k in RAND], 0)            # three draws x seeds, pooled
+MULTI = INFO_ALL['proxy']['NC3'] >= 2
+S_ = len(SEEDS)
+GROUPS_EP = [np.where(src == e)[0] for e in np.unique(src)]
+
+
+def uar_of(pred, idx=None):
+    return war_uar(pred if idx is None else pred[idx], y_all if idx is None else y_all[idx], 7)[1]
+
+
+def war_of(pred, idx=None):
+    return war_uar(pred if idx is None else pred[idx], y_all if idx is None else y_all[idx], 7)[0]
+
+
+def per_seed(k, idx):
+    # per-seed UAR / WAR; the pooled random arm is averaged over its three draws for each seed
+    P = O[k].reshape(-1, S_, N, 7)
+    u = np.array([[uar_of(P[r, s].argmax(1), idx) for s in range(S_)] for r in range(len(P))]).mean(0)
+    w = np.array([[war_of(P[r, s].argmax(1), idx) for s in range(S_)] for r in range(len(P))]).mean(0)
+    return u, w
+
+
+def two_level_boot(pa, pb, sub=None, n_boot=N_BOOT, seed=0):
+    rng = np.random.default_rng(seed)
+    d = []
+    for _ in range(n_boot):
+        ea = pa[rng.integers(0, len(pa), len(pa))].mean(0).argmax(1)
+        eb = pb[rng.integers(0, len(pb), len(pb))].mean(0).argmax(1)
+        idx = np.concatenate([GROUPS_EP[i] for i in rng.integers(0, len(GROUPS_EP), len(GROUPS_EP))])
+        if sub is not None:
+            idx = idx[sub[idx]]
+        d.append(uar_of(ea, idx) - uar_of(eb, idx))
+    return np.percentile(d, [2.5, 97.5])
+
+
+SUBS = {'all MCIS': np.ones(N, bool), '>= 2 non-speaker candidates': MULTI}
+ROWS = []
+print(f"== {N} MCIS, {len(EPS)} episodes, {S_} seeds; >= 2 non-speaker candidates in clip III: {MULTI.sum()} MCIS ==")
+for sname, m in SUBS.items():
+    idx = np.where(m)[0]
+    print(f"\n-- {sname} (n = {len(idx)}) --")
+    for k in ['RoleNet', 'noRoleEmb', 'RoleShuffle', 'RandomL'] + RAND + ['noL', 'RoleNet[R]', 'ClipPool',
+                                                                         'RoleNet[R]-noAux', 'ClipPool-noAux']:
+        e = O[k].mean(0).argmax(1)
+        u, w = per_seed(k, idx)
+        ROWS.append({'subset': sname, 'arm': k, 'n': len(idx), 'UAR': uar_of(e, idx), 'WAR': war_of(e, idx),
+                     'UAR_seed_mean': u.mean(), 'UAR_seed_sd': u.std(ddof=1), 'WAR_seed_mean': w.mean(), 'WAR_seed_sd': w.std(ddof=1)})
+        r = ROWS[-1]
+        print(f"  {k:<17} UAR {r['UAR']:5.2f} WAR {r['WAR']:5.2f} | per seed UAR {r['UAR_seed_mean']:5.2f} ± "
+              f"{r['UAR_seed_sd']:.2f}, WAR {r['WAR_seed_mean']:5.2f} ± {r['WAR_seed_sd']:.2f}")
+
+CONTRASTS = [('1 participant tokens vs clip pooling (aux)', 'RoleNet[R]', 'ClipPool', 'all MCIS'),
+             ('1 participant tokens vs clip pooling (no aux)', 'RoleNet[R]-noAux', 'ClipPool-noAux', 'all MCIS'),
+             ('1 reference: RoleNet (token class) vs clip pooling', 'RoleNet', 'ClipPool', 'all MCIS'),
+             ('1 auxiliary losses, participant tokens', 'RoleNet[R]', 'RoleNet[R]-noAux', 'all MCIS'),
+             ('1 auxiliary losses, clip pooling', 'ClipPool', 'ClipPool-noAux', 'all MCIS'),
+             ('2 role embeddings', 'RoleNet', 'noRoleEmb', 'all MCIS'),
+             ('2 role assignment (A/L shuffled per MCIS)', 'RoleNet', 'RoleShuffle', 'all MCIS'),
+             ('3 proxy vs random non-speaker', 'RoleNet', 'RandomL', '>= 2 non-speaker candidates'),
+             ('3 proxy vs random non-speaker', 'RoleNet', 'RandomL', 'all MCIS'),
+             ('3 random non-speaker vs no listener', 'RandomL', 'noL', '>= 2 non-speaker candidates'),
+             ('3 proxy vs no listener', 'RoleNet', 'noL', '>= 2 non-speaker candidates'),
+             ('3 proxy vs no listener', 'RoleNet', 'noL', 'all MCIS')] + \
+            [(f'3 proxy vs random draw {r}', 'RoleNet', f'RandomL-{r}', '>= 2 non-speaker candidates') for r in range(3)]
+C_ROWS = []
+print("\n== contrasts (ensemble ΔUAR [95% two-level bootstrap]; paired per-seed ΔUAR mean ± SD; folds better) ==")
+for name, a, b, sname in CONTRASTS:
+    m = SUBS[sname]; idx = np.where(m)[0]
+    ea, eb = O[a].mean(0).argmax(1), O[b].mean(0).argmax(1)
+    d = uar_of(ea, idx) - uar_of(eb, idx)
+    dw = war_of(ea, idx) - war_of(eb, idx)
+    lo, hi = two_level_boot(O[a], O[b], sub=None if sname == 'all MCIS' else m)
+    ps = per_seed(a, idx)[0] - per_seed(b, idx)[0]
+    folds = sum(uar_of(ea, np.where((fold_of_row == f) & m)[0]) > uar_of(eb, np.where((fold_of_row == f) & m)[0])
+                for f in range(N_OUTER))
+    C_ROWS.append({'contrast': name, 'a': a, 'b': b, 'subset': sname, 'n': len(idx), 'dUAR': d, 'lo': lo, 'hi': hi,
+                   'dWAR': dw, 'paired_seed_dUAR_mean': ps.mean(), 'paired_seed_dUAR_sd': ps.std(ddof=1), 'folds_a_better': folds})
+    print(f"  {name:<52} [{sname}] {a} − {b}: {d:+5.2f} [{lo:+5.2f},{hi:+5.2f}] | WAR {dw:+5.2f} | "
+          f"per seed {ps.mean():+5.2f} ± {ps.std(ddof=1):.2f} | {folds}/5 folds")
+
+# listener choice: how often the random draw equals the proxy, and how visible the chosen person is
+print("\n== listener choice on MCIS with >= 2 non-speaker candidates ==")
+fr = INFO_ALL['proxy']['LFR'][MULTI]
+print(f"  proxy L: frames in clip III {fr[:, 0].mean():.2f}, in clips I-II {fr[:, 1].mean():.2f}")
+for r in range(3):
+    I_ = INFO_ALL[f'randL{r}']
+    fr = I_['LFR'][MULTI]
+    print(f"  random draw {r}: equals the proxy in {I_['L_IS_PROXY'][MULTI].mean() * 100:.1f}% | frames in clip III "
+          f"{fr[:, 0].mean():.2f}, in clips I-II {fr[:, 1].mean():.2f}")
+
+C = pd.DataFrame(C_ROWS)
+get = lambda name, sname: C[(C.contrast == name) & (C.subset == sname)].iloc[0]
+c1a, c1b = get('1 participant tokens vs clip pooling (aux)', 'all MCIS'), get('1 participant tokens vs clip pooling (no aux)', 'all MCIS')
+c2 = get('2 role assignment (A/L shuffled per MCIS)', 'all MCIS')
+c3 = get('3 proxy vs random non-speaker', '>= 2 non-speaker candidates')
+v1 = ('SUPPORTED' if c1a.lo > 0 and c1b.lo > 0 else 'DEPENDS ON THE AUXILIARY LOSSES' if (c1a.lo > 0) != (c1b.lo > 0)
+      else 'NOT ESTABLISHED')
+v2 = 'SUPPORTED' if c2.lo > 0 else 'NOT ESTABLISHED'
+v3 = 'SUPPORTED' if c3.lo > 0 else 'NOT ESTABLISHED'
+print(f"\nVERDICT 1 (participant tokens vs clip pooling): {v1}")
+print(f"VERDICT 2 (role assignment carries information): {v2}")
+print(f"VERDICT 3 (the listener choice matters): {v3}")
+pd.DataFrame(ROWS).to_csv(f"{OUT_DIR}/g47_summary.csv", index=False)
+C.to_csv(f"{OUT_DIR}/g47_contrasts.csv", index=False)
+print(f"saved {OUT_DIR}/g47_summary.csv and g47_contrasts.csv")
+"""),
+]
+G47[G47.index(G14[2])] = ("code", G14[2][1].replace(_ANNOT_OLD, _ANNOT_NEW))
+
+
+# ======================================================================================================================
+# G48 — Proxy vs true responder by group, with matching confidence and a manual-check sheet (analysis only; CPU)
+G48 = [
+    ("markdown", r"""
+# G48 — Listener proxy vs true responder: groups, matching confidence, manual check (development; analysis only)
+
+For every development MCIS the identities of clips I–III are rebuilt exactly as in RoleNet (ArcFace, average linkage,
+cosine 0.45); A and the proxy L come from clip III. The true responder B is the dominant identity of clip IV (G44a
+faces; analysis only, never an input), matched to the identity of clips I–III with the highest centroid cosine.
+
+| Group | Rule (checked in this order) |
+|---|---|
+| `uncertain` | no clip-IV identity in ≥ 35% of its frames, or best cosine in [0.40, 0.55), or margin to the second-best identity < 0.05, or the best match is A |
+| `B not seen` | best cosine < 0.40 |
+| `B seen = proxy` | best cosine ≥ 0.55, margin ≥ 0.05, matched identity = proxy L |
+| `B seen ≠ proxy` | same confidence, matched identity ≠ proxy L (or no proxy) |
+
+Saved: `g48_groups.csv` (one row per MCIS: group, confidence values, whether B is visible in clip III, frames of B and
+of L, and the G26/G44 rule's match for comparison) and a manual-check sheet: for 8 MCIS of each of `B seen ≠ proxy`,
+`uncertain` and `B seen = proxy`, one image with B's clip-IV face, the matched clip I–III face, the proxy L and A in clip
+III, and `g48_manual_check.csv` to fill in (`match_correct`, `proxy_correct`). Performance by group is computed
+afterwards from the saved G41 / G44 / G43 predictions (no training here).
+
+Inputs: `hi-ef-dataset` (video + annotation), `hi-ef-split`, `g8a-features`, the G44a output (`c4shard_*.pkl`). CPU.
+"""),
+    ("code", r"""
+import os, glob, pickle, random
+from collections import defaultdict
+import numpy as np, pandas as pd, cv2
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from sklearn.cluster import AgglomerativeClustering
+from tqdm.auto import tqdm
+
+DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
+SPLIT_GLOB = "/kaggle/input/**/source_folder_split_seed42.csv"
+G8A_GLOB = "/kaggle/input/**/shard_*.pkl"          # clips I-III (does not match c4shard_*)
+C4_GLOB = "/kaggle/input/**/c4shard_*.pkl"         # clip IV faces (G44a): analysis only
+OUT_DIR = "/kaggle/working/g48"
+SAME_PERSON_COS, DOMINANT_MIN_FRAC = 0.45, 0.25    # as RoleNet / G26 / G44
+FRAC_SURE, COS_LOW, COS_SURE, MARGIN = 0.35, 0.40, 0.55, 0.05
+N_CHECK, CHECK_SEED = 8, 0
+DEBUG_PER_EPISODE = None
+os.makedirs(OUT_DIR, exist_ok=True)
+
+
+def one(pattern, what):
+    hits = sorted(glob.glob(pattern, recursive=True))
+    assert hits, f"{what} not found ({pattern})"
+    return hits[0]
+
+
+sp = pd.read_csv(one(SPLIT_GLOB, "split csv"), dtype=str)
+DEV = sp[sp.split.isin(['train', 'val'])].reset_index(drop=True)
+if DEBUG_PER_EPISODE:
+    DEV = DEV.groupby('source_folder').head(DEBUG_PER_EPISODE).reset_index(drop=True)
+assert 'test' not in set(DEV.split)
+need = set(DEV[['clip1', 'clip2', 'clip3']].values.ravel())
+G8, G84 = {}, {}
+for f in sorted(glob.glob(G8A_GLOB, recursive=True)):
+    G8.update({k: v for k, v in pickle.load(open(f, 'rb')).items() if k in need})
+for f in sorted(glob.glob(C4_GLOB, recursive=True)):
+    G84.update({k: v for k, v in pickle.load(open(f, 'rb')).items() if k in set(DEV.clip4)})
+miss, miss4 = need - set(G8), set(DEV.clip4) - set(G84)
+assert not miss, f"{len(miss)} clips missing from g8a-features"
+assert len(miss4) <= 0.01 * len(DEV), f"{len(miss4)} clip-IV records missing: attach the G44a output"
+roots = sorted(glob.glob(os.path.join(DATASET_DIR, "*", "Hi-EF")))
+VIDEO_ROOTS = [os.path.join(r, "video") for r in roots if os.path.isdir(os.path.join(r, "video"))]
+print(f"development MCIS {len(DEV)} | video roots {VIDEO_ROOTS}")
+"""),
+    ("code", r"""
+unit = lambda v: v / (np.linalg.norm(v) + 1e-9)
+
+
+def cluster(E):
+    return (AgglomerativeClustering(n_clusters=None, metric='cosine', linkage='average',
+                                    distance_threshold=1 - SAME_PERSON_COS).fit_predict(E) if len(E) > 1 else np.zeros(len(E), int))
+
+
+ROWS, KEEP = [], {}
+for n, row in enumerate(tqdm(DEV.itertuples(), total=len(DEV), desc='groups')):
+    cl = [row.clip1, row.clip2, row.clip3]
+    items = [(k, j) for k, c in enumerate(cl) for j in range(len(G8[c]['faces']))]
+    E = np.stack([G8[cl[k]]['faces'][j]['arc'] for k, j in items]).astype(np.float32) if items else np.zeros((0, 512), np.float32)
+    lab = cluster(E)
+    frames = defaultdict(set)
+    for (k, j), p in zip(items, lab):
+        frames[(k, p)].add(G8[cl[k]]['faces'][j]['frame'])
+    ids3 = sorted({p for (k, p) in frames if k == 2}, key=lambda p: -len(frames[(2, p)]))
+    A = ids3[0] if ids3 else None
+    L = ids3[1] if len(ids3) > 1 else None
+    # clip IV: dominant identity
+    f4 = G84.get(row.clip4, {}).get('faces', [])
+    frac, best, second, bp, c4lab = 0.0, -1.0, -1.0, None, None
+    if f4:
+        E4 = np.stack([d['arc'] for d in f4]).astype(np.float32)
+        l4 = cluster(E4)
+        fr4 = defaultdict(set)
+        for d, p in zip(f4, l4):
+            fr4[p].add(d['frame'])
+        dom = max(fr4, key=lambda p: len(fr4[p]))
+        frac = len(fr4[dom]) / max(G84[row.clip4]['meta']['n_sampled'], 1)
+        c4lab = (l4, dom)
+        if items:
+            c4 = unit(E4[l4 == dom].mean(0))
+            sims = sorted(((float(unit(E[lab == p].mean(0)) @ c4), p) for p in set(lab.tolist())), reverse=True)
+            best, bp = sims[0]
+            second = sims[1][0] if len(sims) > 1 else -1.0
+    margin = best - second
+    if frac < FRAC_SURE or (COS_LOW <= best < COS_SURE) or (best >= COS_LOW and margin < MARGIN) or (best >= COS_LOW and bp == A):
+        group = 'uncertain'
+    elif best < COS_LOW:
+        group = 'B not seen'
+    else:
+        group = 'B seen = proxy' if bp == L else 'B seen ≠ proxy'
+    rule_B = bp if (frac >= DOMINANT_MIN_FRAC and best >= SAME_PERSON_COS and bp != A) else None   # G26 / G44 rule
+    nB3 = len(frames[(2, bp)]) if bp is not None and best >= COS_LOW else 0
+    ROWS.append({'sample_id': row.sample_id, 'group': group, 'clip4_dominant_frac': frac, 'best_cos': best,
+                 'second_cos': second, 'margin': margin, 'best_is_A': bp == A and bp is not None,
+                 'has_proxy': L is not None, 'n_ids_III': len(ids3),
+                 'B_frames_III': nB3, 'B_frames_I_II': (len(frames[(0, bp)]) + len(frames[(1, bp)])) if bp is not None and best >= COS_LOW else 0,
+                 'L_frames_III': len(frames[(2, L)]) if L is not None else 0,
+                 'rule_matched': rule_B is not None, 'rule_B_is_proxy': rule_B is not None and rule_B == L})
+    KEEP[row.sample_id] = dict(cl=cl, items=items, lab=lab, A=A, L=L, bp=bp, f4=f4, c4lab=c4lab, clip4=row.clip4)
+G = pd.DataFrame(ROWS)
+G.to_csv(f"{OUT_DIR}/g48_groups.csv", index=False)
+print(G.group.value_counts().to_string())
+print("\nB visible in clip III, by group:")
+print(G.assign(B_in_III=G.B_frames_III > 0).groupby('group').B_in_III.mean().round(3).to_string())
+print(f"\nG26/G44 rule: matched {G.rule_matched.mean() * 100:.1f}% | proxy = rule's B among MCIS with a proxy and a match "
+      f"{G[G.has_proxy & G.rule_matched].rule_B_is_proxy.mean() * 100:.1f}%")
+print(pd.crosstab(G.group, G.rule_matched).to_string())
+assert G.group.isin(['uncertain', 'B not seen', 'B seen = proxy', 'B seen ≠ proxy']).all()
+"""),
+    ("code", r"""
+# ---- manual-check sheet: B's clip-IV face, the matched clip I-III face, the proxy L and A in clip III
+def video_path(clip):
+    ep, num = clip.split('/')
+    for root in VIDEO_ROOTS:
+        for ext in ('.mp4', '.avi', '.mkv', '.mov'):
+            p = os.path.join(root, ep, num + ext)
+            if os.path.exists(p):
+                return p
+    return None
+
+
+def crop(clip, face, pad=0.35):
+    p = video_path(clip)
+    if p is None or face is None:
+        return np.full((96, 96, 3), 230, np.uint8)
+    cap = cv2.VideoCapture(p)
+    cap.set(cv2.CAP_PROP_POS_MSEC, max(face['t'], 0) * 1000)
+    ok, fr = cap.read()
+    cap.release()
+    if not ok:
+        return np.full((96, 96, 3), 230, np.uint8)
+    x1, y1, x2, y2 = [int(v) for v in face['box']]
+    w, h = x2 - x1, y2 - y1
+    x1, y1 = max(0, int(x1 - pad * w)), max(0, int(y1 - pad * h))
+    x2, y2 = min(fr.shape[1], int(x2 + pad * w)), min(fr.shape[0], int(y2 + pad * h))
+    return cv2.cvtColor(fr[y1:y2, x1:x2], cv2.COLOR_BGR2RGB) if x2 > x1 and y2 > y1 else np.full((96, 96, 3), 230, np.uint8)
+
+
+def biggest(faces):
+    return max(faces, key=lambda d: (d['box'][2] - d['box'][0]) * (d['box'][3] - d['box'][1])) if faces else None
+
+
+def faces_of(K, p, clips=(0, 1, 2)):
+    return [G8[K['cl'][k]]['faces'][j] for (k, j), q in zip(K['items'], K['lab']) if q == p and k in clips]
+
+
+rng = random.Random(CHECK_SEED)
+CHECK = []
+for grp in ['B seen ≠ proxy', 'uncertain', 'B seen = proxy']:
+    ids = sorted(G[G.group == grp].sample_id)
+    CHECK += [(grp, s) for s in rng.sample(ids, min(N_CHECK, len(ids)))]
+SHEET = []
+for i, (grp, s) in enumerate(CHECK):
+    K, r = KEEP[s], G[G.sample_id == s].iloc[0]
+    fb4 = None
+    if K['c4lab'] is not None:
+        l4, dom = K['c4lab']
+        fb4 = biggest([d for d, q in zip(K['f4'], l4) if q == dom])
+    panels = [('B in clip IV (target, analysis only)', crop(K['clip4'], fb4)),
+              (f"matched I-III identity (cos {r.best_cos:.2f}, margin {r.margin:.2f})",
+               crop(K['cl'][2], biggest(faces_of(K, K['bp'], (2,)))) if K['bp'] is not None and biggest(faces_of(K, K['bp'], (2,)))
+               else crop(K['cl'][1], biggest(faces_of(K, K['bp'], (0, 1)))) if K['bp'] is not None and biggest(faces_of(K, K['bp'], (0, 1)))
+               else crop(None, None)),
+              ('proxy L, clip III', crop(K['cl'][2], biggest(faces_of(K, K['L'], (2,)))) if K['L'] is not None else crop(None, None)),
+              ('speaker A, clip III', crop(K['cl'][2], biggest(faces_of(K, K['A'], (2,)))) if K['A'] is not None else crop(None, None))]
+    fig, axs = plt.subplots(1, 4, figsize=(10, 2.9))
+    for ax, (t, im) in zip(axs, panels):
+        ax.imshow(im); ax.set_title(t, fontsize=7); ax.axis('off')
+    fig.suptitle(f"[{i:02d}] {s} | group: {grp} | clip-IV dominant frac {r.clip4_dominant_frac:.2f}", fontsize=8)
+    fig.tight_layout(); fig.savefig(f"{OUT_DIR}/check_{i:02d}_{s}.png", dpi=110); plt.close(fig)
+    SHEET.append({'idx': i, 'sample_id': s, 'group': grp, 'best_cos': r.best_cos, 'margin': r.margin,
+                  'clip4_dominant_frac': r.clip4_dominant_frac, 'match_correct': '', 'proxy_correct': '', 'note': ''})
+pd.DataFrame(SHEET).to_csv(f"{OUT_DIR}/g48_manual_check.csv", index=False)
+print(f"saved {len(SHEET)} check images and g48_manual_check.csv in {OUT_DIR}")
+print("fill in match_correct (is the matched I-III face the same person as B in clip IV?) and proxy_correct "
+      "(is the proxy L the same person as B?) with yes / no / unclear")
+"""),
+]
+
+
 if __name__ == "__main__":
     for name, cells in [("g1_llm_recognition.ipynb", G1), ("g2_recognizer_all_labels.ipynb", G2),
                         ("g3_trajectory_forecaster.ipynb", G3), ("g3b_robustness.ipynb", G3B),
@@ -14016,6 +14532,8 @@ if __name__ == "__main__":
                         ("g44_oracle_listener_truncation_cv.ipynb", G44),
                         ("g45_emotion_features_gate_cv.ipynb", G45),
                         ("g46a_future_face_target_gate.ipynb", G46A),
+                        ("g47_organisation_controls_cv.ipynb", G47),
+                        ("g48_proxy_oracle_groups.ipynb", G48),
                         ("m1_meld_prepare_features.ipynb", M1),
                         ("m2_meld_g8a_features.ipynb", M2),
                         ("m3_meld_rolenet.ipynb", M3)]:

@@ -1,0 +1,61 @@
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{Mở đầu}
+\chapter*{Mở đầu}
+
+\noindent{\Large\textbf{Lý do chọn đề tài}}
+
+Cảm xúc chi phối cách con người phản ứng với nhau trong hội thoại. Phần lớn các nghiên cứu về cảm xúc trong hội thoại giải quyết bài toán \emph{nhận diện}: gán nhãn cảm xúc cho một câu nói hoặc một đoạn video đã quan sát được. Trong nhiều ứng dụng như trợ lý ảo, robot xã hội hay hệ thống hỗ trợ tư vấn, điều cần biết lại là một người \emph{sắp} cảm thấy thế nào, để hệ thống có thể điều chỉnh cách phản hồi trước khi phản ứng đó xảy ra. Đây là bài toán \emph{dự đoán cảm xúc} (emotion forecasting): thông tin về lượt nói cần dự đoán hoàn toàn chưa có, mô hình chỉ được nhìn vào những gì đã diễn ra trước đó.
+
+Bộ dữ liệu Hi-EF \cite{wang2026hief} được công bố gần đây đưa bài toán này vào bối cảnh video đa phương thức. Mỗi mẫu gồm bốn đoạn video liên tiếp trích từ phim truyền hình; ba đoạn đầu là đầu vào, và nhiệm vụ là dự đoán cảm xúc của người nói ở đoạn thứ tư. Bài toán có hai điểm khó đặc biệt. Thứ nhất, đoạn thứ tư không bao giờ được quan sát. Thứ hai, danh tính của người sẽ nói ở đoạn thứ tư, tức người phản hồi, không được cho biết. Mô hình gốc của Hi-EF xử lý mỗi đoạn như một khối thống nhất rồi gộp theo thời gian, nên bằng chứng bị chi phối bởi người đang nói, trong khi người sắp phản hồi thường đã xuất hiện trên màn hình với vai trò người nghe.
+
+Vì bộ dữ liệu còn mới, chưa có nhiều phân tích về việc thông tin nào thật sự giúp dự đoán, cũng như về độ tin cậy của các con số được báo cáo. Đề tài này chọn Hi-EF làm đối tượng nghiên cứu nhằm hiểu rõ bài toán, xây dựng một mô hình phù hợp với cấu trúc của hội thoại nhiều người, và đánh giá nó theo một quy trình chặt chẽ.
+
+\vspace{0.3cm}
+\noindent{\Large\textbf{Mục tiêu nghiên cứu}}
+
+\renewcommand{\labelitemi}{$-$}
+\begin{itemize}
+	\item Phân tích bộ dữ liệu Hi-EF: ai có mặt trong mỗi mẫu, người phản hồi xuất hiện ở đâu, và những quy luật nào liên hệ cảm xúc của người phản hồi với ngữ cảnh.
+	\item Tái lập mô hình tốt nhất của bài báo gốc trên một cách chia dữ liệu không rò rỉ giữa các tập.
+	\item Đề xuất một mô hình dự đoán tổ chức bằng chứng xoay quanh những người tham gia hội thoại, đặc biệt là người nghe.
+	\item Xác định bằng các thực nghiệm có kiểm soát xem phần cải thiện đến từ đâu, và giới hạn hiện tại của bài toán nằm ở đâu.
+\end{itemize}
+
+\vspace{0.3cm}
+\noindent{\Large\textbf{Phương pháp nghiên cứu}}
+
+Đề tài kết hợp khảo sát tài liệu, phân tích dữ liệu và thực nghiệm có kiểm soát. Mọi quyết định thiết kế được đưa ra trên dữ liệu phát triển bằng kiểm định chéo theo tập phim (episode), để không có đoạn video nào xuất hiện đồng thời trong dữ liệu huấn luyện và đánh giá. Tập kiểm tra được khóa, và kết quả chính trên tập này được đọc đúng một lần theo một kế hoạch đã cam kết trước khi chạy (preregistration), gồm mô hình, số seed, chỉ số và thứ tự các phép so sánh. Mỗi thực nghiệm được viết thành một notebook có quy tắc đọc kết quả cố định từ trước, chạy trên Kaggle, và được chạy thử với dữ liệu giả trước khi chạy thật. Các khác biệt được đánh giá bằng bootstrap theo seed và theo tập phim.
+
+\vspace{0.3cm}
+\noindent{\Large\textbf{Nội dung nghiên cứu}}
+
+\begin{itemize}
+	\item Tìm hiểu các bài toán nhận diện và dự đoán cảm xúc trong hội thoại, bộ dữ liệu Hi-EF và các bộ trích xuất đặc trưng khuôn mặt, giọng nói, văn bản.
+	\item Trích xuất lại đặc trưng mức khuôn mặt và giọng nói, phân tích thống kê về người tham gia trong Hi-EF.
+	\item Xây dựng mô hình \model{} và so sánh với mô hình gốc trên Hi-EF và trên MELD.
+	\item Thực hiện các phân tích loại bỏ thành phần (ablation), so sánh người nghe đại diện với người phản hồi thật, kiểm tra nguồn gốc của phần cải thiện và phân tích lỗi.
+	\item Thử nghiệm và đánh giá các hướng cải tiến khác, ghi nhận cả những hướng không thành công.
+\end{itemize}
+
+\vspace{0.3cm}
+\noindent{\Large\textbf{Đóng góp của đề tài}}
+
+\begin{itemize}
+	\item Một quy tắc chọn người nghe làm đại diện cho người phản hồi, không dùng thông tin tương lai, nhãn người nói hay chú thích danh tính.
+	\item Mô hình \model{} biểu diễn ba đoạn ngữ cảnh thành một tập token theo người và theo lượt, đọc bằng một bộ mã hóa tập hợp nhỏ; mô hình có khoảng 40 lần ít tham số hơn mô hình gốc.
+	\item Kết quả trên tập kiểm tra được khóa: UAR tăng 3,84 điểm so với mô hình gốc huấn luyện lại, thắng ở bảy trên tám tập phim kiểm tra.
+	\item Một loạt phân tích có kiểm soát mô tả phần cải thiện: vai trò của người nghe và của ngữ cảnh, so sánh với người phản hồi thật, so sánh với mô hình gốc dùng cùng đặc trưng, và phân biệt hai hiện tượng lặp lại cảm xúc người nói (mirroring) và giữ cảm xúc của chính mình (persistence).
+\end{itemize}
+
+\vspace{0.3cm}
+\noindent{\Large\textbf{Bố cục của báo cáo}}
+
+\begin{itemize}
+	\item \textbf{Chương 1} trình bày tổng quan về nhận diện và dự đoán cảm xúc trong hội thoại, bộ dữ liệu Hi-EF, các bộ trích xuất đặc trưng, mô hình trên tập hợp và các phương pháp đánh giá.
+	\item \textbf{Chương 2} phân tích dữ liệu: cách chia tập, phân bố nhãn, những người có mặt trong mỗi mẫu và các quy luật cảm xúc.
+	\item \textbf{Chương 3} mô tả mô hình \model{}.
+	\item \textbf{Chương 4} trình bày thiết lập thực nghiệm, kết quả chính và các phân tích.
+	\item \textbf{Chương 5} tổng hợp các hướng đã thử nhưng không thành công và bài học rút ra.
+	\item \textbf{Kết luận} tóm tắt kết quả, các hạn chế và hướng phát triển.
+\end{itemize}

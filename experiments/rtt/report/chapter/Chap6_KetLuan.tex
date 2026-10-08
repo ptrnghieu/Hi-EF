@@ -1,0 +1,41 @@
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{Kết luận và hướng phát triển}
+\chapter*{Kết luận và hướng phát triển}
+\label{chap:conclusion}
+
+\section*{1. Kết luận}
+
+Báo cáo đã nghiên cứu bài toán dự đoán cảm xúc của người phản hồi trong hội thoại đa phương thức trên bộ dữ liệu Hi-EF. Từ phân tích dữ liệu, có thể rút ra rằng Hi-EF thực chất là hội thoại nhiều người, phim được dựng theo kiểu cảnh -- cảnh phản ứng, và người sẽ phản hồi thường đã xuất hiện trên màn hình với vai trò người nghe. Dựa trên đó, báo cáo đề xuất \model{}: chọn người nghe làm đại diện cho người phản hồi mà không dùng thông tin tương lai, biểu diễn mỗi người trong mỗi lượt bằng một token, và đọc tập token bằng một bộ mã hóa tập hợp nhỏ.
+
+Các kết quả chính gồm:
+\renewcommand{\labelitemi}{$-$}
+\begin{itemize}
+	\item Trên tập kiểm tra được khóa, đọc một lần theo kế hoạch đăng ký trước, \model{} tăng UAR từ 21,40 lên 25,24 và WAR từ 32,52 lên 36,43 so với mô hình gốc huấn luyện lại, thắng ở bảy trên tám tập phim. Chỉ số chính đã đăng ký trước (UAR sau hiệu chỉnh logit) tăng tương tự nhưng không có ý nghĩa thống kê, chủ yếu do lớp \emph{fear} chỉ có 6 mẫu kiểm tra.
+	\item \model{} dùng 0,71 triệu tham số, ít hơn khoảng 40 lần so với mô hình gốc.
+	\item Khuôn mặt của người nghe và ngữ cảnh của các lượt trước là hai nguồn thông tin được xác nhận, mỗi nguồn đóng góp khoảng hai điểm UAR trên dữ liệu phát triển. Phần cải thiện so với mô hình gốc không chỉ do đặc trưng tốt hơn, và vẫn còn khi bỏ phần cuối của lượt nói hiện tại.
+	\item Người nghe được chọn tự động cho kết quả tương đương người phản hồi thật. Các cấu trúc bổ sung đã thử cho bộ mã hóa không mang lại cải thiện đo được. Việc tách khuôn mặt theo vai trò so với gộp theo clip chưa được chứng minh là cần thiết.
+	\item Lợi thế của \model{} lớn nhất khi người phản hồi lặp lại cảm xúc của người nói hoặc giữ cảm xúc của chính mình; khi người phản hồi chuyển sang một cảm xúc mới, mọi mô hình đều gần mức đoán ngẫu nhiên.
+\end{itemize}
+
+Qua quá trình thực tập, kết luận quan trọng nhất là giới hạn hiện tại của bài toán nằm ở việc nhận diện trạng thái cảm xúc của những người tham gia, không nằm ở cách kết hợp bằng chứng. Nhiều hướng cải tiến, từ mô hình hai bước, động lực học cảm xúc, cân bằng lớp đến đặc trưng cảm xúc chuyên biệt, đều dừng lại ở cùng nút thắt này.
+
+\section*{2. Hạn chế}
+
+\begin{itemize}
+	\item Kết luận chính dựa trên UAR thông thường, vốn được đăng ký là phân tích mô tả; chỉ số chính đã đăng ký không có ý nghĩa thống kê. Tập kiểm tra nhỏ (8 tập phim) nên khoảng tin cậy rộng.
+	\item Tập kiểm tra đã từng được dùng cho các họ mô hình khác trước \model{}, và được đọc thêm một lần cho biến thể cân bằng lớp. Mọi lần truy cập được liệt kê ở Phụ lục~\ref{app:access}.
+	\item Thiết kế \model{} dựa trên các phân tích trên chính dữ liệu phát triển dùng cho kiểm định chéo, nên các con số kiểm định chéo mang tính khám phá.
+	\item Người phản hồi thật trong các phân tích oracle được xấp xỉ bằng khuôn mặt chiếm ưu thế trong clip IV, nên lỗi đối chiếu có thể làm mờ các so sánh. Cảm xúc trước của B chỉ biết được ở 27\% số mẫu.
+	\item Văn bản và âm thanh được mã hóa bằng các mô hình đa dụng (CLIP, AudioCLIP); các encoder cảm xúc cố định chỉ cải thiện ít trong thử nghiệm tuyến tính, còn encoder được tinh chỉnh chưa được thử.
+	\item Quy tắc chọn người nghe dựa vào kiểu dựng phim truyền hình, nên có thể không phù hợp với video quay bằng máy cố định. Trên MELD, cải thiện nhỏ và không có ý nghĩa.
+\end{itemize}
+
+\section*{3. Hướng phát triển}
+
+\begin{itemize}
+	\item \textbf{Nhận diện trạng thái tốt hơn.} Huấn luyện hoặc tinh chỉnh bộ nhận diện cảm xúc cho từng người trong video nhiều người, thay vì dùng các mô hình cố định huấn luyện trên dữ liệu khác.
+	\item \textbf{Học với thông tin đặc quyền.} Dùng khuôn mặt của người phản hồi ở lượt cần dự đoán làm mục tiêu phụ khi huấn luyện (hướng G46a), nếu phép kiểm tra tuyến tính cho thấy tín hiệu.
+	\item \textbf{Các lớp hiếm.} \emph{fear} và \emph{surprise} chủ yếu xuất hiện khi người phản hồi rời khỏi cảm xúc của người nói; cần thêm dữ liệu cho các phản ứng này hoặc cách đánh giá phù hợp hơn với lớp hiếm.
+	\item \textbf{Đánh giá tổng quát hơn.} Kiểm tra quy tắc chọn người nghe và \model{} trên dữ liệu không phải phim truyền hình, nơi không có kiểu dựng cảnh -- cảnh phản ứng.
+\end{itemize}

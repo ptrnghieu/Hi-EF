@@ -1,0 +1,103 @@
+\clearpage
+\phantomsection
+\setcounter{chapter}{0}
+\chapter[TỔNG QUAN VÀ CƠ SỞ LÝ THUYẾT]{Tổng quan và cơ sở lý thuyết}
+
+Chương này giới thiệu các khái niệm và công cụ mà báo cáo sử dụng: bài toán nhận diện và dự đoán cảm xúc trong hội thoại, bộ dữ liệu Hi-EF cùng mô hình gốc của nó, các bộ trích xuất đặc trưng được dùng để mô tả khuôn mặt, giọng nói và lời thoại, kiến trúc Transformer áp dụng cho dữ liệu dạng tập hợp, và các phương pháp đánh giá.
+
+\section{Nhận diện cảm xúc trong hội thoại}
+
+Bài toán nhận diện cảm xúc trong hội thoại (Emotion Recognition in Conversation, ERC) gán cho mỗi câu nói trong một cuộc hội thoại một nhãn cảm xúc. Các nhãn thường theo bộ cảm xúc cơ bản gồm tức giận (\emph{angry}), ghê sợ (\emph{disgust}), sợ hãi (\emph{fear}), vui (\emph{happy}), buồn (\emph{sad}), ngạc nhiên (\emph{surprise}) cùng nhãn trung tính (\emph{neutral}). Điểm khác biệt với nhận diện cảm xúc trên từng câu độc lập là ngữ cảnh: cảm xúc của một câu phụ thuộc vào những gì đã được nói trước đó và vào việc ai đang nói.
+
+Các mô hình ERC tiêu biểu xây dựng bộ nhớ hoặc đồ thị theo người nói. ICON \cite{hazarika2018icon} lưu trạng thái riêng cho từng người và mô hình hóa ảnh hưởng qua lại giữa họ. DialogueRNN \cite{majumder2019dialoguernn} cập nhật một trạng thái cho mỗi bên tham gia sau mỗi câu nói của họ. DialogueGCN \cite{ghosal2019dialoguegcn} biểu diễn hội thoại bằng đồ thị có cạnh theo quan hệ giữa người nói. Với dữ liệu đa phương thức, MulT \cite{tsai2019mult} dùng chú ý chéo giữa các luồng văn bản, âm thanh và hình ảnh. Bộ dữ liệu MELD \cite{poria2019meld}, xây dựng từ phim \emph{Friends}, là chuẩn đánh giá phổ biến cho ERC đa phương thức nhiều người; MELD cung cấp tên người nói cho từng câu.
+
+Điểm chung của các phương pháp này là giả định danh tính người nói đã biết. Giả định đó hợp lý khi nhận diện cảm xúc của những câu đã xảy ra, nhưng không còn đúng trong bài toán dự đoán của Hi-EF, nơi danh tính người sẽ nói tiếp theo không được cho trước.
+
+\section{Dự đoán cảm xúc}
+
+\subsection{Khái niệm}
+
+Trong tâm lý học, dự đoán cảm xúc (affective forecasting) nghiên cứu cách con người ước lượng cảm xúc tương lai của chính mình \cite{wilson2003affective}. Trong học máy, bài toán được phát biểu như sau: cho chuỗi các lượt hội thoại đã quan sát, ước lượng cảm xúc của một lượt chưa xảy ra. \citet{wang2020sentiment} nghiên cứu dự đoán cảm xúc tích cực -- tiêu cực của lượt kế tiếp trong hội thoại văn bản. Khác với nhận diện, mô hình dự đoán không có bất kỳ tín hiệu nào từ chính lượt cần dự đoán: không có khuôn mặt, giọng nói hay lời thoại của lượt đó. Mọi thông tin phải được suy ra từ những gì đã diễn ra.
+
+\subsection{Hai quy luật của cảm xúc trong hội thoại}
+
+Hai hiện tượng được nghiên cứu nhiều trong tâm lý học gợi ý những nguồn thông tin hữu ích cho việc dự đoán.
+
+\textbf{Lây lan cảm xúc} (emotional contagion) \cite{hatfield1994contagion}: người tham gia hội thoại có xu hướng tiếp nhận cảm xúc của người đối diện, thông qua việc bắt chước nét mặt, giọng nói và tư thế. Trong dữ liệu hội thoại, hiện tượng này thể hiện qua việc người phản hồi có cùng cảm xúc với người vừa nói. Báo cáo gọi các trường hợp này là \emph{mirroring}.
+
+\textbf{Quán tính cảm xúc} (emotional inertia) \cite{kuppens2010inertia}: trạng thái cảm xúc của một người có xu hướng duy trì theo thời gian, tức cảm xúc ở thời điểm sau phụ thuộc vào cảm xúc ở thời điểm trước của chính người đó. Báo cáo gọi các trường hợp người phản hồi giữ nguyên cảm xúc của chính mình ở lượt trước là \emph{persistence}.
+
+Cả hai quy luật đều đi qua người phản hồi: lây lan cảm xúc có thể quan sát qua phản ứng của người đó khi đang nghe, còn quán tính cảm xúc có thể quan sát qua những biểu hiện trước đó của chính người đó. Đây là cơ sở để xây dựng mô hình xoay quanh người phản hồi ở Chương 3.
+
+\section{Bộ dữ liệu Hi-EF và mô hình gốc}
+
+Hi-EF \cite{wang2026hief} là bộ dữ liệu dự đoán cảm xúc trong tương tác, được xây dựng từ video phim truyền hình. Mỗi mẫu được gọi là một MCIS (multilayered-contextual interaction sample) gồm bốn đoạn video liên tiếp, mỗi đoạn ứng với một câu phụ đề:
+
+\begin{itemize}
+	\item clip I và clip II: ngữ cảnh trước đó;
+	\item clip III: lượt nói của người nói A;
+	\item clip IV: lượt nói của một người khác, người phản hồi B.
+\end{itemize}
+
+Nhiệm vụ là dự đoán cảm xúc của B trong clip IV, thuộc một trong bảy lớp kể trên, chỉ dựa vào video, âm thanh và phụ đề của ba clip đầu. Danh tính của B không được cho trước. Bài báo gốc trình bày bài toán dưới dạng tương tác hai người A -- B; Chương 2 sẽ cho thấy trên thực tế phần lớn các mẫu có nhiều hơn hai người.
+
+Mô hình tốt nhất trong bài báo gốc, báo cáo này gọi là \emph{mô hình gốc} hay \emph{baseline}, xử lý từng clip bằng hai bộ mã hóa thời gian kiểu Transformer trên chuỗi 16 khung hình (đặc trưng CLIP của toàn khung hình và của khuôn mặt), kết hợp với đặc trưng văn bản và âm thanh bằng chú ý chéo, rồi gộp ba clip bằng một mạng LSTM ba lớp và một Transformer. Mô hình có khoảng 27,7 triệu tham số. Đơn vị xử lý của mô hình là cả khung hình và cả clip, nên thông tin về từng người trong cảnh bị trộn lẫn.
+
+\section{Các bộ trích xuất đặc trưng}
+
+Báo cáo sử dụng các mô hình đã được huấn luyện sẵn và giữ cố định để trích xuất đặc trưng. Phần này tóm tắt vai trò của từng mô hình.
+
+\textbf{ArcFace} \cite{deng2019arcface} là mô hình nhận dạng khuôn mặt, ánh xạ mỗi khuôn mặt thành một vector 512 chiều sao cho các khuôn mặt của cùng một người có độ tương đồng cosine cao. Mô hình được huấn luyện với hàm mất mát có biên góc cộng (additive angular margin), giúp tách biệt các danh tính trên mặt cầu đơn vị. Báo cáo dùng ArcFace để gom các khuôn mặt trong một mẫu thành các danh tính, không gắn tên cho bất kỳ ai.
+
+\textbf{HSEmotion} \cite{savchenko2022hsemotion} là mô hình nhận diện biểu cảm khuôn mặt dựa trên EfficientNet, cho ra xác suất của tám biểu cảm, hai giá trị valence (mức độ tích cực) và arousal (mức độ kích thích), cùng một vector nhúng 1280 chiều. Đây là nguồn mô tả nét mặt chính của mô hình đề xuất.
+
+\textbf{CLIP} \cite{radford2021clip} học một không gian chung cho ảnh và văn bản bằng học tương phản trên các cặp ảnh -- chú thích. Bộ đặc trưng đi kèm Hi-EF dùng CLIP để mã hóa khung hình, khuôn mặt và phụ đề.
+
+\textbf{AudioCLIP} \cite{guzhov2022audioclip} mở rộng CLIP sang âm thanh. Đặc trưng âm thanh trong bộ dữ liệu là vector 527 chiều ứng với các lớp sự kiện âm thanh của AudioSet, nghĩa là mô tả loại âm thanh chứ không chuyên về ngữ điệu hay cảm xúc trong giọng nói.
+
+\textbf{ECAPA-TDNN} \cite{desplanques2020ecapa} là mạng nhúng giọng nói dùng cho nhận dạng người nói. Báo cáo dùng nó để so sánh giọng giữa các clip, từ đó suy ra ai có khả năng đang nói mà không cần biết tên người nói.
+
+\section{Transformer và mô hình trên tập hợp}
+
+\subsection{Cơ chế tự chú ý}
+
+Transformer \cite{vaswani2017attention} xử lý một dãy token $H \in \mathbb{R}^{n \times d}$ bằng cơ chế tự chú ý. Với các phép chiếu $Q = HW_Q$, $K = HW_K$, $V = HW_V$, đầu ra của một đầu chú ý là
+\begin{equation}
+	\mathrm{Attn}(Q, K, V) = \operatorname{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right) V .
+\end{equation}
+Chú ý đa đầu (MHA) chạy song song nhiều đầu như vậy rồi ghép kết quả. Mỗi lớp Transformer gồm một khối MHA và một mạng truyền thẳng (FFN), mỗi khối có kết nối tắt và chuẩn hóa theo lớp (LN). Chi phí của một lớp là $O(n^2 d + n d^2)$.
+
+\subsection{Mô hình trên tập hợp}
+
+Khi đầu vào là một tập hợp không có thứ tự, mô hình nên cho kết quả không đổi khi hoán vị các phần tử. Deep Sets \cite{zaheer2017deep} chứng minh rằng mọi hàm bất biến hoán vị có thể biểu diễn dưới dạng $\rho\big(\sum_i \psi(x_i)\big)$. Set Transformer \cite{lee2019set} dùng chú ý để mô hình hóa tương tác giữa các phần tử. Khối chú ý trên tập hợp (Set Attention Block, SAB) chính là một lớp Transformer \emph{không} có mã hóa vị trí, nên đầu ra hoán vị theo đúng cách hoán vị của đầu vào (đồng biến hoán vị). Để thu được một vector đại diện cho cả tập, Set Transformer dùng phép gộp bằng chú ý đa đầu (PMA): một số vector "hạt giống" học được truy vấn vào tập. Chương 3 dùng cách nhìn này: bằng chứng của một mẫu được biểu diễn thành một tập token, và một token truy vấn đóng vai trò hạt giống để đọc ra dự đoán.
+
+\section{Phương pháp đánh giá}
+
+\subsection{Các chỉ số}
+
+Gọi $y_i$ là nhãn thật, $\hat y_i$ là nhãn dự đoán và $\mathcal{C}$ là tập bảy lớp. Độ nhạy của lớp $c$ là tỉ lệ mẫu thuộc lớp $c$ được dự đoán đúng. Hai chỉ số chính theo bài báo gốc là
+\begin{equation}
+	\mathrm{UAR} = \frac{1}{|\mathcal{C}|}\sum_{c \in \mathcal{C}} \frac{|\{i: y_i = c, \hat y_i = c\}|}{|\{i: y_i = c\}|}, \qquad
+	\mathrm{WAR} = \frac{|\{i: \hat y_i = y_i\}|}{N}.
+\end{equation}
+UAR (độ nhạy trung bình không trọng số) đối xử với mọi lớp như nhau nên phạt mô hình chỉ dự đoán các lớp đông; WAR chính là độ chính xác. Vì các lớp trong Hi-EF mất cân bằng, UAR là chỉ số chính của báo cáo. Với một mô hình đoán ngẫu nhiên đều, UAR bằng $1/7 \approx 14{,}29$.
+
+\textbf{Hiệu chỉnh logit} (logit adjustment, LA) \cite{menon2021logit} bù cho sự mất cân bằng lớp ở bước suy luận: thay vì chọn lớp có xác suất lớn nhất, ta chọn
+\begin{equation}
+	\hat y = \arg\max_{c} \big(\log p(c \mid x) - \tau \log \pi_c\big),
+\end{equation}
+với $\pi_c$ là tần suất lớp $c$ trên tập huấn luyện và $\tau = 1$. Phép hiệu chỉnh này nâng các lớp hiếm lên.
+
+\textbf{Hàm hợp lý âm} (NLL) đo chất lượng của toàn bộ phân phối dự đoán chứ không chỉ nhãn được chọn. Vì các mô hình mạng nơ-ron thường quá tự tin, xác suất được hiệu chỉnh bằng temperature scaling \cite{guo2017calibration}, tức chia logit cho một hằng số $T$ học trên dữ liệu giữ lại, trước khi tính NLL. NLL được dùng cho các so sánh cấu trúc có hiệu ứng nhỏ.
+
+\subsection{Kiểm định chéo theo tập phim}
+
+Các clip trong cùng một tập phim có cùng nhân vật, bối cảnh và ánh sáng; các MCIS liên tiếp còn có thể dùng chung clip. Nếu chia ngẫu nhiên theo mẫu, mô hình có thể "nhớ" nhân vật và cho kết quả lạc quan. Vì vậy mọi phép chia trong báo cáo đều theo tập phim: một tập phim chỉ thuộc về đúng một phía. Kiểm định chéo 5 fold được thực hiện trên các tập phim của dữ liệu phát triển; trong mỗi fold, năm tập phim của phần huấn luyện được giữ riêng để dừng sớm. Mọi bước có học từ dữ liệu, kể cả phép PCA trên đặc trưng khuôn mặt, chỉ được thực hiện trên phần huấn luyện của fold.
+
+\subsection{Đánh giá độ bất định bằng bootstrap}
+
+Kết quả của mạng nơ-ron thay đổi theo seed khởi tạo, và tập đánh giá chỉ có vài chục tập phim. Báo cáo dùng \emph{bootstrap hai mức} để đánh giá khác biệt giữa hai mô hình: trong mỗi lần lặp, lấy mẫu có hoàn lại các seed của từng mô hình rồi lấy trung bình xác suất dự đoán (tạo một ensemble), và lấy mẫu có hoàn lại các tập phim để tính chỉ số. Khoảng giữa phân vị 2,5\% và 97,5\% sau 2.000 lần lặp là khoảng tin cậy 95\%. Một khác biệt được coi là có ý nghĩa khi cận dưới của khoảng này lớn hơn 0.
+
+\subsection{Đăng ký trước kế hoạch đánh giá}
+
+Khi cùng một tập kiểm tra được dùng nhiều lần để chọn mô hình, con số cuối cùng sẽ lạc quan hơn thực tế. Để tránh điều đó, báo cáo áp dụng \emph{đăng ký trước} (preregistration): trước khi mở tập kiểm tra, các mô hình, số seed, chỉ số chính và thứ tự các phép so sánh được ghi lại và cam kết; tập kiểm tra sau đó được đọc đúng một lần. Ngoài ra, mỗi thực nghiệm trên dữ liệu phát triển đều có một quy tắc đọc kết quả được cố định trước khi chạy, để kết luận không bị điều chỉnh sau khi đã thấy số liệu.

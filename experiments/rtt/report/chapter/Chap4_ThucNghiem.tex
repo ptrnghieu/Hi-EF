@@ -1,0 +1,271 @@
+\clearpage
+\phantomsection
+\chapter[THỰC NGHIỆM VÀ KẾT QUẢ]{Thực nghiệm và kết quả}
+\label{chap:exp}
+
+Chương này trình bày thiết lập thực nghiệm, kết quả chính trên tập kiểm tra Hi-EF và trên MELD, rồi lần lượt trả lời các câu hỏi: thành phần nào của \model{} quan trọng, mô hình có cần biết chính xác ai là người phản hồi không, phần cải thiện so với mô hình gốc đến từ đâu, bộ mã hóa có cần thêm cấu trúc không, và mô hình còn sai ở đâu.
+
+\section{Thiết lập thực nghiệm}
+\label{sec:thietlap}
+
+\textbf{Kiểm định chéo.} Mọi quyết định thiết kế và mọi phân tích dùng kiểm định chéo 5 fold trên 45 tập phim phát triển (2.421 MCIS). Các tập phim được phân vào fold sao cho số MCIS mỗi fold gần bằng nhau. Trong mỗi fold, năm tập phim của phần huấn luyện được giữ lại để dừng sớm. Mỗi cấu hình được huấn luyện với nhiều seed (5 hoặc 10 tùy thực nghiệm); kết quả là UAR của ensemble các seed, tức trung bình xác suất dự đoán rồi chọn lớp lớn nhất. Khác biệt giữa hai cấu hình được đánh giá bằng bootstrap hai mức theo seed và theo tập phim với 2.000 lần lặp. Mọi biến thể trong các bảng phân tích đều được \emph{huấn luyện lại}; khi một nhóm token bị loại, nó bị che khỏi phép chú ý cả lúc huấn luyện lẫn lúc đánh giá, chứ không chỉ che lúc kiểm tra.
+
+\textbf{Tập kiểm tra.} \model{} và mô hình gốc được huấn luyện trên 45 tập phim phát triển với 5 seed, và tập kiểm tra được đọc một lần theo kế hoạch đã cam kết trước (mô hình, seed, chỉ số và thứ tự các phép so sánh). Chỉ số chính đã đăng ký trước là UAR 7 lớp sau hiệu chỉnh logit; UAR và WAR thông thường được đăng ký là phân tích mô tả. Trước đó, một số họ mô hình khác (không liên quan đến \model{}) đã từng được đánh giá trên cùng tập kiểm tra; Phụ lục~\ref{app:access} liệt kê mọi lần truy cập. Ngoại trừ Bảng~\ref{tab:main} và các Hình~\ref{fig:confusion}, \ref{fig:recall}, mọi kết quả trên Hi-EF trong chương này đều dùng dữ liệu phát triển.
+
+\textbf{Mô hình gốc.} Mô hình so sánh là cấu hình tốt nhất của \citet{wang2026hief}, được cài đặt lại từ mã nguồn công bố và huấn luyện trên cùng cách chia (AdamW, tốc độ học $10^{-4}$, batch 32, 50 epoch, chọn checkpoint theo UAR). Báo cáo chỉ so sánh với mô hình này. Siêu tham số đầy đủ của cả hai mô hình nằm ở Phụ lục~\ref{app:hparams}.
+
+\textbf{MELD.} Cả hai mô hình được huấn luyện với 3 seed, dùng các mẫu huấn luyện để khớp mô hình, các mẫu kiểm định để dừng sớm và các mẫu kiểm tra để so sánh.
+
+\section{Kết quả trên tập kiểm tra Hi-EF}
+
+\begin{table}[!htb]
+\centering
+\caption{Kết quả trên tập kiểm tra Hi-EF (409 MCIS, 8 tập phim; ensemble các seed)}
+\label{tab:main}
+\begin{tabular}{lcc}
+\toprule
+Mô hình & UAR & WAR \\
+\midrule
+Mô hình gốc \cite{wang2026hief} & 21,40 & 32,52 \\
+\model{} & \textbf{25,24} & \textbf{36,43} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Bảng~\ref{tab:main} cho thấy \model{} tăng UAR 3,84 điểm (khoảng tin cậy 95\%: [+1,24; +6,76]) và WAR 3,91 điểm so với mô hình gốc, đồng thời có UAR cao hơn ở bảy trên tám tập phim kiểm tra.
+
+Với chỉ số chính đã đăng ký trước (UAR sau hiệu chỉnh logit), mức tăng tương tự (+3,77; 19,55 so với 23,31) nhưng \emph{không có ý nghĩa thống kê} (khoảng tin cậy [$-7{,}49$; $+10{,}12$]). Nguyên nhân chính là lớp \emph{fear}: tập kiểm tra chỉ có 6 mẫu \emph{fear}, nên mỗi dự đoán đúng thêm một mẫu đáng 2,38 điểm UAR. Phép hiệu chỉnh logit đẩy mô hình gốc dự đoán \emph{fear} cho 27,6\% số MCIS (trong khi tỉ lệ thật là 1,5\%); nhờ vậy nó đoán đúng hai mẫu \emph{fear}, nhưng độ nhạy của lớp \emph{angry} giảm xuống 1,3\%. Khi bỏ lớp \emph{fear}, mức tăng sau hiệu chỉnh là +9,95. Vì vậy báo cáo coi kết quả kiểm tra là \emph{phù hợp} với bằng chứng trên dữ liệu phát triển chứ không phải một sự xác nhận, và coi việc chọn UAR 7 lớp sau hiệu chỉnh làm chỉ số chính cho một tập kiểm tra chỉ có 6 mẫu \emph{fear} là một lỗi thiết kế của kế hoạch đăng ký trước.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\linewidth]{confusion_test.pdf}
+\caption{Ma trận nhầm lẫn chuẩn hóa theo hàng của mô hình gốc và \model{} trên tập kiểm tra (ensemble các seed). Nhãn hàng ghi số MCIS kiểm tra của mỗi lớp}
+\label{fig:confusion}
+\end{figure}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.8\linewidth]{recall_test.pdf}
+\caption{Độ nhạy theo từng lớp trên tập kiểm tra}
+\label{fig:recall}
+\end{figure}
+
+Hình~\ref{fig:confusion} và Hình~\ref{fig:recall} so sánh lỗi của hai mô hình. Mô hình gốc nhầm lẫn cực tính: nó dự đoán \emph{happy} cho 58\% các phản hồi \emph{sad} và chỉ nhận ra 3\% số đó. \model{} giảm nhầm lẫn này xuống 18\% và nâng độ nhạy của \emph{sad} lên 23\%, trong khi giữ \emph{angry}, \emph{happy} và \emph{neutral} ở mức tương đương. Không mô hình nào dự đoán đúng \emph{fear} hay \emph{surprise}, và \emph{disgust} chỉ hiếm khi đúng.
+
+\section{Kết quả trên MELD}
+
+\begin{table}[!htb]
+\centering
+\caption{Kết quả trên tập kiểm tra MELD (1.341 mẫu; UAR ngẫu nhiên 14,29). TB: trung bình các seed; Ens.: ensemble các seed}
+\label{tab:meld}
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{UAR} & \multicolumn{2}{c}{WAR} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Mô hình & TB & Ens. & TB & Ens. \\
+\midrule
+Mô hình gốc & 15,56 & 15,50 & \textbf{43,35} & \textbf{46,09} \\
+\model{} & \textbf{16,72} & \textbf{16,85} & 35,84 & 39,30 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Trên MELD (Bảng~\ref{tab:meld}), UAR của \model{} cao hơn một chút so với mô hình gốc, nhưng khác biệt không có ý nghĩa thống kê. Mô hình gốc có WAR cao hơn vì dự đoán \emph{neutral} cho phần lớn các mẫu (độ nhạy \emph{neutral} 93\%, mọi lớp khác bằng 0 trừ \emph{angry}), còn \model{} phân bố dự đoán rộng hơn (độ nhạy \emph{happy} 17,9\%, \emph{angry} 17,6\%). Vì \emph{neutral} chiếm 48\% tập kiểm tra MELD, WAR thưởng cho việc dồn về lớp đông, điều mà UAR phạt. Cả hai mô hình đều gần mức ngẫu nhiên, cho thấy dự đoán cảm xúc trên MELD khi không biết người nói là rất khó.
+
+\section{Phân tích loại bỏ thành phần}
+
+\begin{table}[!htb]
+\centering
+\caption{Phân tích loại bỏ thành phần trên dữ liệu phát triển. Mọi biến thể được huấn luyện lại với cùng fold và seed; các biến thể đến từ ba lần chạy, trong đó mô hình đầy đủ đạt từ 25,92 đến 26,24 (bảng ghi giá trị cao nhất)}
+\label{tab:ablation}
+\begin{tabular}{lc}
+\toprule
+Biến thể & UAR \\
+\midrule
+\model{} & \textbf{26,24} \\
+\midrule
+\quad bỏ token người nghe & 24,20 \\
+\quad bỏ ngữ cảnh clip I--II & 24,11 \\
+\quad gộp mọi khuôn mặt theo clip (không có vai trò) & 25,80 \\
+\midrule
+\quad bỏ token người nghe ở clip III & 25,00 \\
+\quad bỏ token người nói & 25,66 \\
+\quad bỏ token những người còn lại & 24,64 \\
+\quad bỏ token người nghe và những người còn lại & 23,22 \\
+\quad bỏ token người nói, lời nói và bối cảnh & 23,10 \\
+\midrule
+\quad bỏ toàn bộ token khuôn mặt & 22,03 \\
+\quad bỏ token lời nói và bối cảnh & 25,01 \\
+\quad bỏ đầu dự đoán phụ và modality dropout & 25,15 \\
+\quad đường xử lý riêng cho từng vai trò, cộng lại & 23,78 \\
+\quad đường xử lý riêng cho từng vai trò, có tương tác & 24,60 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Trong Bảng~\ref{tab:ablation}, mọi biến thể đều thấp hơn mô hình đầy đủ, dù một số khác biệt nhỏ. Cần lưu ý rằng các lần chạy lặp lại của cùng một mô hình với ba seed dao động khoảng $\pm0{,}4$ đến $0{,}6$ điểm UAR, nên các khác biệt dưới khoảng 1 điểm cần nhiều seed hơn mới kết luận được. Vì vậy các kết luận quan trọng dưới đây đều được kiểm tra lại với 10 seed.
+
+\textbf{Khuôn mặt là nguồn thông tin quan trọng nhất.} Bỏ toàn bộ token khuôn mặt làm UAR giảm xuống 22,03.
+
+\textbf{Trong các khuôn mặt, người nghe đóng góp nhiều nhất.} Chỉ bỏ token của người nghe làm UAR giảm từ 26,24 xuống 24,20; với 10 seed, mức giảm là 2,04 điểm (khoảng tin cậy [+0,21; +3,46]), xảy ra ở cả năm fold. Mức giảm tập trung ở các MCIS có người nghe xuất hiện trong clip III (+2,80) so với các MCIS không có (+0,54).
+
+\textbf{Ngữ cảnh trước đó quan trọng tương đương.} Chỉ giữ clip III cho 24,11 (mức giảm 2,13, khoảng tin cậy [+0,20; +4,08]); phần lớn mức giảm đến từ clip II.
+
+\textbf{Hai loại bằng chứng bổ sung cho nhau.} Một mô hình chỉ giữ khuôn mặt của người nói cùng token lời nói và bối cảnh, tức kiểu tiếp cận quanh người nói, đạt 23,22; chỉ dùng khuôn mặt của người nghe và những người còn lại đạt 23,10. Cả hai đều thấp hơn nhiều so với khi kết hợp.
+
+\textbf{Xử lý đồng thời các token có ích.} Tách thành các đường xử lý riêng cho từng vai trò rồi cộng lại chỉ đạt 23,78 (thấp hơn 2,14 điểm, khoảng tin cậy [+0,29; +3,79]); thêm một số hạng tương tác chỉ lấy lại một phần.
+
+\textbf{Việc tách khuôn mặt theo vai trò chưa được chứng minh là cần thiết.} Gộp mọi khuôn mặt của một clip thành một token (không có A/L/O) đạt 25,80; với 10 seed, khác biệt là +0,44 với khoảng tin cậy [$-1{,}21$; $+2{,}16$], không có ý nghĩa. Điều này khớp với việc bỏ vector nhúng vai trò cũng không làm giảm kết quả. Phiên bản gộp vẫn nhìn thấy khuôn mặt của người nghe, chỉ là trộn với người khác; nên điều quan trọng là có nét mặt của người nghe trong đầu vào, còn việc gắn nhãn vai trò cho nó thì chưa chắc. Hình~\ref{fig:cvroles} so sánh ma trận nhầm lẫn của hai phiên bản. Mục~\ref{sec:g47} trình bày một thực nghiệm kiểm soát chặt hơn cho câu hỏi này.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\linewidth]{confusion_cv_roles.pdf}
+\caption{Ma trận nhầm lẫn trên dữ liệu phát triển của \model{} (trái) và phiên bản gộp khuôn mặt theo clip, không có vai trò (phải)}
+\label{fig:cvroles}
+\end{figure}
+
+\section{Người nghe đại diện và người phản hồi thật}
+\label{sec:proxy}
+
+Câu hỏi tiếp theo là liệu mô hình có cần biết chính xác ai sẽ phản hồi không. Một phiên bản oracle thay người nghe bằng người phản hồi thật: B được xác định là khuôn mặt chiếm ưu thế trong clip IV, rồi đối chiếu với một danh tính của clip I--III, điều này làm được với 88\% số MCIS. Phiên bản này dùng clip IV nên chỉ phục vụ phân tích. Trong số các MCIS mà quy tắc gán được người nghe, người nghe trùng với người phản hồi đã đối chiếu ở 68\%.
+
+\begin{table}[!htb]
+\centering
+\caption{UAR khi dùng người nghe đại diện (không cần danh tính) và khi dùng người phản hồi thật (oracle, dùng clip IV). "Người nghe $\neq$ B": quy tắc chọn người khác hoặc không chọn ai}
+\label{tab:proxy}
+\begin{tabular}{lrcc}
+\toprule
+Nhóm mẫu (dữ liệu phát triển) & Số mẫu & Đại diện & Oracle \\
+\midrule
+Toàn bộ & 2.421 & 26,24 & 26,20 \\
+B xuất hiện trong clip I--III & 2.107 & 26,98 & 26,90 \\
+\quad người nghe $\neq$ B & 390 & 28,33 & 28,15 \\
+B không xuất hiện trong clip I--III & 314 & 21,20 & 21,29 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Bảng~\ref{tab:proxy} không cho thấy khác biệt đo được giữa người nghe đại diện và người phản hồi thật (toàn bộ: $-0{,}04$, khoảng tin cậy [$-1{,}50$; $+1{,}85$]), kể cả trên 390 MCIS mà quy tắc chọn sai người. Kết quả này gợi ý rằng mô hình dựa vào những gì các khuôn mặt nhìn thấy được biểu hiện, và trên Hi-EF một cách chọn bằng chứng không cần danh tính là đủ. Các MCIS mà B không xuất hiện có UAR thấp hơn rõ rệt, phù hợp với việc người phản hồi là nguồn thông tin chính.
+
+\subsection{Phân nhóm theo độ tin cậy của việc đối chiếu}
+
+Phép đối chiếu B với các danh tính của clip I--III có thể sai. Để kiểm tra, một phân tích bổ sung (G48) chia lại các MCIS phát triển thành bốn nhóm theo độ tin cậy: B trùng người nghe (990 MCIS), B có mặt nhưng khác người nghe (1.114), B không xuất hiện (225), và đối chiếu không chắc chắn (92). Trong nhóm "B có mặt nhưng khác người nghe", B chỉ xuất hiện trong clip III ở 19,3\% số mẫu; phần lớn còn lại B chỉ có mặt ở clip I--II, nơi quy tắc chọn người nghe (vốn chỉ xét clip III) không thể chọn được B. Nhóm đáng chú ý nhất để đánh giá giá trị của việc biết chính xác B là khoảng 215 MCIS mà B có mặt trong clip III nhưng quy tắc chọn người khác.
+
+\choketqua{G48 -- UAR của người nghe đại diện, oracle và phiên bản không có người nghe trên từng nhóm; kết quả kiểm tra thủ công 24 mẫu}
+
+\section{Nguồn gốc của phần cải thiện}
+
+Mục này tách phần cải thiện so với mô hình gốc thành hai câu hỏi: nó đến từ đặc trưng tốt hơn hay từ cách tổ chức bằng chứng, và nó có phụ thuộc vào những khung hình sát lượt nói cần dự đoán không. Mọi mô hình trong Bảng~\ref{tab:origin} được huấn luyện trong cùng một lần chạy, cùng fold và cùng seed.
+
+\begin{table}[!htb]
+\centering
+\caption{Nguồn gốc của phần cải thiện so với mô hình gốc (dữ liệu phát triển). Mô hình gốc dùng đặc trưng của \model{} là kiến trúc của \citet{wang2026hief} được cung cấp đặc trưng khuôn mặt, đồng bộ miệng -- âm thanh và giọng nói của \model{}, gộp theo clip. Trong các biến thể cắt clip III, chỉ \model{} bị mất phần cuối clip; các mô hình gốc vẫn thấy toàn bộ clip}
+\label{tab:origin}
+\begin{tabular}{lcc}
+\toprule
+Mô hình & UAR & WAR \\
+\midrule
+Mô hình gốc, đặc trưng gốc & 21,27 & 31,68 \\
+Mô hình gốc, đặc trưng của \model{} & 23,25 & 32,71 \\
+\midrule
+\model{} & \textbf{26,62} & \textbf{37,92} \\
+\quad chỉ token người nghe của clip I/II & 25,15 & 36,56 \\
+\quad chỉ token người nghe của clip III & 24,86 & 35,98 \\
+\quad không có token người nghe & 24,04 & 35,23 \\
+\midrule
+\model{}, giữ 80\% đầu của clip III & 25,73 & 37,01 \\
+\model{}, giữ 60\% đầu của clip III & 25,08 & 36,14 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Đặc trưng hay cách tổ chức?} Cung cấp cho kiến trúc gốc các đặc trưng của \model{}, gộp theo clip như thông thường, nâng UAR từ 21,27 lên 23,25 (khác biệt +1,98, không có ý nghĩa). \model{} vẫn hơn mô hình này 3,37 điểm (khoảng tin cậy [+0,68; +5,09]) ở cả năm fold. Như vậy đặc trưng phong phú hơn chỉ giải thích một phần phần cải thiện. Phần còn lại gắn với token người nghe: khi bỏ chúng, \model{} không còn phân biệt được với mô hình gốc dùng cùng đặc trưng (+0,79). Token người nghe của clip I/II hoặc của clip III riêng lẻ mỗi loại lấy lại một phần khoảng cách (lần lượt +1,12 và +0,83 so với khi không có người nghe, đều chưa có ý nghĩa), và chỉ khi có cả hai mô hình mới trở lại mức đầy đủ (+2,58, có ý nghĩa).
+
+\textbf{Dự đoán hay nhận ra phản ứng sớm?} Khoảng một nửa số khung hình có người nghe nằm ở 20\% cuối của clip III, rất gần lượt nói cần dự đoán. Nếu mô hình chỉ nhận ra phản ứng đã bắt đầu của người phản hồi, đó gần với nhận diện hơn là dự đoán. Để kiểm tra, \model{} được huấn luyện lại khi cắt bỏ phần cuối của clip III: khuôn mặt sau điểm cắt bị loại trước khi gán vai trò, và token bối cảnh chỉ dùng các khung hình còn lại; các mô hình gốc vẫn thấy toàn bộ clip. Khi giữ 80\% hoặc 60\% clip III, \model{} vẫn hơn mô hình gốc 4,46 và 3,81 điểm, và hơn mô hình gốc dùng cùng đặc trưng 2,48 và 1,83 điểm, tất cả đều có ý nghĩa, dù khoảng cách với mô hình gốc dùng cùng đặc trưng là nhỏ.
+
+Phần đóng góp riêng của người nghe giảm khi cắt. Với quy tắc chọn người nghe thông thường, đóng góp này giảm từ 2,58 xuống 1,15 rồi $-0{,}13$; nhưng ở đây việc cắt còn làm mất luôn danh tính người nghe trong nhiều mẫu. Khi cố định người nghe là người phản hồi thật (oracle như Mục~\ref{sec:proxy}), để việc cắt chỉ bỏ khung hình chứ không bỏ danh tính, đóng góp giảm từ 2,85 xuống 1,57 rồi 1,21: khoảng một nửa còn lại khi không có các khung hình cuối, tương đương giá trị của token người nghe ở clip I/II. Không nửa nào có ý nghĩa thống kê khi đứng riêng. Kết quả gợi ý rằng mô hình dựa vào cả những lần xuất hiện trước đó của người phản hồi lẫn phản ứng của họ ở cuối lượt hiện tại, với mức độ tương đương nhau.
+
+\section{Bộ mã hóa có cần thêm cấu trúc?}
+\label{sec:structure}
+
+Nhiều ý tưởng cải tiến tự nhiên là thêm cấu trúc vào bộ mã hóa: mã hóa thứ tự thời gian, quan hệ giữa các người, hay tách riêng các nhóm bằng chứng. Bảng~\ref{tab:structure} tổng hợp các thử nghiệm theo hướng này, đánh giá bằng NLL sau temperature scaling vì các hiệu ứng mong đợi nhỏ.
+
+\begin{table}[!htb]
+\centering
+\caption{Các biến thể cấu trúc của \model{}: NLL trên dữ liệu giữ lại sau temperature scaling, so với \model{} (dương = kém hơn). Nhóm EMAP: người nghe, lịch sử (các token khác của clip I--II) và sự kiện hiện tại (các token khác của clip III)}
+\label{tab:structure}
+\begin{tabular}{lc}
+\toprule
+Thay đổi so với \model{} & $\Delta$NLL \\
+\midrule
+Bỏ thứ tự giữa clip I và II & $+0{,}006$ \\
+Bỏ thứ tự giữa cả ba clip & $+0{,}008$ \\
+Thêm độ lệch chú ý theo thời gian, người và loại bằng chứng & $+0{,}001$ \\
+Xấp xỉ cộng tính tốt nhất (EMAP) & $+0{,}011$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Làm cho bộ mã hóa bất biến hoàn toàn với thứ tự của clip I và II, hoặc của cả ba clip (đã kiểm tra bằng số: thay đổi logit lớn nhất là $1{,}4\cdot10^{-6}$), không làm kết quả kém đi có ý nghĩa. Các độ lệch chú ý theo thời gian, người và loại bằng chứng được học nhưng không mang lại cải thiện đo được; các cách đọc kết quả khác (trung bình các token, đọc token người nghe, truy vấn chỉ đọc, ba truy vấn) cũng vậy.
+
+Tuy nhiên, phân tích EMAP \cite{hessel2020emap} cho thấy bộ mã hóa sau huấn luyện \emph{có} dùng tương tác không cộng tính. EMAP thay mô hình bằng xấp xỉ cộng tính tốt nhất theo ba nhóm token (người nghe, lịch sử, sự kiện hiện tại); NLL tăng 0,011 (có ý nghĩa), và mỗi nhóm đều tương tác với phần còn lại. Các tương tác này khiêm tốn, chiếm khoảng 5\% phương sai của logit, và không liên quan đến lời thoại: tách cộng tính giữa văn bản và mọi thứ khác không làm mất gì đo được. Kết luận chung: tự chú ý đồng thời trên các token đã đủ, các cấu trúc tường minh đã thử không mang lại thêm lợi ích.
+
+\section{Phân tích lỗi}
+
+\subsection{Lặp lại cảm xúc của người nói}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.62\linewidth]{errors_by_group_cv.pdf}
+\caption{Độ chính xác của \model{} theo nhóm mẫu trên dữ liệu phát triển}
+\label{fig:groups}
+\end{figure}
+
+Hơn một nửa số dự đoán đúng là các trường hợp mirroring. Trên các MCIS mà B lặp lại cảm xúc của A, \model{} đúng 56,9\%, nhưng chỉ 27,7\% ở các trường hợp còn lại, nơi nó vẫn dự đoán cảm xúc của A trong 29\% số mẫu (Hình~\ref{fig:groups}). Token người nghe giúp chủ yếu ở các trường hợp mirroring. Việc B có lặp lại A hay không là dự đoán được một phần (AUC 0,70), nhưng B sẽ chuyển sang cảm xúc nào thì gần như không: trên các trường hợp không lặp lại, độ nhạy của \emph{disgust} là 1,6\%, \emph{surprise} 2,8\% và \emph{fear} 0\%.
+
+\subsection{Giữ cảm xúc của chính mình}
+
+\begin{table}[!htb]
+\centering
+\caption{Độ chính xác (\%) theo việc B giữ hay đổi cảm xúc của chính mình so với lượt nói trước của B (dữ liệu phát triển, cùng lần chạy với Bảng~\ref{tab:origin}). "Đặc trưng \model{}": mô hình gốc dùng đặc trưng của \model{}}
+\label{tab:keep}
+\begin{tabular}{lrccc}
+\toprule
+Nhóm mẫu & Số mẫu & Mô hình gốc & Đặc trưng \model{} & \model{} \\
+\midrule
+Toàn bộ & 2.421 & 31,7 & 32,7 & \textbf{37,9} \\
+B giữ cảm xúc & 320 & 46,3 & 45,6 & \textbf{56,6} \\
+\quad và trùng với A & 145 & 55,9 & 53,8 & \textbf{71,0} \\
+\quad và khác A & 175 & 38,3 & 38,9 & \textbf{44,6} \\
+B đổi cảm xúc & 334 & 27,0 & 27,0 & \textbf{27,8} \\
+\quad sang cảm xúc của A & 90 & 41,1 & 36,7 & \textbf{43,3} \\
+\quad sang cảm xúc khác A & 244 & 21,7 & \textbf{23,4} & 22,1 \\
+Không biết cảm xúc trước của B & 1.767 & 29,9 & 31,5 & \textbf{36,5} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Quán tính cảm xúc cho một bức tranh tương tự (Bảng~\ref{tab:keep}). Ở 27\% số MCIS, B đã nói ở clip I hoặc II với một nhãn cảm xúc (B được xác định qua giọng nói trong clip IV, chỉ để phân tích), và B giữ cảm xúc đó trong 48,9\% trường hợp. Lợi thế của \model{} so với mô hình gốc lớn nhất ở các trường hợp B giữ cảm xúc: đúng 56,6\% so với 46,3\%, và 71,0\% so với 55,9\% khi cảm xúc được giữ cũng trùng với A. Khi B chuyển sang cảm xúc khác, mọi mô hình chỉ đúng khoảng 27\%, và khoảng 22\% khi cảm xúc mới cũng khác của A. Đây là phép so sánh mô tả: với 320 mẫu, khoảng tin cậy của khác biệt trên nhóm "giữ cảm xúc" vẫn chạm 0.
+
+\subsection{Nhãn không chắc chắn và sự có mặt của người nghe}
+
+Khi người chú thích đánh dấu nhãn của B là không chắc chắn, độ chính xác giảm từ 40,5\% xuống 25,2\%, phù hợp với việc sự mơ hồ của nhãn giới hạn mức mà bất kỳ mô hình nào có thể đạt. Độ chính xác không phụ thuộc vào việc người nghe có xuất hiện trong clip III hay không (38,0\% ở cả hai nhóm), phù hợp với việc mô hình dựa vào ngữ cảnh và người nói khi không thấy người nghe.
+
+\subsection{Giới hạn nằm ở việc nhận diện}
+
+Hai phân tích oracle gợi ý rằng thông tin còn thiếu chủ yếu là vấn đề nhận diện. Khi thêm cảm xúc thật của A trong clip III vào đầu ra của \model{}, UAR của một mô hình tuyến tính trên các đầu ra này tăng từ 24,73 lên 27,51 và NLL giảm 0,036; nhưng khi cảm xúc của A được ước lượng bằng một bộ nhận diện từ clip III, phần tăng biến mất. Trên các MCIS biết lượt nói trước của B, chỉ cần sao chép cảm xúc trước đó của B đã đạt 39,18 UAR, so với 27,39 của \model{}, và thêm đầu ra của \model{} vào nhãn đó không cải thiện thêm đáng kể (+1,44, khoảng tin cậy [$-4{,}75$; $+8{,}39$]). Như vậy tín hiệu còn thiếu nằm ở trạng thái cảm xúc hiện tại của những người tham gia, mà các bộ trích xuất đặc trưng cố định nhận diện kém; các cách kết hợp khác nhau của cùng các token đã thử không lấy lại được nó. Chương 5 trình bày các nỗ lực nhằm cải thiện việc nhận diện này.
+
+\section{Kiểm soát vai trò của việc tổ chức theo người}
+\label{sec:g47}
+
+Kết quả ở Mục 4.4 cho thấy gộp khuôn mặt theo clip chỉ kém \model{} 0,44 điểm, không có ý nghĩa. Tuy nhiên phép so sánh đó chưa hoàn toàn tương đương: phiên bản gộp không có đầu dự đoán phụ cho cảm xúc của A, vì không có token riêng của A. Để làm rõ phần đóng góp nào đến từ việc giữ bằng chứng riêng theo người, từ việc gán vai trò và từ việc chọn người nghe, thực nghiệm G47 huấn luyện lại trong cùng một lần chạy (10 seed $\times$ 5 fold) các biến thể sau:
+
+\begin{itemize}
+	\item token theo người so với gộp theo clip, cả khi có và khi không có các đầu dự đoán phụ; phiên bản gộp cũng gộp độ đồng bộ miệng -- âm thanh theo clip, để không còn thông tin vai trò;
+	\item bỏ vector nhúng vai trò; và hoán đổi A với L ở một nửa ngẫu nhiên các mẫu, nhất quán qua cả ba clip, để phá thông tin vai trò mà vẫn giữ riêng từng người;
+	\item chọn người nghe ngẫu nhiên trong số những người không nói ở clip III (ba lần chọn khác nhau), so với người nghe theo quy tắc và với phiên bản không có người nghe, đánh giá chủ yếu trên các mẫu có ít nhất hai ứng viên.
+\end{itemize}
+
+Quy tắc đọc kết quả được cố định trước: việc tổ chức theo người được coi là có lợi nếu cận dưới khoảng tin cậy của khác biệt dương ở cả cặp có và không có đầu dự đoán phụ; việc gán vai trò mang thông tin nếu \model{} hơn phiên bản hoán đổi một cách có ý nghĩa; và việc chọn người nghe có giá trị nếu \model{} hơn phiên bản chọn ngẫu nhiên trên các mẫu có ít nhất hai ứng viên.
+
+\choketqua{G47 -- bảng UAR/WAR (trung bình $\pm$ độ lệch chuẩn theo seed), khác biệt theo cặp, khoảng tin cậy và kết luận theo ba quy tắc trên}

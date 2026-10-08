@@ -1,0 +1,97 @@
+\clearpage
+\phantomsection
+\chapter[DỮ LIỆU VÀ PHÂN TÍCH DỮ LIỆU]{Dữ liệu và phân tích dữ liệu}
+
+Trước khi thiết kế mô hình, cần hiểu rõ dữ liệu: các tập được chia thế nào, nhãn phân bố ra sao, và quan trọng nhất là trong mỗi mẫu có những ai, người phản hồi xuất hiện ở đâu. Các phân tích trong chương này được thực hiện trên dữ liệu phát triển; clip IV chỉ được dùng để phân tích, không bao giờ làm đầu vào cho mô hình dự đoán.
+
+\section{Bộ dữ liệu Hi-EF và cách chia tập}
+
+Bộ chú thích công bố của Hi-EF gồm 2.830 MCIS lấy từ 53 tập phim. Mỗi clip dài khoảng hai giây và ứng với một câu phụ đề. Cách chia tập của bài báo gốc cho phép các MCIS của cùng một tập phim, thậm chí dùng chung clip, nằm ở cả tập huấn luyện lẫn tập kiểm tra. Để tránh rò rỉ, báo cáo chia lại theo tập phim với tỉ lệ 37/8/8 tập phim, tương ứng 1.993/428/409 MCIS cho huấn luyện, kiểm định và kiểm tra. Hai tập huấn luyện và kiểm định được gộp thành \emph{dữ liệu phát triển} gồm 45 tập phim và 2.421 MCIS, dùng cho mọi thực nghiệm kiểm định chéo. Tập kiểm tra gồm 8 tập phim được khóa lại. Do cách chia khác, các con số trong báo cáo không so sánh trực tiếp được với con số trong bài báo gốc; thay vào đó, mô hình gốc được huấn luyện lại trên cùng cách chia (Mục~\ref{sec:thietlap}).
+
+\begin{table}[!htb]
+\centering
+\caption{Phân bố nhãn cảm xúc của B trong clip IV}
+\label{tab:phanbo}
+\begin{tabular}{lrrrr}
+\toprule
+ & \multicolumn{2}{c}{Phát triển (45 tập phim)} & \multicolumn{2}{c}{Kiểm tra (8 tập phim)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Cảm xúc & Số mẫu & Tỉ lệ (\%) & Số mẫu & Tỉ lệ (\%) \\
+\midrule
+angry & 448 & 18,5 & 77 & 18,8 \\
+disgust & 220 & 9,1 & 40 & 9,8 \\
+fear & 32 & 1,3 & 6 & 1,5 \\
+happy & 562 & 23,2 & 100 & 24,4 \\
+neutral & 563 & 23,3 & 89 & 21,8 \\
+sad & 359 & 14,8 & 60 & 14,7 \\
+surprise & 237 & 9,8 & 37 & 9,0 \\
+\midrule
+Tổng & 2.421 & 100 & 409 & 100 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Bảng~\ref{tab:phanbo} cho thấy phân bố nhãn của hai phía khá giống nhau, nhưng mất cân bằng mạnh: \emph{happy} và \emph{neutral} chiếm gần một nửa, trong khi \emph{fear} chỉ có 32 mẫu phát triển và 6 mẫu kiểm tra. Với 6 mẫu, mỗi dự đoán đúng thêm một mẫu \emph{fear} làm UAR trên tập kiểm tra thay đổi 2,38 điểm. Điều này ảnh hưởng trực tiếp đến cách đọc kết quả ở Chương 4.
+
+\section{Ai có mặt trong mỗi mẫu}
+
+Bài báo gốc mô tả bài toán như một tương tác hai người. Để kiểm tra giả định này, các khuôn mặt trong mỗi mẫu được phát hiện ở tốc độ 4 khung hình mỗi giây (tối đa 32 khung hình mỗi clip), nhúng bằng ArcFace và gom cụm thành các danh tính; giọng nói được so sánh bằng ECAPA. Người phản hồi B được xác định, chỉ cho mục đích phân tích, là khuôn mặt chiếm ưu thế trong clip IV, sau đó đối chiếu với các danh tính của clip I--III. Hình~\ref{fig:datastats} tóm tắt kết quả.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.75\linewidth]{data_stats.pdf}
+\caption{Thống kê người tham gia trong dữ liệu phát triển của Hi-EF (khuôn mặt: 600 mẫu; giọng nói: 592 mẫu; người phản hồi xuất hiện trong clip I--III và đã nói ở clip I/II: 2.421 mẫu; clip IV chỉ dùng để phân tích)}
+\label{fig:datastats}
+\end{figure}
+
+Có bốn quan sát chính.
+
+\textbf{Hi-EF thực chất là hội thoại nhiều người.} 47\% số mẫu có từ ba người trở lên xuất hiện trong cảnh.
+
+\textbf{Người phản hồi thường đã có mặt từ trước.} B xuất hiện ở clip I--III trong 88\% số mẫu, được thấy đang nghe trong clip III ở 48\% số mẫu, và đã nói ở clip I hoặc II trong 50\% số mẫu. Như vậy, phần lớn thời gian mô hình có thể quan sát trực tiếp người mà nó cần dự đoán.
+
+\textbf{Phim được dựng theo kiểu cắt cảnh luân phiên.} A và B chỉ cùng xuất hiện trong một khung hình của clip III ở 0,7\% số mẫu: máy quay quay người nói, rồi cắt sang người nghe. Hệ quả là một vector tóm tắt mức khung hình hay mức clip sẽ trộn lẫn những người khác nhau.
+
+\textbf{Lượt lời không đủ để xác định B.} Người nói ở clip I/II là một người thứ ba (không phải A, cũng không phải B) trong khoảng 39\% số mẫu, nên quy tắc "người nói trước A chính là B" sai khá thường xuyên.
+
+Một thí nghiệm không cần huấn luyện cho thấy nét mặt của người nghe có thông tin hữu ích. Trên 1.234 mẫu có người nghe nhìn thấy được, chỉ dùng biểu cảm khuôn mặt (HSEmotion) của người nghe để đoán nhãn của B cho UAR cao hơn 3,72 điểm so với dùng biểu cảm của A; trong khi đó, một cờ cho biết người nghe có mặt hay không thì không mang thông tin. Ngoài ra, khoảng một nửa số khung hình có người nghe nằm ở 20\% cuối của clip III, tức rất gần lượt nói cần dự đoán. Chương 4 sẽ kiểm tra liệu mô hình có chỉ dựa vào những khung hình cuối này hay không.
+
+\section{Lặp lại cảm xúc và giữ cảm xúc}
+
+Hai quy luật trình bày ở Chương 1 có thể đo trực tiếp trên nhãn.
+
+\textbf{Mirroring.} Cảm xúc của B trùng với cảm xúc của A trong clip III ở 35,5\% số mẫu phát triển; trên MELD tỉ lệ tương ứng là 34,7\%. Nếu hai nhãn độc lập, tỉ lệ trùng chỉ khoảng 18\%, nên lây lan cảm xúc là một tín hiệu mạnh.
+
+\textbf{Persistence.} Ở 27\% số mẫu phát triển (654 MCIS), B đã nói ở clip I hoặc II và lượt nói đó có nhãn, nên biết được cảm xúc trước đó của chính B. Trong các mẫu này, B giữ nguyên cảm xúc của mình ở clip IV trong 48,9\% trường hợp.
+
+Để có mốc so sánh, Bảng~\ref{tab:copy} liệt kê một số bộ dự đoán chẩn đoán. Hai bộ "sao chép" dùng nhãn thật của ngữ cảnh nên là \emph{oracle}, chỉ dùng để phân tích, không phải là mô hình có thể triển khai. Đường cơ sở dự đoán lớp đông nhất có UAR thấp hơn $1/7$ vì lớp đông nhất khác nhau giữa các fold.
+
+\begin{table}[!htb]
+\centering
+\caption{Các bộ dự đoán chẩn đoán trên dữ liệu phát triển (kiểm định chéo 5 fold); oracle dùng nhãn thật của ngữ cảnh}
+\label{tab:copy}
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{Toàn bộ (2.421)} & \multicolumn{2}{c}{Biết cảm xúc trước của B (654)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Bộ dự đoán & UAR & WAR & UAR & WAR \\
+\midrule
+Lớp đông nhất của fold huấn luyện & 10,82 & 17,60 & 10,55 & 19,57 \\
+Sao chép cảm xúc của A (oracle) & 27,12 & 35,52 & 26,18 & 35,93 \\
+Sao chép cảm xúc trước của B (oracle) & -- & -- & 39,18 & 48,93 \\
+\midrule
+Mô hình gốc & 21,27 & 31,68 & 22,74 & 36,39 \\
+\model{} & 26,62 & 37,92 & 27,39 & 41,90 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Bảng cho thấy hai điều. Thứ nhất, chỉ cần biết đúng cảm xúc trước của B đã đạt 39,18 UAR, cao hơn nhiều so với mọi mô hình; quán tính cảm xúc là nguồn thông tin rất mạnh nếu nhận diện được trạng thái trước đó của B. Thứ hai, \model{}, dù không được thấy nhãn của A, đạt UAR ngang và WAR cao hơn bộ sao chép cảm xúc của A.
+
+\section{Nhãn không chắc chắn}
+
+Bộ chú thích của Hi-EF có một cột mức độ chắc chắn của nhãn với ba mức: chắc chắn, ranh giới và không chắc chắn. Trong các clip có nhãn, số lượng ba mức lần lượt là 3.587, 559 và 637. Với nhãn của clip IV, 25,8\% thuộc hai mức sau; tỉ lệ này đặc biệt cao ở \emph{sad} (41\%), \emph{disgust} (47\%) và \emph{fear} (56\%), cũng là những lớp khó dự đoán nhất. Như vậy một phần sai số của mọi mô hình đến từ sự mơ hồ của chính nhãn.
+
+\section{Bộ dữ liệu MELD}
+
+Để kiểm tra khả năng tổng quát, báo cáo xây dựng các mẫu theo kiểu Hi-EF từ MELD \cite{poria2019meld}: ba lượt nói liên tiếp, tiếp theo là một lượt của người nói khác, cho 5.405/595/1.341 mẫu huấn luyện/kiểm định/kiểm tra. Tên người nói của MELD không được dùng làm đầu vào, để giữ cùng điều kiện với Hi-EF. MELD bị chi phối bởi lớp \emph{neutral}, chiếm 48\% số mẫu kiểm tra.

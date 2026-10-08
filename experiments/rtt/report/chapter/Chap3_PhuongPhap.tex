@@ -1,0 +1,138 @@
+\clearpage
+\phantomsection
+\chapter[MÔ HÌNH ĐỀ XUẤT ROLENET]{Mô hình đề xuất RoleNet}
+\label{chap:method}
+
+Chương này trình bày mô hình \model{}. Ý tưởng chính rút ra từ Chương 2: người sẽ phản hồi thường đã có mặt trên màn hình với vai trò người nghe, và bằng chứng nên được tổ chức theo từng người thay vì theo cả khung hình hay cả clip.
+
+\section{Phát biểu bài toán}
+
+Cho một MCIS với ba clip đầu vào $X = (C_1, C_2, C_3)$, mỗi clip $C_k$ gồm các khung hình video, âm thanh và phụ đề. Mô hình cần đưa ra phân phối xác suất $p(y_B \mid X)$ trên bảy lớp cảm xúc, với $y_B$ là cảm xúc của người phản hồi B trong clip IV. Ba ràng buộc được giữ trong toàn bộ nghiên cứu: clip IV không bao giờ là đầu vào khi suy luận; danh tính của B không được cho; và không giả định chỉ có hai người tham gia.
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=0.62\linewidth]{motivation.pdf}
+\caption{Một mẫu kiểm tra của Hi-EF có nhiều người trong cảnh. Bên trái: các vai trò mà \model{} gán mà không dùng thông tin tương lai (người nói A của clip III, người nghe L làm đại diện cho người phản hồi, và những người còn lại O). Bên phải: tóm tắt mỗi clip quanh người nói cho dự đoán \emph{neutral}, còn \model{} xây dựng quanh người nghe dự đoán đúng phản ứng \emph{happy} của B}
+\label{fig:motivation}
+\end{figure}
+
+\section{Tổng quan kiến trúc}
+
+Hình~\ref{fig:arch} cho thấy cấu trúc của \model{}, gồm bốn bước:
+
+\begin{enumerate}
+	\item \textbf{Trích xuất đặc trưng.} Khuôn mặt được phát hiện và mô tả bằng ArcFace và HSEmotion; khung hình và phụ đề bằng CLIP; âm thanh bằng AudioCLIP và ECAPA.
+	\item \textbf{Gán vai trò.} Mỗi khuôn mặt được gán một trong ba vai trò: người nói A của clip III, người nghe L làm đại diện cho người phản hồi, và những người còn lại O (Mục~\ref{sec:roles}).
+	\item \textbf{Xây dựng tập bằng chứng.} Mỗi cặp (vai trò, clip) được tóm tắt thành một token khuôn mặt; mỗi clip có thêm một token lời nói và một token bối cảnh, tổng cộng 15 token (Mục~\ref{sec:tokens}).
+	\item \textbf{Mã hóa tập hợp và dự đoán.} Một bộ mã hóa tập hợp nhỏ đọc cả 15 token cùng lúc, và một token truy vấn gộp chúng thành dự đoán (Mục~\ref{sec:encoder}).
+\end{enumerate}
+
+\begin{figure}[!htb]
+\centering
+\includegraphics[width=\linewidth]{architecture.pdf}
+\caption{Kiến trúc tổng thể của \model{}. Khuôn mặt của clip I--III được gom thành các danh tính; trong clip III, danh tính xuất hiện nhiều nhất là người nói A và danh tính nhiều thứ hai là người nghe L. Mỗi ô vai trò $\times$ clip trở thành một token khuôn mặt, mỗi clip thêm một token lời nói và một token bối cảnh. Token truy vấn gộp tập đã mã hóa thành dự đoán}
+\label{fig:arch}
+\end{figure}
+
+\section{Gán vai trò}
+\label{sec:roles}
+
+Phim truyền hình thường được dựng theo kiểu cảnh -- cảnh phản ứng: máy quay dừng lâu ở người đang nói, rồi cắt sang người đang nghe, thường cũng là người sẽ trả lời. \model{} dựa vào quy ước này để đoán người phản hồi mà không cần thông tin tương lai.
+
+Cụ thể, khuôn mặt được phát hiện trong các khung hình của clip I--III ở tốc độ 4 khung hình mỗi giây (tối đa 32 khung hình mỗi clip) và nhúng bằng ArcFace. Toàn bộ khuôn mặt của một MCIS được gom cụm phân cấp (liên kết trung bình, ngưỡng tương đồng cosine 0,45), sao cho mỗi cụm xấp xỉ một người xuyên suốt ba clip. Trong clip III, cụm có nhiều khung hình nhất được coi là người nói A, cụm nhiều thứ hai là người nghe L; mọi cụm khác là O. Nếu clip III chỉ có một người, mẫu đó không có người nghe. Như vậy mỗi khuôn mặt $f$ nhận một vai trò $r(f) \in \{A, L, O\}$.
+
+Quy tắc này không đọc clip IV, không dùng nhãn người nói hay chú thích danh tính, và không gắn tên cho ai. Các cụm chỉ có ý nghĩa bên trong một mẫu. Trong phân tích ban đầu trên 600 mẫu, người nghe được chọn trùng với người phản hồi thật trong 81,4\% trường hợp; với cách đối chiếu chặt hơn trên toàn bộ dữ liệu phát triển, tỉ lệ này là khoảng 68--73\% trong số các mẫu có người nghe. Mục~\ref{sec:proxy} sẽ cho thấy việc thay L bằng người phản hồi thật không cải thiện dự đoán.
+
+\section{Token bằng chứng}
+\label{sec:tokens}
+
+\subsection{Token khuôn mặt}
+
+Mỗi clip của Hi-EF chỉ dài khoảng hai giây, và người nghe thường chỉ xuất hiện trong một đến ba khung hình. Vì vậy \model{} tóm tắt mỗi người trong mỗi clip bằng \emph{một} token, giữ cho tập bằng chứng nhỏ, nhưng vẫn cho phép mô hình tập trung vào khung hình biểu cảm nhất.
+
+Gọi $F_{r,k}$ là tập khung hình (tối đa 24) chứa khuôn mặt có vai trò $r$ trong clip $k$. Mỗi khuôn mặt được mô tả bằng vector $\phi(f) \in \mathbb{R}^{146}$ gồm: 128 thành phần PCA của vector nhúng HSEmotion (PCA chỉ được khớp trên khuôn mặt của dữ liệu huấn luyện trong từng fold), 8 xác suất biểu cảm cùng valence và arousal, hướng đầu, vị trí và kích thước khuôn mặt, độ mở miệng, và thời điểm tương đối của khung hình trong clip. Các khung hình của một ô được gộp bằng chú ý:
+\begin{equation}
+\begin{split}
+u_f &= \mathrm{MLP}(\phi(f)),\\
+\alpha_f &= \operatorname{softmax}_{f \in F_{r,k}}\big(w^\top u_f\big),\\
+x_{r,k} &= \textstyle\sum_{f} \alpha_f u_f + e^{\text{role}}_r + e^{\text{clip}}_k ,
+\end{split}
+\label{eq:pool}
+\end{equation}
+trong đó $e^{\text{role}}_r$ và $e^{\text{clip}}_k$ là các vector nhúng học được của vai trò và của clip. Trọng số $\alpha_f$ cho phép mô hình chọn khung hình mang nhiều thông tin nhất thay vì lấy trung bình đều. Nếu một ô không có khuôn mặt nào, ví dụ người nghe không xuất hiện trong clip I, token được thay bằng một vector giữ chỗ học được $a_{r,k}$. Kết quả là chín token khuôn mặt $x_{r,k} \in \mathbb{R}^d$ với $d = 128$ cho mỗi MCIS.
+
+\subsection{Token lời nói và token bối cảnh}
+
+Những gì được nói và bối cảnh của mỗi lượt bổ sung cho khuôn mặt. Với mỗi clip, \model{} tạo một token lời nói $s_k$ và một token bối cảnh $g_k$:
+\begin{align}
+s_k &= W_t\,t_k + (W_a\,a_k)\,\delta_k + W_v\,v_k + e^{\text{speech}} + e^{\text{clip}}_k, \label{eq:sk}\\
+g_k &= W_s\,[\bar c^{\,\text{frame}}_k;\,\bar c^{\,\text{face}}_k] + e^{\text{scene}} + e^{\text{clip}}_k, \label{eq:gk}
+\end{align}
+trong đó $t_k$ là vector CLIP của phụ đề, $a_k$ là vector sự kiện âm thanh AudioCLIP nhân với cờ $\delta_k$ cho biết có âm thanh hay không, và $\bar c$ là trung bình vector CLIP của toàn khung hình và của mọi khuôn mặt. Vector mô tả lượt $v_k$ (9 chiều) gồm độ đồng bộ giữa cử động miệng và năng lượng âm thanh của từng vai trò, độ tương đồng giọng nói ECAPA so với clip III, và số danh tính. Vector này giúp mô hình biết ai có khả năng đang nói ở clip I và II mà không cần gọi tên ai.
+
+Cùng nhau, các token khuôn mặt, lời nói và bối cảnh tạo thành tập bằng chứng
+\begin{equation}
+\mathcal{S} = \{x_{r,k}\}_{r \in \{A,L,O\},\,k=1..3} \cup \{s_k\}_{k=1..3} \cup \{g_k\}_{k=1..3}
+\end{equation}
+gồm 15 token có kiểu.
+
+\section{Mã hóa tập hợp và đầu ra}
+\label{sec:encoder}
+
+Tập bằng chứng được đọc đồng thời, để mô hình có thể kết hợp, chẳng hạn, nét mặt của người nghe ở clip II với những gì A nói ở clip III. Một token truy vấn học được $q$ được thêm vào đầu, rồi qua hai khối SAB dạng pre-norm, tức các lớp Transformer không có mã hóa vị trí:
+\begin{align}
+H^{(0)} &= [q;\,\mathcal{S}], \nonumber\\
+Z &= H^{(\ell-1)} + \mathrm{MHA}\big(\mathrm{LN}(H^{(\ell-1)})\big), \nonumber\\
+H^{(\ell)} &= Z + \mathrm{FFN}(\mathrm{LN}(Z)),\quad \ell = 1, 2, \\
+p(y_B \mid \mathcal{S}) &= \operatorname{softmax}\big(W\,\mathrm{LN}(h^{(2)}_q)\big),
+\end{align}
+với 4 đầu chú ý, FFN 512 chiều và dropout 0,2. Dự đoán được đọc tại vị trí của truy vấn; vì $q$ tham gia tự chú ý, nó đóng vai trò hạt giống gộp như PMA của Set Transformer. Bộ mã hóa đồng biến với hoán vị của các token, và thứ tự các clip chỉ đi vào qua $e^{\text{clip}}$. Tự chú ý cho phép tương tác cặp giữa mọi token ở mỗi lớp. Mục~\ref{sec:structure} cho thấy có thể bỏ thứ tự clip mà không giảm đáng kể kết quả, và mô hình sau huấn luyện thực sự dùng các tương tác này.
+
+\section{Hàm mất mát và huấn luyện}
+
+Bên cạnh hàm mất mát entropy chéo $\mathcal{L}_B$ trên $y_B$, ba đầu dự đoán phụ được dùng khi huấn luyện: dự đoán $y_B$ từ trung bình các token khuôn mặt ($\mathcal{L}_{\text{face}}$), dự đoán $y_B$ từ trung bình các token lời nói và bối cảnh ($\mathcal{L}_{\text{ctx}}$), và dự đoán cảm xúc của A trong clip III từ token khuôn mặt của A ở clip III ($\mathcal{L}_{A}$). Hàm mất mát tổng là
+\begin{equation}
+\mathcal{L} = \mathcal{L}_B + \lambda\,(\mathcal{L}_{\text{face}} + \mathcal{L}_{\text{ctx}} + \mathcal{L}_{A}), \qquad \lambda = 0{,}3 .
+\end{equation}
+Các đầu phụ buộc từng nhóm token tự mang thông tin hữu ích, tránh việc một luồng dữ liệu lấn át các luồng khác. Cũng với mục đích đó, kỹ thuật bỏ ngẫu nhiên phương thức (modality dropout) \cite{neverova2016moddrop} loại toàn bộ token lời nói và bối cảnh với xác suất 0,3, hoặc nếu không thì loại toàn bộ token khuôn mặt với xác suất 0,15, nên mô hình được huấn luyện trên các tập con ngẫu nhiên của $\mathcal{S}$.
+
+Mô hình được tối ưu bằng AdamW (tốc độ học $3\cdot10^{-4}$, weight decay $10^{-2}$, batch 64, tối đa 80 epoch). Checkpoint được chọn theo UAR trên năm tập phim giữ lại từ phần huấn luyện (dừng sớm sau 12 epoch không cải thiện). Dự đoán cuối cùng là trung bình xác suất của nhiều seed. Thuật toán~\ref{alg:rolenet} tóm tắt bước suy luận cho một MCIS.
+
+\begin{algorithm}[!htb]
+\caption{Bước suy luận của \model{} cho một MCIS}
+\label{alg:rolenet}
+\begin{algorithmic}[1]
+\Require khung hình, phụ đề và âm thanh của clip I--III
+\State Phát hiện khuôn mặt ở 4 khung hình/giây; nhúng bằng ArcFace; gom cụm mọi khuôn mặt thành danh tính
+\State $A \gets$ danh tính nhiều khung hình nhất trong clip III; $L \gets$ danh tính nhiều thứ hai (hoặc không có); còn lại $\to O$
+\For{$r \in \{A, L, O\}$, $k \in \{1,2,3\}$}
+  \State $x_{r,k} \gets \textsc{AttnPool}(F_{r,k})$, hoặc $a_{r,k}$ nếu $F_{r,k} = \emptyset$
+  \State $x_{r,k} \gets x_{r,k} + e^{\text{role}}_r + e^{\text{clip}}_k$
+\EndFor
+\For{$k \in \{1,2,3\}$} \State tạo $s_k$ và $g_k$ theo (\ref{eq:sk})--(\ref{eq:gk}) \EndFor
+\State $H \gets [q;\, \{x_{r,k}\};\, s_{1:3};\, g_{1:3}]$ \Comment{16 token}
+\For{$\ell = 1, 2$} \State $H \gets \mathrm{SAB}(H)$ \EndFor
+\State \Return $\operatorname{softmax}(W\,\mathrm{LN}(H_q))$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Độ phức tạp tính toán}
+
+Với một tập $n$ token có chiều $d$, mỗi khối SAB tốn $O(n^2 d + n d^2)$. \model{} luôn gộp đúng $n = 16$ token ở $d = 128$, nên chi phí bộ mã hóa là hằng số cho mỗi MCIS; phép gộp chú ý trên khuôn mặt tuyến tính theo số khung hình. Bảng~\ref{tab:complexity} so sánh với mô hình gốc: \model{} có ít hơn khoảng 40 lần số tham số và 40--75 lần số phép tính của phần hợp nhất. Đổi lại, \model{} cần bước tiền xử lý phong phú hơn (phát hiện khuôn mặt, ArcFace, HSEmotion, ECAPA), nhưng bước này chỉ chạy một lần cho mỗi clip và được dùng chung cho mọi MCIS chứa clip đó.
+
+\begin{table}[!htb]
+\centering
+\caption{Chi phí của phần hợp nhất trên đặc trưng đã tính sẵn (đếm FLOP bằng PyTorch; khoảng FLOP của \model{} phụ thuộc số khung hình có khuôn mặt)}
+\label{tab:complexity}
+\begin{tabular}{lcc}
+\toprule
+ & Mô hình gốc & \model{} \\
+\midrule
+Đơn vị hợp nhất & khung hình, rồi clip & người $\times$ lượt \\
+Số token được hợp nhất & 96 khung hình, 3 clip & 16 \\
+Chiều ẩn $d$ & 512 & 128 \\
+Số tham số & 27,7 triệu & 0,71 triệu \\
+FLOP hợp nhất mỗi MCIS & $\approx$1,3 G & 17--29 M \\
+\bottomrule
+\end{tabular}
+\end{table}

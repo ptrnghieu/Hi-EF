@@ -1,0 +1,117 @@
+\clearpage
+\phantomsection
+\chapter[CÁC HƯỚNG ĐÃ THỬ NHƯNG KHÔNG THÀNH CÔNG]{Các hướng đã thử nhưng không thành công}
+\label{chap:negative}
+
+Bên cạnh \model{}, trong quá trình thực tập nhiều hướng cải tiến khác đã được đề xuất và kiểm tra. Phần lớn không mang lại cải thiện. Chương này ghi lại các hướng đó vì hai lý do: chúng giúp khoanh vùng chỗ thực sự là nút thắt của bài toán, và một kết quả âm được kiểm tra cẩn thận cũng là thông tin có giá trị cho người nghiên cứu sau. Mỗi hướng được trình bày theo cùng một khuôn: giả thuyết, cách kiểm tra, kết quả và lý do dừng. Tất cả các thực nghiệm dưới đây dùng dữ liệu phát triển, trừ khi ghi rõ. Bảng~\ref{tab:negative} tóm tắt các hướng chính.
+
+\begin{table}[!htb]
+\centering
+\caption{Tóm tắt các hướng đã thử nhưng không thành công}
+\label{tab:negative}
+{\fontsize{11}{13}\selectfont
+\begin{tabular}{>{\raggedright}p{4.2cm}>{\raggedright}p{2.2cm}>{\raggedright\arraybackslash}p{8.2cm}}
+\toprule
+Hướng & Thực nghiệm & Kết quả chính \\
+\midrule
+Nhận diện rồi chuyển trạng thái & G1--G5 & Ngang mô hình dự đoán trực tiếp trên tập kiểm định \\
+Gắn vai trò người nói cho lời thoại & G9 & +0,11, không ý nghĩa; con trỏ hoàn hảo cũng không giúp \\
+Động lực học cảm xúc liên tục & G15--G17 & Không thấy cảm xúc phai dần theo thời gian \\
+Thay đổi cách gộp và cấu trúc & G12, G28--G33 & Không cải thiện đo được \\
+Đánh giá tình huống bằng mô hình ngôn ngữ & G24 & Không giúp dự đoán hướng phản ứng \\
+Cân bằng lớp khi huấn luyện & G36, G38 & Chỉ dịch chuyển độ nhạy giữa các lớp \\
+Đặc trưng cảm xúc chuyên biệt & G45 & Nhận diện tăng ít, dự đoán không đổi \\
+Dùng cảm xúc trước của B & Mô phỏng & Chỉ có lợi khi nhận diện gần hoàn hảo \\
+Học từ khuôn mặt tương lai & G46a & \choketqua{G46a} \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\section{Nhận diện rồi chuyển trạng thái}
+
+\textbf{Giả thuyết.} Nếu biết cảm xúc thật của A ở clip III, một mô hình đơn giản đã đạt khoảng 28 UAR, cao hơn các mô hình lúc đó. Vì vậy có thể tách bài toán thành hai bước: nhận diện cảm xúc của các lượt trước, rồi dự đoán cảm xúc của B từ "quỹ đạo" cảm xúc đó.
+
+\textbf{Kiểm tra.} Một bộ nhận diện cảm xúc cho từng clip được huấn luyện chéo trên các tập phim huấn luyện; xác suất cảm xúc, cực tính, độ tin cậy và entropy của từng clip I--III tạo thành quỹ đạo làm đầu vào cho bộ dự đoán. Bộ nhận diện dùng đặc trưng CLIP và AudioCLIP chỉ đạt khoảng 23 UAR khi nhận diện cảm xúc của A.
+
+\textbf{Kết quả.} Khi chọn mô hình trên tập kiểm định theo đúng quy trình báo cáo, bộ dự đoán dùng quỹ đạo ngang bằng một mô hình dự đoán trực tiếp từ đặc trưng clip (26,23 so với 25,77 UAR trung bình theo seed; khác biệt của ensemble $-0{,}62$, khoảng tin cậy [$-2{,}98$; $+2{,}52$]).
+
+\textbf{Lý do dừng.} Bước nhận diện quá yếu, nên lợi ích của việc biết cảm xúc trước đó không truyền được sang bước dự đoán. Bài học này lặp lại ở nhiều hướng khác bên dưới.
+
+\section{Gắn vai trò người nói cho lời thoại}
+
+\textbf{Giả thuyết.} Lượt nói trước của chính B dự đoán cảm xúc tiếp theo của B tốt nhất: nhãn ở clip II trùng với nhãn của B trong 50,6\% trường hợp nếu B là người nói clip II, so với khoảng 35\% nếu đó là A. Vì vậy gắn cho mỗi câu thoại ở clip I/II một trọng số "do A nói / do B nói / do người khác nói", và thêm một token cho lượt nói trước của B, có thể giúp mô hình.
+
+\textbf{Kiểm tra.} Phiên bản \model{}+ (G9) dùng một con trỏ dự đoán câu nào do B nói từ các tín hiệu trong clip I--III (AUC 0,82). Nhãn huấn luyện của con trỏ lấy từ giọng nói ở clip IV, chỉ khi huấn luyện. Một phiên bản oracle dùng con trỏ hoàn hảo để đo mức trần.
+
+\textbf{Kết quả.} \model{}+ chỉ hơn \model{} 0,11 điểm UAR (khoảng tin cậy [$-2{,}23$; $+2{,}03$]), dương ở 2/5 fold. Con trỏ hoàn hảo cũng không giúp ($-0{,}64$).
+
+\textbf{Lý do dừng.} Ngay cả khi biết chính xác B đã nói câu nào, mô hình vẫn phải tự nhận diện cảm xúc của câu đó từ đặc trưng, và đó mới là khâu yếu.
+
+\section{Động lực học cảm xúc liên tục}
+
+\textbf{Giả thuyết.} Trạng thái cảm xúc của B có thể được mô hình hóa như một quá trình liên tục theo thời gian, ví dụ quá trình Ornstein--Uhlenbeck: trạng thái phai dần về mức nền và bị kéo về phía cảm xúc của người đối diện. Nếu đúng, các quan sát gần lượt nói cần dự đoán sẽ mang nhiều thông tin hơn, và mức độ phụ thuộc vào khoảng thời gian trôi qua.
+
+\textbf{Kiểm tra.} Một chuỗi phép kiểm tra (G15--G17) so sánh lượng thông tin (tính bằng bit) về nhãn của B mà khuôn mặt của B mang lại khi được quan sát gần (clip III) và xa (clip I/II), trong khi giữ cố định loại quan sát (đang nghe hay đang nói) và số khung hình.
+
+\textbf{Kết quả.} Quan sát gần mang nhiều thông tin hơn quan sát xa khoảng bốn lần (+0,079 bit, có ý nghĩa). Nhưng khi giữ cố định loại quan sát, khuôn mặt ở clip II không mang nhiều thông tin hơn ở clip I ($-0{,}017$ bit, khoảng tin cậy [$-0{,}115$; $+0{,}078$]), và quan sát lúc nghe không hơn lúc nói. Phần lợi thế của quan sát gần chủ yếu đến từ việc các quan sát xa thường là lúc B đang nói, chứ không phải từ thời gian trôi qua. Đóng góp của người nghe cũng không phụ thuộc vào khoảng cách thời gian đến clip IV (hệ số tương quan Spearman +0,005).
+
+\textbf{Lý do dừng.} Ở thang thời gian của Hi-EF (vài giây mỗi clip), dữ liệu không ủng hộ mô hình suy giảm liên tục; trạng thái thay đổi theo từng bước, theo lượt nói.
+
+\section{Thay đổi cách gộp và cấu trúc của mô hình}
+
+Một nhóm thử nghiệm giữ nguyên bằng chứng nhưng thay đổi cách mô hình xử lý nó.
+\begin{itemize}
+	\item \textbf{Đường xử lý riêng cho từng vai trò} (G12): kém hơn \model{} 2,14 điểm; thêm tương tác chỉ lấy lại một phần (Bảng~\ref{tab:ablation}).
+	\item \textbf{Huấn luyện với người nghe bị che ngẫu nhiên} (G28), để mô hình quen với việc thiếu người nghe: không cải thiện có ý nghĩa ($\Delta$NLL +0,0037, khoảng tin cậy [$-0{,}0066$; $+0{,}0153$]).
+	\item \textbf{Gộp khung hình có điều kiện theo ngữ cảnh} (G29), để ngữ cảnh chọn khung hình khuôn mặt nào được chú ý: không phân biệt được với cách gộp hiện tại.
+	\item \textbf{Hỗn hợp "lặp lại A / phần còn lại"} (G31): một phiên bản tuyến tính còn kém hơn một chút so với cộng logit thông thường, và cổng hỗn hợp thu về gần 0.
+	\item \textbf{Thứ tự clip và độ lệch chú ý theo quan hệ} (G33): không cải thiện (Bảng~\ref{tab:structure}).
+\end{itemize}
+Các kết quả này cùng chỉ ra rằng, với cùng một bộ bằng chứng, cách kết hợp hiện tại đã khai thác gần hết thông tin; các cấu trúc tường minh không bổ sung được gì đo được.
+
+\section{Đánh giá tình huống bằng mô hình ngôn ngữ}
+
+\textbf{Giả thuyết.} Theo lý thuyết đánh giá (appraisal), phản ứng cảm xúc phụ thuộc vào cách một người đánh giá tình huống. Một mô hình ngôn ngữ lớn đọc phụ đề của clip I--III có thể ước lượng các chiều đánh giá này và giúp dự đoán hướng phản ứng tiêu cực của B.
+
+\textbf{Kết quả} (G24). Thêm các đánh giá do mô hình ngôn ngữ sinh ra không cải thiện việc phân biệt hướng phản ứng (+0,002, khoảng tin cậy [$-0{,}005$; $+0{,}010$]). Các đánh giá gần như suy biến: chúng chỉ nắm được chiều tích cực -- tiêu cực, không phân biệt được các cảm xúc tiêu cực ngay cả của chính A trong văn bản.
+
+\section{Cân bằng lớp khi huấn luyện}
+
+\textbf{Giả thuyết.} \model{} gần như không bao giờ dự đoán đúng các lớp hiếm (\emph{fear}, \emph{surprise}, \emph{disgust}). Lấy mẫu lại theo tần suất lớp khi huấn luyện có thể cải thiện các lớp này.
+
+\textbf{Kết quả} (G36, G38). Lấy mẫu theo căn bậc hai nghịch đảo tần suất tăng UAR trên dữ liệu phát triển từ 26,10 lên 26,95 (+0,86, không ý nghĩa). Theo quy tắc cố định trước, biến thể này được đọc trên tập kiểm tra một lần thứ hai (được ghi rõ là một lần truy cập bổ sung): UAR 25,64 so với 25,24 của \model{} (+0,40, không ý nghĩa), với \emph{disgust} tăng từ 2,5\% lên 22,5\% nhưng \emph{angry} giảm từ 48,1\% xuống 20,8\%, và \emph{fear} vẫn bằng 0. Các mức lấy mẫu nhẹ hơn (G38) không có mức nào đáp ứng quy tắc "không làm lớp nào giảm quá 5 điểm".
+
+\textbf{Lý do dừng.} Lấy mẫu lại chỉ phân phối lại độ nhạy giữa \emph{angry} và các lớp hiếm trong khi UAR gần như không đổi. Mô hình cuối cùng vẫn là \model{} đã đăng ký trước.
+
+\section{Đặc trưng cảm xúc chuyên biệt}
+
+\textbf{Giả thuyết.} Token lời nói của \model{} dùng CLIP, AudioCLIP và ECAPA, không mô hình nào chuyên về cảm xúc. Các mô hình cảm xúc có sẵn có thể giúp nhận diện trạng thái của người tham gia tốt hơn.
+
+\textbf{Kiểm tra} (G45). Hai mô hình cố định, không huấn luyện trên MELD, được thêm vào: mô hình cảm xúc giọng nói wav2vec2 của \citet{wagner2023dawn} (huấn luyện trên MSP-Podcast) và mô hình văn bản RoBERTa huấn luyện trên GoEmotions \cite{demszky2020goemotions}. Hai bộ phân loại tuyến tính so sánh đặc trưng hiện có với đặc trưng hiện có cộng đặc trưng cảm xúc, cho việc nhận diện cảm xúc của từng clip và cho việc dự đoán. Quy tắc cố định trước: nhận diện lượt nói trước của B phải tăng ít nhất 5 điểm UAR với cận dưới dương.
+
+\textbf{Kết quả.} Nhận diện tăng khoảng 1,5--2 điểm, chỉ có ý nghĩa ở clip III (+2,07). Trên lượt nói trước của B, UAR tăng từ 27,19 lên 29,67 (+2,47, khoảng tin cậy [$-1{,}27$; $+5{,}58$]), không đạt ngưỡng. Dự đoán tuyến tính gần như không đổi (18,86 so với 18,92). Theo quy tắc, hướng này dừng lại.
+
+\section{Dùng cảm xúc trước của người phản hồi}
+
+\textbf{Giả thuyết.} Vì sao chép cảm xúc trước của B đạt 39,18 UAR (Bảng~\ref{tab:copy}), có thể thêm một "đường tắt" đưa cảm xúc đã nhận diện của B vào bước dự đoán.
+
+\textbf{Kiểm tra.} Một mô phỏng trên 654 MCIS biết cảm xúc trước của B thêm cảm xúc đó, với các mức độ chính xác nhận diện khác nhau, vào đầu ra của \model{}.
+
+\textbf{Kết quả.} Khi cảm xúc trước của B được biết chính xác, UAR trên nhóm này tăng 8,15 điểm (khoảng 2,2 điểm trên toàn bộ dữ liệu). Nhưng khi độ chính xác nhận diện là 60\%, mức tăng còn $-0{,}12$; ở 31\%, xấp xỉ khả năng hiện tại của bộ nhận diện, kết quả còn kém đi 2,46 điểm. Đường tắt này chỉ có ích nếu việc nhận diện trạng thái trước đó của B tốt hơn rất nhiều so với hiện nay, và còn đòi hỏi biết lượt nói nào là của B, điều bản thân nó cũng không chắc chắn khi suy luận.
+
+\section{Học từ khuôn mặt tương lai khi huấn luyện}
+
+\textbf{Giả thuyết.} Mỗi MCIS chỉ có một nhãn bảy lớp, trong khi khuôn mặt của B ở clip IV, chính khoảnh khắc mà nhãn mô tả, chứa nhiều thông tin hơn. Dùng khuôn mặt này làm \emph{mục tiêu phụ chỉ khi huấn luyện} (học với thông tin đặc quyền) có thể giúp mô hình học biểu diễn tốt hơn mà không vi phạm ràng buộc không dùng clip IV khi suy luận.
+
+\textbf{Kiểm tra} (G46a). Một phép kiểm tra tuyến tính dự đoán vector biểu cảm khuôn mặt của B ở clip IV từ clip I--III bằng hồi quy ridge, rồi thêm dự đoán đó vào bộ phân loại. Đối chứng là cùng quy trình nhưng mục tiêu bị xáo trộn giữa các mẫu. Quy tắc: mục tiêu phải mang thông tin về nhãn (kiểm tra bằng oracle), và dự đoán của nó phải tốt hơn cả đặc trưng hiện có lẫn đối chứng xáo trộn.
+
+\choketqua{G46a -- R² của hồi quy, UAR của các biến thể và kết luận theo quy tắc}
+
+\section{Bài học rút ra}
+
+\begin{itemize}
+	\item \textbf{Bằng chứng quan trọng hơn cấu trúc.} Những gì tạo ra khác biệt là việc có đúng nguồn thông tin trong đầu vào: khuôn mặt của người nghe và ngữ cảnh của các lượt trước. Các thay đổi về cấu trúc mô hình, cách gộp hay cách đọc kết quả đều không mang lại cải thiện đo được.
+	\item \textbf{Nút thắt là nhận diện trạng thái.} Nhiều hướng thất bại vì cùng một lý do: thông tin về cảm xúc trước đó của người tham gia rất có giá trị khi biết chính xác, nhưng các bộ trích xuất hiện có không nhận diện được nó đủ tốt.
+	\item \textbf{Quy tắc cố định trước giúp tránh tự đánh lừa.} Mỗi thực nghiệm đều có quy tắc đọc kết quả được viết trước khi chạy, và các khác biệt nhỏ được kiểm tra lại với nhiều seed hơn. Nhờ vậy những cải thiện "trông có vẻ" tốt nhưng nằm trong mức nhiễu không bị đưa vào mô hình cuối.
+	\item \textbf{Tập kiểm tra là tài nguyên có hạn.} Mỗi lần đọc tập kiểm tra đều được ghi lại; kết quả của lần đọc thứ hai được báo cáo kèm điều kiện đó.
+\end{itemize}

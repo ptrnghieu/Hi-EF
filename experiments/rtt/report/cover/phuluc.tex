@@ -1,0 +1,84 @@
+\chapter{Phụ lục}
+
+\section{Siêu tham số}
+\label{app:hparams}
+
+\begin{table}[!htb]
+\centering
+\caption{Siêu tham số của \model{} và mô hình gốc (cố định trước khi chạy trên tập kiểm tra, không điều chỉnh theo tập kiểm tra)}
+\label{tab:hparams}
+{\fontsize{12}{14}\selectfont
+\begin{tabular}{>{\raggedright}p{4.5cm}>{\raggedright\arraybackslash}p{10cm}}
+\toprule
+Lấy mẫu khuôn mặt & 4 khung hình/giây, tối đa 32 khung hình mỗi clip, tối đa 24 khung hình mỗi ô vai trò \\
+Gom cụm danh tính & ArcFace, liên kết trung bình, ngưỡng cosine 0,45 \\
+Đặc trưng khung hình & PCA 128 chiều của HSEmotion (khớp theo fold) + 18 đặc trưng hình học/biểu cảm \\
+Giọng nói & ECAPA, cùng người nói nếu cosine $\ge$ 0,35 \\
+Bộ mã hóa & 2 khối SAB pre-norm, $d = 128$, 4 đầu, FFN 512, dropout 0,2 \\
+Đầu ra & LN, dropout 0,3, tuyến tính \\
+Trọng số mất mát phụ & 0,3 (khuôn mặt, ngữ cảnh, A) \\
+Modality dropout & ngữ cảnh 0,3, nếu không thì khuôn mặt 0,15 \\
+Tối ưu & AdamW, tốc độ học $3\cdot10^{-4}$, weight decay $10^{-2}$, batch 64 \\
+Lịch huấn luyện & tối đa 80 epoch, dừng sau 12 epoch không cải thiện UAR trên dữ liệu giữ lại \\
+Số seed & 5 hoặc 10 (kiểm định chéo), 5 (tập kiểm tra) \\
+Mô hình gốc & AdamW, tốc độ học $10^{-4}$, weight decay $10^{-5}$, batch 32, 50 epoch \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\section{Các lần truy cập tập kiểm tra}
+\label{app:access}
+
+\begin{table}[!htb]
+\centering
+\caption{Mọi lần truy cập tập kiểm tra. \model{} được thiết kế sau lần truy cập 1, chỉ dựa trên dữ liệu phát triển; không siêu tham số nào của \model{} được chọn sau một lần truy cập tập kiểm tra}
+\label{tab:access}
+{\fontsize{12}{14}\selectfont
+\begin{tabular}{>{\raggedright}p{1.4cm}>{\raggedright}p{7cm}>{\raggedright\arraybackslash}p{6cm}}
+\toprule
+Lần & Mô hình & Tình trạng \\
+\midrule
+1 & Các mô hình nhận diện rồi chuyển trạng thái và dự đoán theo quỹ đạo (họ mô hình trước đó) & Một lần chạy đăng ký trước; không hợp lệ cho các nhánh quỹ đạo do lỗi bộ nhớ đệm \\
+2, 3 & Cùng họ mô hình: chạy lại sau khi sửa lỗi; kiểm định chéo trên cả 53 tập phim & Đã lên kế hoạch; chưa xác minh được việc thực thi \\
+4 & \model{}, mô hình gốc và các biến thể nội bộ (Bảng~\ref{tab:main}) & Một lần chạy đăng ký trước \\
+5 & Biến thể cân bằng lớp của \model{} & Một lần đọc sau lần 4 (Chương 5) \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\section{Danh sách các thực nghiệm}
+
+Mỗi thực nghiệm là một notebook trong thư mục \texttt{experiments/rtt} của kho mã nguồn, có quy tắc đọc kết quả được viết trong phần đầu notebook trước khi chạy. Bảng~\ref{tab:notebooks} liệt kê các thực nghiệm được nhắc đến trong báo cáo.
+
+{\fontsize{12}{14}\selectfont
+\begin{longtable}{>{\raggedright}p{2cm}>{\raggedright\arraybackslash}p{12.5cm}}
+\caption{Các thực nghiệm được nhắc đến trong báo cáo}\label{tab:notebooks}\\
+\toprule
+Mã & Nội dung \\
+\midrule
+\endfirsthead
+\toprule
+Mã & Nội dung \\
+\midrule
+\endhead
+G1--G5 & Nhận diện cảm xúc từng clip, dự đoán theo quỹ đạo, lần chạy kiểm tra đầu tiên \\
+G6a--G6c & Thống kê người tham gia; thử nghiệm không huấn luyện với khuôn mặt người nghe \\
+G8a, G8b & Trích xuất đặc trưng khuôn mặt và giọng nói; xây dựng và đánh giá \model{} bằng kiểm định chéo \\
+G9 & Gắn vai trò người nói cho lời thoại (\model{}+) \\
+G10 & Lần chạy kiểm tra duy nhất đã đăng ký trước \\
+G11--G14 & Loại bỏ thành phần, đường xử lý riêng theo vai trò, xác nhận với 10 seed \\
+G15--G17 & Động lực học cảm xúc theo thời gian \\
+G24 & Đánh giá tình huống bằng mô hình ngôn ngữ \\
+G26 & Người nghe đại diện so với người phản hồi thật \\
+G28--G35 & Các biến thể cấu trúc, cách gộp, thứ tự clip, EMAP \\
+G36, G38 & Cân bằng lớp khi huấn luyện \\
+G40, G44 & Cắt phần cuối của clip III (người nghe đại diện và người phản hồi thật) \\
+G41 & Mô hình gốc dùng đặc trưng của \model{} \\
+G43 & Token người nghe ở clip I/II và ở clip III \\
+G45 & Đặc trưng cảm xúc chuyên biệt \\
+G46a & Khuôn mặt tương lai làm mục tiêu khi huấn luyện \\
+G47 & Kiểm soát vai trò của việc tổ chức theo người \\
+G48 & Phân nhóm người nghe đại diện -- người phản hồi thật \\
+M1--M3 & Chuẩn bị dữ liệu và đánh giá trên MELD \\
+\bottomrule
+\end{longtable}}

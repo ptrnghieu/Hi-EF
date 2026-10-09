@@ -14426,9 +14426,14 @@ def video_path(clip):
     return None
 
 
+N_CROP_OK = N_CROP_TRY = 0
+
+
 def crop(clip, face, pad=0.35):
+    global N_CROP_OK, N_CROP_TRY
     if clip is None or face is None:                 # no such person (e.g. no proxy L) -> grey placeholder
         return np.full((96, 96, 3), 230, np.uint8)
+    N_CROP_TRY += 1
     p = video_path(clip)
     if p is None:
         return np.full((96, 96, 3), 230, np.uint8)
@@ -14438,11 +14443,18 @@ def crop(clip, face, pad=0.35):
     cap.release()
     if not ok:
         return np.full((96, 96, 3), 230, np.uint8)
-    x1, y1, x2, y2 = [int(v) for v in face['box']]
+    H, W = fr.shape[:2]
+    b = np.asarray(face['box'], np.float32)
+    if b.max() <= 1.5:                               # G8a stores boxes normalised to [0, 1] (as G37 uses them)
+        b = b * np.array([W, H, W, H], np.float32)
+    x1, y1, x2, y2 = [int(v) for v in b]
     w, h = x2 - x1, y2 - y1
     x1, y1 = max(0, int(x1 - pad * w)), max(0, int(y1 - pad * h))
     x2, y2 = min(fr.shape[1], int(x2 + pad * w)), min(fr.shape[0], int(y2 + pad * h))
-    return cv2.cvtColor(fr[y1:y2, x1:x2], cv2.COLOR_BGR2RGB) if x2 > x1 and y2 > y1 else np.full((96, 96, 3), 230, np.uint8)
+    if x2 <= x1 or y2 <= y1:
+        return np.full((96, 96, 3), 230, np.uint8)
+    N_CROP_OK += 1
+    return cv2.cvtColor(fr[y1:y2, x1:x2], cv2.COLOR_BGR2RGB)
 
 
 def biggest(faces):
@@ -14480,6 +14492,8 @@ for i, (grp, s) in enumerate(CHECK):
     SHEET.append({'idx': i, 'sample_id': s, 'group': grp, 'best_cos': r.best_cos, 'margin': r.margin,
                   'clip4_dominant_frac': r.clip4_dominant_frac, 'match_correct': '', 'proxy_correct': '', 'note': ''})
 pd.DataFrame(SHEET).to_csv(f"{OUT_DIR}/g48_manual_check.csv", index=False)
+print(f"face crops from video: {N_CROP_OK} ok / {N_CROP_TRY} attempted")
+assert not VIDEO_ROOTS or N_CROP_OK > 0.5 * N_CROP_TRY, "most face crops failed: check video paths / box format"
 print(f"saved {len(SHEET)} check images and g48_manual_check.csv in {OUT_DIR}")
 print("fill in match_correct (is the matched I-III face the same person as B in clip IV?) and proxy_correct "
       "(is the proxy L the same person as B?) with yes / no / unclear")

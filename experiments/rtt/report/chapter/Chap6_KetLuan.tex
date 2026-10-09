@@ -35,7 +35,7 @@ Qua quá trình thực tập, kết luận quan trọng nhất là giới hạn 
 
 \begin{itemize}
 	\item \textbf{Nhận diện trạng thái tốt hơn.} Huấn luyện hoặc tinh chỉnh bộ nhận diện cảm xúc cho từng người trong video nhiều người, thay vì dùng các mô hình cố định huấn luyện trên dữ liệu khác.
-	\item \textbf{Học với thông tin đặc quyền.} Dùng khuôn mặt của người phản hồi ở lượt cần dự đoán làm mục tiêu phụ khi huấn luyện (hướng G46a), nếu phép kiểm tra tuyến tính cho thấy tín hiệu.
+	\item \textbf{Học với thông tin đặc quyền theo cách phi tuyến.} Phép kiểm tra tuyến tính (G46a) cho thấy khuôn mặt tương lai chứa thông tin về nhãn nhưng phần dự đoán được từ ngữ cảnh không giúp; một bộ mã hóa được huấn luyện cùng mục tiêu này có thể học được biểu diễn khác, nhưng cần một lý do định lượng trước khi thử.
 	\item \textbf{Các lớp hiếm.} \emph{fear} và \emph{surprise} chủ yếu xuất hiện khi người phản hồi rời khỏi cảm xúc của người nói; cần thêm dữ liệu cho các phản ứng này hoặc cách đánh giá phù hợp hơn với lớp hiếm.
 	\item \textbf{Đánh giá tổng quát hơn.} Kiểm tra quy tắc chọn người nghe và \model{} trên dữ liệu không phải phim truyền hình, nơi không có kiểu dựng cảnh -- cảnh phản ứng.
 \end{itemize}

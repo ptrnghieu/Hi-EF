@@ -22,7 +22,7 @@ Thay đổi cách gộp và cấu trúc & G12, G28--G33 & Không cải thiện �
 Cân bằng lớp khi huấn luyện & G36, G38 & Chỉ dịch chuyển độ nhạy giữa các lớp \\
 Đặc trưng cảm xúc chuyên biệt & G45 & Nhận diện tăng ít, dự đoán không đổi \\
 Dùng cảm xúc trước của B & Mô phỏng & Chỉ có lợi khi nhận diện gần hoàn hảo \\
-Học từ khuôn mặt tương lai & G46a & \choketqua{G46a} \\
+Học từ khuôn mặt tương lai & G46a & Dự đoán được một phần khuôn mặt tương lai nhưng không giúp dự đoán cảm xúc \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -105,7 +105,9 @@ Các kết quả này cùng chỉ ra rằng, với cùng một bộ bằng chứ
 
 \textbf{Kiểm tra} (G46a). Một phép kiểm tra tuyến tính dự đoán vector biểu cảm khuôn mặt của B ở clip IV từ clip I--III bằng hồi quy ridge, rồi thêm dự đoán đó vào bộ phân loại. Đối chứng là cùng quy trình nhưng mục tiêu bị xáo trộn giữa các mẫu. Quy tắc: mục tiêu phải mang thông tin về nhãn (kiểm tra bằng oracle), và dự đoán của nó phải tốt hơn cả đặc trưng hiện có lẫn đối chứng xáo trộn.
 
-\choketqua{G46a -- R² của hồi quy, UAR của các biến thể và kết luận theo quy tắc}
+\textbf{Kết quả.} Khuôn mặt của B trong clip IV mang thông tin rõ ràng về nhãn: chỉ riêng nó đã nhận diện được cảm xúc với 30,68 UAR, và thêm nó (oracle) vào đặc trưng hiện có làm UAR tăng 3,79 điểm (khoảng tin cậy [+2,66; +4,97]), nên điều kiện hợp lệ được thỏa. Hồi quy từ clip I--III dự đoán được một phần khuôn mặt này ($R^2$ trên dữ liệu giữ lại khoảng 0,16--0,18, so với $-0{,}01$ khi mục tiêu bị xáo trộn). Tuy nhiên, thêm khuôn mặt dự đoán được vào bộ phân loại chỉ tăng 0,12 điểm (khoảng tin cậy [$-0{,}62$; $+0{,}86$]), và không hơn đối chứng xáo trộn (+0,28, [$-0{,}52$; $+1{,}20$]).
+
+\textbf{Lý do dừng.} Phần của khuôn mặt tương lai có thể suy ra từ clip I--III không mang thêm thông tin về cảm xúc so với những gì đặc trưng hiện có đã chứa. Theo quy tắc cố định trước, hướng này dừng ở bước kiểm tra tuyến tính và không được đưa vào \model{}.
 
 \section{Bài học rút ra}
 

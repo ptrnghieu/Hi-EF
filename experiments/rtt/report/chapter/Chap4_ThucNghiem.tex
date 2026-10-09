@@ -151,7 +151,29 @@ Bảng~\ref{tab:proxy} không cho thấy khác biệt đo được giữa ngư�
 
 Phép đối chiếu B với các danh tính của clip I--III có thể sai. Để kiểm tra, một phân tích bổ sung (G48) chia lại các MCIS phát triển thành bốn nhóm theo độ tin cậy: B trùng người nghe (990 MCIS), B có mặt nhưng khác người nghe (1.114), B không xuất hiện (225), và đối chiếu không chắc chắn (92). Trong nhóm "B có mặt nhưng khác người nghe", B chỉ xuất hiện trong clip III ở 19,3\% số mẫu; phần lớn còn lại B chỉ có mặt ở clip I--II, nơi quy tắc chọn người nghe (vốn chỉ xét clip III) không thể chọn được B. Nhóm đáng chú ý nhất để đánh giá giá trị của việc biết chính xác B là khoảng 215 MCIS mà B có mặt trong clip III nhưng quy tắc chọn người khác.
 
-\choketqua{G48 -- UAR của người nghe đại diện, oracle và phiên bản không có người nghe trên từng nhóm; kết quả kiểm tra thủ công 24 mẫu}
+\begin{table}[!htb]
+\centering
+\caption{UAR theo nhóm đối chiếu (dữ liệu phát triển). Đại diện: \model{}; oracle: người nghe là người phản hồi thật; không L: bỏ token người nghe. Cột cuối là mức tăng do token người nghe (đại diện so với không L), kèm khoảng tin cậy 95\%}
+\label{tab:g48}
+{\fontsize{12}{14}\selectfont
+\begin{tabular}{lrcccc}
+\toprule
+Nhóm & Số mẫu & Đại diện & Oracle & Không L & Đại diện -- không L \\
+\midrule
+Toàn bộ & 2.421 & 26,62 & 26,44 & 24,04 & +2,58 [+0,05; +3,75] \\
+B trùng người nghe & 990 & 25,93 & 26,09 & 20,74 & +5,18 [+1,30; +6,78] \\
+B có mặt, khác người nghe & 1.114 & 27,79 & 27,43 & 27,76 & +0,02 [$-2{,}61$; +2,68] \\
+\quad B có trong clip III & 215 & 29,27 & 29,59 & 30,94 & $-1{,}67$ [$-6{,}20$; +4,24] \\
+\quad B chỉ có ở clip I--II & 899 & 27,17 & 26,47 & 26,75 & +0,42 [$-2{,}76$; +3,49] \\
+B không xuất hiện & 225 & 23,80 & 21,92 & 19,52 & +4,28 [$-2{,}94$; +7,35] \\
+Đối chiếu không chắc chắn & 92 & 24,61 & 25,32 & 26,23 & -- \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Bảng~\ref{tab:g48} cho thấy token người nghe giúp rõ rệt khi người nghe chính là người phản hồi (+5,18 điểm, có ý nghĩa), nhưng gần như không giúp khi người nghe là người khác (+0,02). Trong khi đó, thay người nghe bằng người phản hồi thật không thay đổi UAR ở bất kỳ nhóm nào, kể cả 215 MCIS mà B có mặt trong clip III nhưng quy tắc chọn người khác (+0,31, khoảng tin cậy [$-6{,}31$; $+4{,}44$]); nhóm này nhỏ nên khoảng tin cậy rộng. Kết quả phù hợp với nhận xét ở Mục~\ref{sec:g47}: điều quan trọng là có được khuôn mặt của người phản hồi trong đầu vào, và quy tắc chọn người nghe đã làm được điều đó ở phần lớn các mẫu có thể làm được.
+
+\choketqua{kiểm tra thủ công 24 mẫu -- ảnh của lần chạy đầu bị trống do lỗi tọa độ khung mặt, đã sửa và cần chạy lại}
 
 \section{Nguồn gốc của phần cải thiện}
 

@@ -1192,5 +1192,28 @@ measurably matter on Hi-EF.
 ## G48 groups (development; analysis only; log `results/g48/g48_run.log`)
 
 B seen = proxy 990, B seen ≠ proxy 1,114 (B visible in clip III in 19.3% of them), B not seen 225, uncertain 92;
-G26/G44 rule matched 87.9%, proxy = rule's B 73.2% among MCIS with a proxy and a match. Per-group performance pending
-`g48_groups.csv` (`analysis/proxy_oracle_groups.py`).
+G26/G44 rule matched 87.9%, proxy = rule's B 73.2% among MCIS with a proxy and a match. Per group (`analysis/proxy_oracle_groups.py` → `results/g48/proxy_oracle_groups.csv`; proxy = G41 RoleNet, oracle
+= G44 100%, no listener = G43 L-none; two-level bootstrap):
+
+| Group | n | proxy | oracle | no L | oracle − proxy | proxy − no L |
+|---|---|---|---|---|---|---|
+| all | 2,421 | 26.62 | 26.44 | 24.04 | −0.18 [−1.69, +2.33] | +2.58 [+0.05, +3.75] |
+| B seen = proxy | 990 | 25.93 | 26.09 | 20.74 | +0.17 [−1.95, +3.41] | **+5.18 [+1.30, +6.78]** |
+| B seen ≠ proxy | 1,114 | 27.79 | 27.43 | 27.76 | −0.36 [−2.68, +2.23] | +0.02 [−2.61, +2.68] |
+| … B visible in clip III | 215 | 29.27 | 29.59 | 30.94 | +0.31 [−6.31, +4.44] | −1.67 [−6.20, +4.24] |
+| … B only in clips I–II | 899 | 27.17 | 26.47 | 26.75 | −0.70 [−2.94, +2.60] | +0.42 [−2.76, +3.49] |
+| B not seen | 225 | 23.80 | 21.92 | 19.52 | −1.88 [−5.57, +7.96] | +4.28 [−2.94, +7.35] |
+| uncertain | 92 | 24.61 | 25.32 | 26.23 | — | — |
+
+Reading: the listener tokens help where the proxy is the responder (+5.2) and not where it is someone else (≈ 0);
+giving the true responder instead does not change UAR in any group, including the 215 MCIS where B is visible in clip
+III but the proxy picked another person (small n, wide CI). The manual-check images of the first run were blank
+(G8a boxes are normalised to [0, 1]; fixed in the notebook, re-run needed for the sheet only).
+
+## G46a results: B's clip-IV face as a training-time target (linear gate; log `results/g46a/g46a_run.log`)
+
+Target found for 100% of MCIS. Ridge X → T: held-out R² 0.16–0.18 (shuffled target −0.01). UAR (LR, 5 folds):
+X 18.23, X+T̂ 18.35, X+T̂shuf 18.07, X+T (oracle) 22.02, T alone 30.68. Contrasts: oracle X+T − X **+3.79 [+2.66, +4.97]**
+(validity passed: the clip-IV face carries label information); main X+T̂ − X +0.12 [−0.62, +0.86]; X+T̂ − X+T̂shuf
++0.28 [−0.52, +1.20]. **Verdict (fixed rule): STOP** — the part of B's future face that is predictable from clips
+I–III adds nothing to the linear forecast. No G46.

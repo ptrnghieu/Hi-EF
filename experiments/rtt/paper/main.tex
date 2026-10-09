@@ -39,8 +39,9 @@ participant-by-turn evidence tokens read by a set encoder. On the locked Hi-EF t
 preregistered plan, \model{} improves unweighted average recall over a retrained version of the strongest published
 configuration by 3.84 points and wins seven of eight test episodes; the preregistered primary contrast under
 logit-adjusted scoring was not significant, which we attribute mainly to a test set with six examples of one class.
-Replacing our responder proxy by the true responder identity does not measurably change the forecast, whereas
-removing the listener's face or the preceding context each costs about two points on development data. Explicit temporal, relational or role structure in the encoder brings no measurable gain.
+Replacing our responder proxy by the true responder or by a random non-speaker, or removing the role labels, does
+not measurably change the forecast, whereas removing the listener's face or the preceding context each costs about
+two points on development data. Explicit temporal or relational structure in the encoder brings no measurable gain.
 Remaining errors concentrate on turns where the responder does not mirror the speaker's emotion.
 \end{abstract}
 
@@ -77,9 +78,9 @@ earlier expressions.
 We therefore build the forecaster around the responder, although the responder is unknown. Our contributions are
 as follows:
 \begin{itemize}[leftmargin=*,itemsep=1pt,topsep=2pt]
-\item We propose an identity-free responder proxy: within the current turn, the second most visible person after
-the speaker is taken as the listener, and all evidence is organised around this listener, the speaker and everyone
-else. No future information, speaker label or identity annotation is used.
+\item We propose a simple identity-free responder proxy: within the current turn, the second most visible person
+after the speaker is taken as the listener, and the evidence is organised around this listener, the speaker and
+everyone else. No future information, speaker label or identity annotation is used.
 \item We represent the preceding clips as a participant-centric evidence set, in which each participant in each turn
 contributes one token built from their face frames, alongside one speech and one scene token per turn. A small set
 encoder reads the tokens jointly and a query token pools them into a forecast. We call the model \model{}; it has
@@ -89,8 +90,9 @@ test split was read once under a preregistered plan. \model{} improves unweighte
 strongest configuration of \citet{wang2026hief}, retrained on the same split, by 3.84 points and wins seven of eight
 test episodes.
 \item Controlled analyses on development data characterise the gain: it persists against the baseline given the
-same features and after the end of the current turn is removed, the proxy performs on par with the true responder,
-the listener's face and the preceding context are each worth about two UAR points, explicit temporal order or
+same features and after the end of the current turn is removed, the listener's face and the preceding context are
+each worth about two UAR points, whereas which non-speaker serves as listener and whether the slots carry role labels
+make no measurable difference, explicit temporal order or
 relation biases bring no measurable gain, and the advantage is largest when the responder mirrors the speaker or
 keeps their own earlier emotion, while a change to a new emotion remains hard for every model.
 \end{itemize}
@@ -156,7 +158,8 @@ that one cluster approximates one person across the three clips. In clip III, th
 taken as the speaker A and the cluster with the second most frames as the listener L; all other clusters are treated
 as others O, and no listener is assigned when clip III shows a single person. Every face $f$ thus receives a role
 $r(f) \in \{A, L, O\}$. The rule reads neither clip IV nor speaker labels nor identity annotations, and
-Section~\ref{sec:ablation} shows that replacing L by the true responder does not improve the forecast.
+Section~\ref{sec:ablation} shows that replacing L by the true responder or by a random non-speaker of clip III does
+not change the forecast measurably.
 
 \subsection{Evidence Tokens}
 \label{sec:tokens}
@@ -406,7 +409,10 @@ Variant (development CV) & UAR \\
 \midrule
 \quad w/o listener tokens & 24.20 \\
 \quad w/o context clips I--II & 24.11 \\
-\quad w/o role labels & 25.80 \\
+\quad faces pooled per clip (no roles) & 25.80 \\
+\quad w/o role embeddings & 26.41 \\
+\quad A and L swapped in half of the MCIS & 26.25 \\
+\quad random non-speaker as listener & 26.32 \\
 \midrule
 \quad w/o listener tokens in clip III & 25.00 \\
 \quad w/o speaker tokens & 25.66 \\
@@ -423,47 +429,52 @@ Variant (development CV) & UAR \\
 \end{tabular}
 \end{adjustbox}
 \caption{Ablation study on development CV. Every variant is retrained on the same folds and seeds. The variants come
-from three training runs in which the full model reached 25.92 to 26.24; the highest is shown. Separate role paths
+from four training runs in which the full model reached 25.92 to 26.24; the highest is shown. Random listener: three
+draws pooled. Separate role paths
 replace the joint encoder by one path per role whose outputs are added (with or without a learned interaction
 term).}
 \label{tab:ablation}
 \end{table}
 
-In Table~\ref{tab:ablation}, every variant scores below the full model, although several differences are small.
-The face tokens matter most: without them UAR falls to 22.03. Among the faces, the listener contributes most. Removing
+Table~\ref{tab:ablation} separates what the model needs from what it does not. The face tokens matter most: without them UAR falls to 22.03. Among the faces, the listener contributes most. Removing
 only the listener's tokens lowers UAR from 26.24 to 24.20, in all five folds, and the loss is concentrated on MCIS
 where a listener is visible in clip III. The preceding context matters about as much: keeping only clip III gives 24.11, and most of
 the loss comes from clip II. The two kinds of evidence are complementary: a speaker-centric model that keeps only A's
 face and the speech and scene tokens reaches 23.22, and the faces of the listener and the others alone reach 23.10.
 Processing all tokens jointly matters too: separate role paths combined additively reach 23.78, and an interaction
-term recovers only part of the gap. Role labels, speech and scene tokens and the auxiliary training signals have
-smaller effects.
+term recovers only part of the gap. The role labels do not matter: removing the role embeddings, swapping A and L
+in a random half of the MCIS or taking a random non-speaker of clip III as listener leaves UAR unchanged. Pooling all
+faces of a clip into one token reaches 25.80; in a fully matched rerun, person tokens lead by about one point with and
+without auxiliary losses, but not significantly. The model uses the content of the faces, not the slot labels.
 
 \begin{table}[t]
 \centering\small
 \begin{adjustbox}{max width=\columnwidth}
-\begin{tabular}{lrcc}
+\begin{tabular}{lrccc}
 \toprule
-Subset (development CV) & $n$ & Proxy & Oracle \\
+Subset (development CV) & $n$ & Proxy & Oracle & No L \\
 \midrule
-All MCIS & 2{,}421 & 26.24 & 26.20 \\
-B seen in clips I--III & 2{,}107 & 26.98 & 26.90 \\
-\quad proxy $L \neq$ B & 390 & 28.33 & 28.15 \\
-B not seen in I--III & 314 & 21.20 & 21.29 \\
+All MCIS & 2{,}421 & 26.62 & 26.44 & 24.04 \\
+B is the proxy & 990 & 25.93 & 26.09 & 20.74 \\
+B seen, proxy is another person & 1{,}114 & 27.79 & 27.43 & 27.76 \\
+\quad B visible in clip III & 215 & 29.27 & 29.59 & 30.94 \\
+B not seen in I--III & 225 & 23.80 & 21.92 & 19.52 \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}
-\caption{UAR with the identity-free listener proxy and with the true responder (oracle, uses clip IV). ``Proxy
-$L \neq$ B'': the proxy picked another person or no listener.}
+\caption{UAR with the identity-free listener proxy, with the true responder as listener (oracle, uses clip IV) and
+without listener tokens, by whether the proxy is the responder (same runs as Table~\ref{tab:origin}; 92 MCIS with an
+uncertain match are not shown).}
 \label{tab:proxy}
 \end{table}
 
 We next ask whether the forecaster needs to know who responds. An oracle replaces the listener by the true
-responder: B is found as the dominant face of clip IV and matched to an identity of clips I--III, which is possible
-for 88\% of MCIS; this uses clip IV and serves only as an analysis. The proxy's listener equals the matched responder
-in 68\% of the MCIS where the proxy assigns a listener. Table~\ref{tab:proxy} shows no measurable difference between proxy
-and oracle, also on the 390 MCIS where the proxy picks the wrong person. This suggests that the model relies on what
-the visible faces show, and that an identity-free selection of the evidence is sufficient on Hi-EF.
+responder: B is found as the dominant face of clip IV and matched to an identity of clips I--III (cosine $\geq$ 0.55
+and a clear margin over the second-best identity for the groups of Table~\ref{tab:proxy}); this uses clip IV and serves
+only as an analysis. The listener tokens help where the proxy is the responder ($+5.18$ UAR, significant) and not
+where it is someone else ($+0.02$), mostly because B is then seen only in clips I/II. Yet the oracle does not improve on
+the proxy in any group, including the 215 MCIS where B is visible in clip III. What matters is that the responder's
+face reaches the model, and the identity-free rule achieves that wherever it can.
 
 \begin{table}[t]
 \centering\small
@@ -569,11 +580,9 @@ the time against 46.2\% for the baseline, and 71.0\% against 55.9\% when the kep
 \emph{shifts} to another emotion, all models are correct about 27\% of the time, and about 22\% when the new emotion
 also differs from A's.
 
-Two factors limit accuracy (Figure~\ref{fig:groups}). When B does not mirror A, the next emotion appears to be only
-weakly determined by what is visible, and accuracy halves. When the annotators marked B's label as uncertain,
-accuracy falls from 40.5\% to 25.2\%, which is consistent with label ambiguity limiting what any model can reach. Accuracy
-does not depend on whether a listener is visible in clip III (38.0\% either way), which is consistent with the model
-falling back on context and on the speaker when the listener is absent.
+Two factors limit accuracy (Figure~\ref{fig:groups}): when B does not mirror A, accuracy halves, and when the
+annotators marked B's label as uncertain, it falls from 40.5\% to 25.2\%, consistent with label ambiguity. Accuracy
+does not depend on whether a listener is visible in clip III (38.0\% either way).
 
 Two oracle analyses suggest that the missing information is largely a matter of recognition. With A's true clip III emotion added
 to \model{}'s outputs, the UAR of a linear model on these outputs rises from 24.73 to 27.51 and NLL falls by 0.036;
@@ -582,26 +591,19 @@ is labelled, simply copying B's earlier emotion gives 39.18 UAR against 27.39 fo
 outputs to that label adds nothing detectable. The missing signal thus appears to lie in the participants' current
 emotional states, which the fixed feature extractors recognise poorly; none of the alternative ways of combining the
 same tokens that we tried recovered it.
-Off-the-shelf emotion encoders do not close this gap either. Adding frozen speech emotion features
-\citep{wagner2023dawn} and text emotion features \citep{demszky2020goemotions} to the clip features raises a linear
-recogniser of B's earlier turn only from 27.2 to 29.7 UAR, and a linear forecast stays at 18.9.
+Frozen speech \citep{wagner2023dawn} and text \citep{demszky2020goemotions} emotion encoders do not close this gap: in a
+linear probe they raise the recognition of B's earlier turn only from 27.2 to 29.7 UAR and leave the forecast unchanged.
 
 % ======================================================================================================
 \section{Conclusion and Future Work}
 \label{sec:conclusion}
 
-On Hi-EF, organising the evidence around the visible participants, and the listener in particular, improves
-emotion forecasting. An identity-free listener proxy and a participant-centric evidence set read by a small set
-encoder outperform a retrained version of the published configuration on a locked test split under plain scoring,
-the proxy performs on par with the true responder, and the additional encoder structures we tested bring no
-measurable gain. The gain comes mostly from responders who mirror the speaker or keep their
-own emotion; the remaining errors point to recognising the participants' current emotional states, in particular the
-responder's own earlier state, as the next problem to solve.
-
-Two classes remain unsolved: \model{} recalls none of the \emph{fear} and \emph{surprise} responses on test, and only
-2.5\% of \emph{disgust}. These classes are rare and mostly arise when the responder departs from the speaker's
-emotion, where the visible evidence says little about the next state. Future work should address them with
-recognisers adapted to multi-party video and with more training examples of these reactions.
+On Hi-EF, giving the forecaster the face of the person who is about to respond, together with the preceding context,
+improves emotion forecasting; knowing the true responder, choosing among the non-speakers, role labels and further
+encoder structure bring no measurable gain. The remaining errors point to recognising the participants' current
+states, in particular the responder's own earlier state. The rare classes (\emph{fear}, \emph{surprise} and
+\emph{disgust}) mostly arise when the responder departs from the speaker's emotion and remain unsolved; recognisers
+adapted to multi-party video and more examples of these reactions are the next steps.
 
 % ======================================================================================================
 \section*{Limitations}
@@ -618,7 +620,8 @@ inputs under the benchmark protocol and carry part of the listener's contributio
 the baselines, but the listener's own gain is no longer significant (Section~\ref{sec:ablation}), so part of it
 reflects the responder's early reaction rather than forecasting further ahead. The true responder used by the oracle is approximated by the dominant
 face of clip IV matched by face identity, so matching errors would blur the proxy--oracle comparison; the same holds
-for B's earlier emotion, which is known only where B's voice matches an earlier turn (27\% of MCIS). Text and audio
+for B's earlier emotion, which is known only where B's voice matches an earlier turn (27\% of MCIS). Only 16\% of MCIS
+have two or more non-speakers in clip III, so the comparison of the proxy with a random listener has little power. Text and audio
 come from general-purpose encoders (CLIP, AudioCLIP sound events), and conclusions about which evidence matters are
 conditional on them. Frozen emotion-specific encoders improved recognition only slightly in a linear probe; fine-tuned
 or conversation-specific recognisers were not tested. Hi-EF and MELD consist of scripted TV series with

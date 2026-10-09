@@ -1,0 +1,39 @@
+10.4s 1 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+10.4s 2 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+10.4s 3 0.00s - to python to disable frozen modules.
+10.4s 4 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+11.2s 5 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+11.2s 6 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+11.2s 7 0.00s - to python to disable frozen modules.
+11.2s 8 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+57.6s 9 development MCIS 2421 | video roots ['/kaggle/input/datasets/ptrnghieu/hi-ef-dataset/Hi-EF-20260829T071606Z-1-001/Hi-EF/video', '/kaggle/input/datasets/ptrnghieu/hi-ef-dataset/Hi-EF-20260829T071606Z-1-002/Hi-EF/video']
+62.7s 10 group
+62.7s 11 B seen ≠ proxy    1114
+62.7s 12 B seen = proxy     990
+62.7s 13 B not seen         225
+62.7s 14 uncertain           92
+62.7s 15 
+62.7s 16 B visible in clip III, by group:
+62.7s 17 group
+62.7s 18 B not seen        0.000
+62.7s 19 B seen = proxy    1.000
+62.7s 20 B seen ≠ proxy    0.193
+62.7s 21 uncertain         0.728
+62.7s 22 
+62.7s 23 G26/G44 rule: matched 87.9% | proxy = rule's B among MCIS with a proxy and a match 73.2%
+62.7s 24 rule_matched    False  True
+62.7s 25 group
+62.7s 26 B not seen        225      0
+62.7s 27 B seen = proxy      0    990
+62.7s 28 B seen ≠ proxy      0   1114
+62.7s 29 uncertain          69     23
+81.0s 30 saved 24 check images and g48_manual_check.csv in /kaggle/working/g48
+81.0s 31 fill in match_correct (is the matched I-III face the same person as B in clip IV?) and proxy_correct (is the proxy L the same person as B?) with yes / no / unclear
+84.8s 32 /usr/local/lib/python3.13/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\|'
+84.8s 33 cells[i][c] = re.sub('\\\\\|', '|', cell)
+85.0s 34 /usr/local/lib/python3.13/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\_'
+85.0s 35 text = re.sub(r'_', '\_', text) # Escape underscores in display text
+85.9s 36 [NbConvertApp] Converting notebook __notebook__.ipynb to notebook
+86.0s 37 [NbConvertApp] Writing 28804 bytes to __notebook__.ipynb
+89.2s 38 [NbConvertApp] Converting notebook __notebook__.ipynb to html
+89.9s 39 [NbConvertApp] Writing 352926 bytes to __results__.html

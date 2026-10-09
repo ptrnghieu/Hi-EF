@@ -1155,3 +1155,42 @@ fold (`build_face_tensors(fit_clips)`); the test split takes no part in model se
 ablation table is retrained (G11 masks tokens at training and evaluation); `noRole` (G8b/G14) is the clip-pooled control
 (10 seeds: 26.24 vs 25.80, per seed UAR 24.74 ± 0.97 vs 24.11 ± 0.78, WAR 35.15 ± 1.51 vs 35.04 ± 1.28, Δ +0.44
 [−1.21, +2.16], 4/5 folds) but has no auxiliary head for A, hence the no-aux pair in G47.
+
+## G47 results: organisation controls (5-fold CV, 2,421 MCIS, 10 seeds; test untouched; log `results/g47/g47_run.log`)
+
+`RoleNet` (token class) reproduces G14 `Full` exactly (26.24; per seed 24.74 ± 0.97).
+
+| Arm | UAR | WAR | per-seed UAR | ≥ 2 candidates (393): UAR |
+|---|---|---|---|---|
+| RoleNet | 26.24 | 38.04 | 24.74 ± 0.97 | 28.63 |
+| noRoleEmb | 26.41 | 38.33 | 24.79 ± 0.86 | 28.81 |
+| RoleShuffle | 26.25 | 38.62 | 24.56 ± 0.77 | 29.61 |
+| RandomL (3 draws pooled) | 26.32 | 38.33 | 24.58 ± 0.95 | 28.84 |
+| noL | 24.20 | 35.23 | 22.80 ± 0.75 | 27.62 |
+| RoleNet[R] | 26.35 | 38.29 | 24.52 ± 1.21 | 29.13 |
+| ClipPool | 25.33 | 37.13 | 24.16 ± 0.68 | 28.76 |
+| RoleNet[R]-noAux | 26.68 | 38.83 | 24.76 ± 0.79 | 30.27 |
+| ClipPool-noAux | 25.52 | 37.38 | 23.53 ± 0.72 | 30.74 |
+
+| Contrast | ΔUAR [95% two-level] | paired per-seed | folds |
+|---|---|---|---|
+| RoleNet[R] − ClipPool | +1.03 [−0.96, +2.35] | +0.36 ± 1.11 | 5/5 |
+| RoleNet[R]-noAux − ClipPool-noAux | +1.16 [−0.30, +2.96] | +1.24 ± 1.19 | 4/5 |
+| RoleNet − noRoleEmb | −0.17 [−1.62, +1.35] | −0.06 ± 0.93 | 2/5 |
+| RoleNet − RoleShuffle | −0.01 [−1.71, +1.37] | +0.17 ± 0.66 | 3/5 |
+| RoleNet − RandomL (≥ 2 candidates) | −0.21 [−2.46, +3.64] | +0.47 ± 1.13 | 3/5 |
+| RandomL − noL (≥ 2 candidates) | +1.22 [−2.21, +4.96] | +0.71 ± 1.00 | 4/5 |
+| RoleNet − noL (all) | +2.04 [+0.21, +3.46] | +1.94 ± 1.01 | 5/5 |
+
+Verdicts (fixed rules): participant tokens vs clip pooling **not established** (positive in both pairs, 5/5 and 4/5
+folds, CIs include 0); role assignment **not established**; listener choice **not established**. Only 16.2% of MCIS
+have ≥ 2 non-speaker candidates in clip III, and a random draw equals the proxy in 40–43% of them (proxy L: 4.1 frames
+in clip III vs 2.7 for a random non-speaker), so the listener-choice test has little power. Reading: having the
+listener's face (or any non-speaker of clip III) matters; which non-speaker, and labelling the slots, does not
+measurably matter on Hi-EF.
+
+## G48 groups (development; analysis only; log `results/g48/g48_run.log`)
+
+B seen = proxy 990, B seen ≠ proxy 1,114 (B visible in clip III in 19.3% of them), B not seen 225, uncertain 92;
+G26/G44 rule matched 87.9%, proxy = rule's B 73.2% among MCIS with a proxy and a match. Per-group performance pending
+`g48_groups.csv` (`analysis/proxy_oracle_groups.py`).

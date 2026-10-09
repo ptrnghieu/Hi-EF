@@ -14,7 +14,7 @@ Các kết quả chính gồm:
 	\item Trên tập kiểm tra được khóa, đọc một lần theo kế hoạch đăng ký trước, \model{} tăng UAR từ 21,40 lên 25,24 và WAR từ 32,52 lên 36,43 so với mô hình gốc huấn luyện lại, thắng ở bảy trên tám tập phim. Chỉ số chính đã đăng ký trước (UAR sau hiệu chỉnh logit) tăng tương tự nhưng không có ý nghĩa thống kê, chủ yếu do lớp \emph{fear} chỉ có 6 mẫu kiểm tra.
 	\item \model{} dùng 0,71 triệu tham số, ít hơn khoảng 40 lần so với mô hình gốc.
 	\item Khuôn mặt của người nghe và ngữ cảnh của các lượt trước là hai nguồn thông tin được xác nhận, mỗi nguồn đóng góp khoảng hai điểm UAR trên dữ liệu phát triển. Phần cải thiện so với mô hình gốc không chỉ do đặc trưng tốt hơn, và vẫn còn khi bỏ phần cuối của lượt nói hiện tại.
-	\item Người nghe được chọn tự động cho kết quả tương đương người phản hồi thật. Các cấu trúc bổ sung đã thử cho bộ mã hóa không mang lại cải thiện đo được. Việc tách khuôn mặt theo vai trò so với gộp theo clip chưa được chứng minh là cần thiết.
+	\item Người nghe được chọn tự động cho kết quả tương đương người phản hồi thật, và cũng tương đương một người không nói được chọn ngẫu nhiên trong clip III; gắn nhãn vai trò cho các token không tạo khác biệt đo được. Token theo người có xu hướng tốt hơn gộp theo clip khoảng một điểm UAR nhưng chưa vượt qua mức nhiễu. Các cấu trúc bổ sung đã thử cho bộ mã hóa không mang lại cải thiện đo được.
 	\item Lợi thế của \model{} lớn nhất khi người phản hồi lặp lại cảm xúc của người nói hoặc giữ cảm xúc của chính mình; khi người phản hồi chuyển sang một cảm xúc mới, mọi mô hình đều gần mức đoán ngẫu nhiên.
 \end{itemize}
 

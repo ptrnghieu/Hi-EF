@@ -1,0 +1,691 @@
+6.4s 1 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+6.4s 2 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+6.4s 3 0.00s - to python to disable frozen modules.
+6.4s 4 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+6.9s 5 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+6.9s 6 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+6.9s 7 0.00s - to python to disable frozen modules.
+6.9s 8 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+87.9s 9 annotation file: /kaggle/input/datasets/ptrnghieu/hi-ef-dataset/Hi-EF-20260829T071606Z-1-001/Hi-EF/annotation.csv
+87.9s 10 development MCIS 2421 | episodes 45
+152.4s 11 {'face': (6756, 16, 512), 'fmask': (6756, 16), 'ori': (6756, 16, 512), 'text': (6756, 512), 'audio': (6756, 527), 'afound': (6756,)}
+152.4s 12 ==== assignment mode: proxy | arms: ['RoleNet', 'noRoleEmb', 'noL', 'RoleNet[R]', 'RoleNet[R]-noAux', 'ClipPool', 'ClipPool-noAux'] ====
+158.1s 13 HSEmotion embedding available: True | frame feature dim 146
+165.0s 14 A found in III 100.0% | listener visible in III 59.9% | listener also in I/II 44.2%
+165.0s 15 mode proxy: >= 2 non-speaker candidates in clip III 16.2% | L differs from the proxy 0.0% (on the >= 2 subset 0.0%) | swapped 0.0% | L frames in III / I-II (mean, MCIS with L) [2.67 7.17]
+165.3s 16 parameters: {'RoleNet[R]': '0.71M', 'RoleNet[R]-noAux': '0.71M', 'ClipPool': '0.71M', 'ClipPool-noAux': '0.70M'}
+165.4s 17 parameters: {'RoleNet': '0.709M', 'noRoleEmb': '0.709M', 'noL': '0.709M', 'RoleNet[R]': '0.709M', 'RoleNet[R]-noAux': '0.706M', 'ClipPool': '0.707M', 'ClipPool-noAux': '0.705M'}
+165.5s 18 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+172.0s 19 fold 0: train 1733 | early-stop 207 | eval 481
+183.4s 20 fold 0 RoleNet        seed 42: sel 23.38 | UAR 27.92 WAR 42.20 | 0.3 min
+193.9s 21 fold 0 RoleNet        seed 123: sel 20.94 | UAR 25.07 WAR 34.93 | 0.5 min
+207.2s 22 fold 0 RoleNet        seed 456: sel 22.77 | UAR 24.78 WAR 28.90 | 0.7 min
+216.3s 23 fold 0 RoleNet        seed 7: sel 21.34 | UAR 25.40 WAR 33.89 | 0.8 min
+225.3s 24 fold 0 RoleNet        seed 11: sel 23.61 | UAR 28.39 WAR 40.54 | 1.0 min
+234.7s 25 fold 0 RoleNet        seed 19: sel 21.20 | UAR 25.51 WAR 36.59 | 1.2 min
+243.3s 26 fold 0 RoleNet        seed 23: sel 22.25 | UAR 29.80 WAR 42.62 | 1.3 min
+252.6s 27 fold 0 RoleNet        seed 31: sel 23.73 | UAR 25.58 WAR 35.14 | 1.5 min
+258.6s 28 fold 0 RoleNet        seed 37: sel 21.15 | UAR 27.51 WAR 38.88 | 1.6 min
+266.5s 29 fold 0 RoleNet        seed 43: sel 21.05 | UAR 26.38 WAR 36.59 | 1.7 min
+272.9s 30 fold 0 noRoleEmb      seed 42: sel 23.59 | UAR 26.77 WAR 41.16 | 1.8 min
+278.6s 31 fold 0 noRoleEmb      seed 123: sel 19.58 | UAR 26.69 WAR 37.84 | 1.9 min
+286.8s 32 fold 0 noRoleEmb      seed 456: sel 21.33 | UAR 28.73 WAR 39.71 | 2.0 min
+292.2s 33 fold 0 noRoleEmb      seed 7: sel 21.51 | UAR 25.69 WAR 38.88 | 2.1 min
+297.1s 34 fold 0 noRoleEmb      seed 11: sel 23.42 | UAR 25.31 WAR 38.46 | 2.2 min
+301.8s 35 fold 0 noRoleEmb      seed 19: sel 19.89 | UAR 24.23 WAR 37.42 | 2.3 min
+307.1s 36 fold 0 noRoleEmb      seed 23: sel 21.89 | UAR 27.24 WAR 41.58 | 2.4 min
+312.8s 37 fold 0 noRoleEmb      seed 31: sel 21.71 | UAR 27.59 WAR 40.12 | 2.5 min
+318.8s 38 fold 0 noRoleEmb      seed 37: sel 21.31 | UAR 25.95 WAR 36.80 | 2.6 min
+325.5s 39 fold 0 noRoleEmb      seed 43: sel 22.99 | UAR 29.58 WAR 39.09 | 2.7 min
+330.9s 40 fold 0 noL            seed 42: sel 21.16 | UAR 25.31 WAR 37.84 | 2.8 min
+341.5s 41 fold 0 noL            seed 123: sel 23.26 | UAR 23.68 WAR 34.30 | 2.9 min
+349.7s 42 fold 0 noL            seed 456: sel 20.92 | UAR 23.34 WAR 31.19 | 3.1 min
+359.4s 43 fold 0 noL            seed 7: sel 21.05 | UAR 21.72 WAR 33.26 | 3.2 min
+364.7s 44 fold 0 noL            seed 11: sel 20.53 | UAR 24.55 WAR 39.50 | 3.3 min
+373.7s 45 fold 0 noL            seed 19: sel 20.18 | UAR 26.17 WAR 39.92 | 3.5 min
+379.0s 46 fold 0 noL            seed 23: sel 18.84 | UAR 26.36 WAR 40.96 | 3.6 min
+385.5s 47 fold 0 noL            seed 31: sel 20.23 | UAR 24.35 WAR 34.93 | 3.7 min
+391.2s 48 fold 0 noL            seed 37: sel 20.02 | UAR 25.61 WAR 37.84 | 3.8 min
+406.6s 49 fold 0 noL            seed 43: sel 20.78 | UAR 21.13 WAR 25.99 | 4.0 min
+411.7s 50 fold 0 RoleNet[R]     seed 42: sel 23.38 | UAR 27.56 WAR 41.79 | 4.1 min
+418.0s 51 fold 0 RoleNet[R]     seed 123: sel 20.63 | UAR 27.51 WAR 39.09 | 4.2 min
+427.7s 52 fold 0 RoleNet[R]     seed 456: sel 22.72 | UAR 24.94 WAR 33.89 | 4.4 min
+436.5s 53 fold 0 RoleNet[R]     seed 7: sel 21.86 | UAR 25.18 WAR 33.89 | 4.5 min
+441.4s 54 fold 0 RoleNet[R]     seed 11: sel 23.42 | UAR 26.16 WAR 39.50 | 4.6 min
+446.8s 55 fold 0 RoleNet[R]     seed 19: sel 20.35 | UAR 27.09 WAR 42.62 | 4.7 min
+455.0s 56 fold 0 RoleNet[R]     seed 23: sel 22.29 | UAR 29.50 WAR 42.41 | 4.8 min
+464.0s 57 fold 0 RoleNet[R]     seed 31: sel 22.71 | UAR 25.24 WAR 34.30 | 5.0 min
+473.9s 58 fold 0 RoleNet[R]     seed 37: sel 21.14 | UAR 22.61 WAR 29.73 | 5.1 min
+479.7s 59 fold 0 RoleNet[R]     seed 43: sel 21.65 | UAR 27.67 WAR 40.54 | 5.2 min
+488.1s 60 fold 0 RoleNet[R]-noAux seed 42: sel 25.97 | UAR 28.36 WAR 42.00 | 5.4 min
+492.7s 61 fold 0 RoleNet[R]-noAux seed 123: sel 19.63 | UAR 26.45 WAR 40.75 | 5.5 min
+497.5s 62 fold 0 RoleNet[R]-noAux seed 456: sel 21.22 | UAR 26.66 WAR 39.29 | 5.5 min
+501.8s 63 fold 0 RoleNet[R]-noAux seed 7: sel 23.06 | UAR 26.66 WAR 41.37 | 5.6 min
+505.8s 64 fold 0 RoleNet[R]-noAux seed 11: sel 23.00 | UAR 26.20 WAR 39.50 | 5.7 min
+509.9s 65 fold 0 RoleNet[R]-noAux seed 19: sel 21.55 | UAR 26.49 WAR 39.09 | 5.7 min
+513.8s 66 fold 0 RoleNet[R]-noAux seed 23: sel 19.82 | UAR 25.32 WAR 39.50 | 5.8 min
+519.4s 67 fold 0 RoleNet[R]-noAux seed 31: sel 23.48 | UAR 30.01 WAR 43.45 | 5.9 min
+525.3s 68 fold 0 RoleNet[R]-noAux seed 37: sel 21.72 | UAR 29.11 WAR 41.79 | 6.0 min
+536.7s 69 fold 0 RoleNet[R]-noAux seed 43: sel 21.82 | UAR 25.51 WAR 33.06 | 6.2 min
+543.8s 70 fold 0 ClipPool       seed 42: sel 20.08 | UAR 27.87 WAR 41.37 | 6.3 min
+551.4s 71 fold 0 ClipPool       seed 123: sel 22.07 | UAR 25.12 WAR 33.26 | 6.4 min
+556.6s 72 fold 0 ClipPool       seed 456: sel 20.14 | UAR 26.96 WAR 43.24 | 6.5 min
+568.0s 73 fold 0 ClipPool       seed 7: sel 20.20 | UAR 25.31 WAR 34.51 | 6.7 min
+577.2s 74 fold 0 ClipPool       seed 11: sel 19.81 | UAR 25.32 WAR 31.81 | 6.9 min
+581.7s 75 fold 0 ClipPool       seed 19: sel 19.65 | UAR 23.06 WAR 34.51 | 6.9 min
+592.4s 76 fold 0 ClipPool       seed 23: sel 19.76 | UAR 26.69 WAR 36.59 | 7.1 min
+605.4s 77 fold 0 ClipPool       seed 31: sel 22.62 | UAR 24.80 WAR 35.97 | 7.3 min
+623.4s 78 fold 0 ClipPool       seed 37: sel 19.49 | UAR 21.71 WAR 28.69 | 7.6 min
+629.4s 79 fold 0 ClipPool       seed 43: sel 19.62 | UAR 24.26 WAR 40.33 | 7.7 min
+638.5s 80 fold 0 ClipPool-noAux seed 42: sel 19.66 | UAR 26.24 WAR 41.79 | 7.9 min
+643.4s 81 fold 0 ClipPool-noAux seed 123: sel 19.17 | UAR 24.91 WAR 38.88 | 8.0 min
+649.3s 82 fold 0 ClipPool-noAux seed 456: sel 20.06 | UAR 25.12 WAR 34.10 | 8.1 min
+659.7s 83 fold 0 ClipPool-noAux seed 7: sel 21.89 | UAR 25.84 WAR 35.34 | 8.2 min
+668.5s 84 fold 0 ClipPool-noAux seed 11: sel 22.01 | UAR 24.51 WAR 34.51 | 8.4 min
+679.6s 85 fold 0 ClipPool-noAux seed 19: sel 21.15 | UAR 22.69 WAR 30.15 | 8.6 min
+689.1s 86 fold 0 ClipPool-noAux seed 23: sel 20.37 | UAR 25.24 WAR 39.50 | 8.7 min
+695.6s 87 fold 0 ClipPool-noAux seed 31: sel 21.00 | UAR 27.84 WAR 41.16 | 8.8 min
+700.1s 88 fold 0 ClipPool-noAux seed 37: sel 22.01 | UAR 26.32 WAR 38.67 | 8.9 min
+705.0s 89 fold 0 ClipPool-noAux seed 43: sel 18.79 | UAR 24.03 WAR 38.88 | 9.0 min
+712.5s 90 fold 1: train 1667 | early-stop 267 | eval 487
+720.8s 91 fold 1 RoleNet        seed 42: sel 29.22 | UAR 28.47 WAR 40.45 | 9.3 min
+728.9s 92 fold 1 RoleNet        seed 123: sel 31.62 | UAR 28.25 WAR 42.51 | 9.4 min
+736.3s 93 fold 1 RoleNet        seed 456: sel 26.99 | UAR 26.74 WAR 39.22 | 9.5 min
+744.8s 94 fold 1 RoleNet        seed 7: sel 28.63 | UAR 29.17 WAR 40.66 | 9.7 min
+753.7s 95 fold 1 RoleNet        seed 11: sel 28.36 | UAR 27.36 WAR 38.81 | 9.8 min
+760.9s 96 fold 1 RoleNet        seed 19: sel 30.20 | UAR 28.20 WAR 42.92 | 9.9 min
+768.0s 97 fold 1 RoleNet        seed 23: sel 29.15 | UAR 29.52 WAR 42.09 | 10.0 min
+775.0s 98 fold 1 RoleNet        seed 31: sel 28.91 | UAR 25.46 WAR 40.66 | 10.2 min
+780.7s 99 fold 1 RoleNet        seed 37: sel 29.29 | UAR 28.27 WAR 40.66 | 10.3 min
+787.1s 100 fold 1 RoleNet        seed 43: sel 27.12 | UAR 27.53 WAR 40.86 | 10.4 min
+794.7s 101 fold 1 noRoleEmb      seed 42: sel 28.82 | UAR 26.51 WAR 39.22 | 10.5 min
+802.0s 102 fold 1 noRoleEmb      seed 123: sel 31.70 | UAR 27.45 WAR 41.48 | 10.6 min
+810.5s 103 fold 1 noRoleEmb      seed 456: sel 27.04 | UAR 26.77 WAR 37.78 | 10.8 min
+817.1s 104 fold 1 noRoleEmb      seed 7: sel 28.98 | UAR 27.31 WAR 41.27 | 10.9 min
+824.9s 105 fold 1 noRoleEmb      seed 11: sel 28.47 | UAR 28.41 WAR 40.25 | 11.0 min
+831.2s 106 fold 1 noRoleEmb      seed 19: sel 28.56 | UAR 26.35 WAR 39.84 | 11.1 min
+837.9s 107 fold 1 noRoleEmb      seed 23: sel 30.59 | UAR 30.35 WAR 43.94 | 11.2 min
+846.5s 108 fold 1 noRoleEmb      seed 31: sel 29.72 | UAR 26.71 WAR 40.66 | 11.4 min
+852.1s 109 fold 1 noRoleEmb      seed 37: sel 28.58 | UAR 27.90 WAR 40.86 | 11.4 min
+858.0s 110 fold 1 noRoleEmb      seed 43: sel 26.88 | UAR 26.94 WAR 39.01 | 11.5 min
+864.2s 111 fold 1 noL            seed 42: sel 27.38 | UAR 26.14 WAR 40.86 | 11.6 min
+871.3s 112 fold 1 noL            seed 123: sel 26.91 | UAR 23.71 WAR 39.22 | 11.8 min
+876.6s 113 fold 1 noL            seed 456: sel 25.26 | UAR 24.88 WAR 39.43 | 11.9 min
+883.4s 114 fold 1 noL            seed 7: sel 27.17 | UAR 24.32 WAR 37.17 | 12.0 min
+888.7s 115 fold 1 noL            seed 11: sel 25.15 | UAR 22.86 WAR 39.22 | 12.1 min
+895.4s 116 fold 1 noL            seed 19: sel 25.93 | UAR 24.71 WAR 39.43 | 12.2 min
+901.9s 117 fold 1 noL            seed 23: sel 26.31 | UAR 25.74 WAR 38.60 | 12.3 min
+907.6s 118 fold 1 noL            seed 31: sel 26.84 | UAR 27.18 WAR 40.66 | 12.4 min
+914.9s 119 fold 1 noL            seed 37: sel 27.12 | UAR 27.42 WAR 37.58 | 12.5 min
+920.6s 120 fold 1 noL            seed 43: sel 28.33 | UAR 24.25 WAR 36.96 | 12.6 min
+927.3s 121 fold 1 RoleNet[R]     seed 42: sel 29.48 | UAR 28.45 WAR 40.66 | 12.7 min
+934.0s 122 fold 1 RoleNet[R]     seed 123: sel 31.32 | UAR 27.88 WAR 42.09 | 12.8 min
+940.2s 123 fold 1 RoleNet[R]     seed 456: sel 26.93 | UAR 26.81 WAR 39.22 | 12.9 min
+946.8s 124 fold 1 RoleNet[R]     seed 7: sel 28.43 | UAR 27.71 WAR 42.51 | 13.0 min
+954.5s 125 fold 1 RoleNet[R]     seed 11: sel 28.27 | UAR 27.00 WAR 39.01 | 13.2 min
+960.8s 126 fold 1 RoleNet[R]     seed 19: sel 29.64 | UAR 28.36 WAR 43.12 | 13.3 min
+966.8s 127 fold 1 RoleNet[R]     seed 23: sel 29.36 | UAR 30.38 WAR 43.33 | 13.4 min
+972.8s 128 fold 1 RoleNet[R]     seed 31: sel 29.39 | UAR 25.63 WAR 40.86 | 13.5 min
+977.7s 129 fold 1 RoleNet[R]     seed 37: sel 29.07 | UAR 28.18 WAR 40.45 | 13.5 min
+983.4s 130 fold 1 RoleNet[R]     seed 43: sel 26.85 | UAR 27.60 WAR 40.86 | 13.6 min
+988.6s 131 fold 1 RoleNet[R]-noAux seed 42: sel 27.58 | UAR 27.91 WAR 42.30 | 13.7 min
+994.5s 132 fold 1 RoleNet[R]-noAux seed 123: sel 31.41 | UAR 25.32 WAR 36.76 | 13.8 min
+999.9s 133 fold 1 RoleNet[R]-noAux seed 456: sel 28.64 | UAR 28.14 WAR 41.07 | 13.9 min
+1006.6s 134 fold 1 RoleNet[R]-noAux seed 7: sel 29.76 | UAR 27.36 WAR 39.22 | 14.0 min
+1013.4s 135 fold 1 RoleNet[R]-noAux seed 11: sel 28.05 | UAR 25.99 WAR 38.19 | 14.1 min
+1019.7s 136 fold 1 RoleNet[R]-noAux seed 19: sel 28.25 | UAR 25.01 WAR 37.37 | 14.2 min
+1024.4s 137 fold 1 RoleNet[R]-noAux seed 23: sel 27.35 | UAR 25.57 WAR 41.07 | 14.3 min
+1029.5s 138 fold 1 RoleNet[R]-noAux seed 31: sel 28.85 | UAR 25.28 WAR 36.55 | 14.4 min
+1035.1s 139 fold 1 RoleNet[R]-noAux seed 37: sel 29.42 | UAR 28.68 WAR 41.27 | 14.5 min
+1040.1s 140 fold 1 RoleNet[R]-noAux seed 43: sel 28.44 | UAR 27.57 WAR 41.89 | 14.6 min
+1047.2s 141 fold 1 ClipPool       seed 42: sel 29.10 | UAR 25.06 WAR 38.19 | 14.7 min
+1052.9s 142 fold 1 ClipPool       seed 123: sel 28.60 | UAR 27.06 WAR 40.45 | 14.8 min
+1058.9s 143 fold 1 ClipPool       seed 456: sel 28.93 | UAR 28.14 WAR 40.86 | 14.9 min
+1064.8s 144 fold 1 ClipPool       seed 7: sel 28.50 | UAR 26.27 WAR 40.04 | 15.0 min
+1070.2s 145 fold 1 ClipPool       seed 11: sel 27.12 | UAR 26.65 WAR 38.19 | 15.1 min
+1075.7s 146 fold 1 ClipPool       seed 19: sel 28.56 | UAR 25.73 WAR 40.66 | 15.2 min
+1081.9s 147 fold 1 ClipPool       seed 23: sel 29.96 | UAR 26.18 WAR 37.78 | 15.3 min
+1088.8s 148 fold 1 ClipPool       seed 31: sel 29.26 | UAR 26.03 WAR 37.99 | 15.4 min
+1096.2s 149 fold 1 ClipPool       seed 37: sel 27.35 | UAR 26.11 WAR 40.86 | 15.5 min
+1102.3s 150 fold 1 ClipPool       seed 43: sel 27.62 | UAR 26.18 WAR 42.30 | 15.6 min
+1109.3s 151 fold 1 ClipPool-noAux seed 42: sel 27.89 | UAR 26.43 WAR 40.25 | 15.7 min
+1116.6s 152 fold 1 ClipPool-noAux seed 123: sel 29.53 | UAR 26.71 WAR 40.04 | 15.9 min
+1121.8s 153 fold 1 ClipPool-noAux seed 456: sel 26.74 | UAR 25.19 WAR 36.96 | 15.9 min
+1129.1s 154 fold 1 ClipPool-noAux seed 7: sel 27.70 | UAR 25.03 WAR 36.96 | 16.1 min
+1135.4s 155 fold 1 ClipPool-noAux seed 11: sel 27.51 | UAR 25.63 WAR 35.73 | 16.2 min
+1142.9s 156 fold 1 ClipPool-noAux seed 19: sel 28.54 | UAR 25.35 WAR 39.01 | 16.3 min
+1149.8s 157 fold 1 ClipPool-noAux seed 23: sel 28.96 | UAR 24.15 WAR 36.34 | 16.4 min
+1156.1s 158 fold 1 ClipPool-noAux seed 31: sel 28.25 | UAR 26.99 WAR 41.07 | 16.5 min
+1162.1s 159 fold 1 ClipPool-noAux seed 37: sel 29.46 | UAR 26.46 WAR 41.07 | 16.6 min
+1168.4s 160 fold 1 ClipPool-noAux seed 43: sel 28.05 | UAR 25.78 WAR 38.81 | 16.7 min
+1175.9s 161 fold 2: train 1634 | early-stop 308 | eval 479
+1184.4s 162 fold 2 RoleNet        seed 42: sel 22.41 | UAR 25.99 WAR 36.95 | 17.0 min
+1191.2s 163 fold 2 RoleNet        seed 123: sel 21.00 | UAR 24.17 WAR 35.91 | 17.1 min
+1198.7s 164 fold 2 RoleNet        seed 456: sel 21.64 | UAR 25.81 WAR 36.74 | 17.2 min
+1211.5s 165 fold 2 RoleNet        seed 7: sel 22.49 | UAR 23.84 WAR 31.11 | 17.4 min
+1219.2s 166 fold 2 RoleNet        seed 11: sel 24.26 | UAR 26.48 WAR 36.53 | 17.6 min
+1226.7s 167 fold 2 RoleNet        seed 19: sel 21.77 | UAR 23.52 WAR 34.24 | 17.7 min
+1233.7s 168 fold 2 RoleNet        seed 23: sel 23.55 | UAR 25.86 WAR 38.00 | 17.8 min
+1241.0s 169 fold 2 RoleNet        seed 31: sel 22.77 | UAR 26.81 WAR 37.79 | 17.9 min
+1249.8s 170 fold 2 RoleNet        seed 37: sel 22.95 | UAR 24.59 WAR 34.86 | 18.1 min
+1256.4s 171 fold 2 RoleNet        seed 43: sel 22.73 | UAR 25.78 WAR 37.58 | 18.2 min
+1264.4s 172 fold 2 noRoleEmb      seed 42: sel 23.23 | UAR 25.66 WAR 36.33 | 18.3 min
+1270.9s 173 fold 2 noRoleEmb      seed 123: sel 21.00 | UAR 24.51 WAR 36.33 | 18.4 min
+1276.8s 174 fold 2 noRoleEmb      seed 456: sel 20.34 | UAR 24.62 WAR 36.33 | 18.5 min
+1284.1s 175 fold 2 noRoleEmb      seed 7: sel 22.65 | UAR 24.29 WAR 34.24 | 18.6 min
+1292.3s 176 fold 2 noRoleEmb      seed 11: sel 23.38 | UAR 24.56 WAR 33.19 | 18.8 min
+1299.8s 177 fold 2 noRoleEmb      seed 19: sel 21.41 | UAR 23.00 WAR 33.19 | 18.9 min
+1306.5s 178 fold 2 noRoleEmb      seed 23: sel 23.21 | UAR 25.44 WAR 37.79 | 19.0 min
+1313.4s 179 fold 2 noRoleEmb      seed 31: sel 20.88 | UAR 27.20 WAR 38.41 | 19.1 min
+1321.2s 180 fold 2 noRoleEmb      seed 37: sel 22.33 | UAR 23.88 WAR 33.82 | 19.3 min
+1328.6s 181 fold 2 noRoleEmb      seed 43: sel 23.39 | UAR 24.38 WAR 34.86 | 19.4 min
+1335.8s 182 fold 2 noL            seed 42: sel 22.81 | UAR 23.17 WAR 32.78 | 19.5 min
+1349.2s 183 fold 2 noL            seed 123: sel 21.75 | UAR 18.23 WAR 24.84 | 19.7 min
+1358.3s 184 fold 2 noL            seed 456: sel 22.46 | UAR 21.93 WAR 30.48 | 19.9 min
+1365.2s 185 fold 2 noL            seed 7: sel 23.24 | UAR 22.31 WAR 31.52 | 20.0 min
+1372.9s 186 fold 2 noL            seed 11: sel 25.33 | UAR 21.29 WAR 29.23 | 20.1 min
+1384.4s 187 fold 2 noL            seed 19: sel 22.89 | UAR 19.82 WAR 26.30 | 20.3 min
+1391.3s 188 fold 2 noL            seed 23: sel 22.36 | UAR 24.24 WAR 34.66 | 20.4 min
+1398.7s 189 fold 2 noL            seed 31: sel 20.41 | UAR 23.67 WAR 33.19 | 20.6 min
+1407.9s 190 fold 2 noL            seed 37: sel 22.93 | UAR 20.16 WAR 28.81 | 20.7 min
+1417.7s 191 fold 2 noL            seed 43: sel 22.26 | UAR 22.21 WAR 31.52 | 20.9 min
+1423.8s 192 fold 2 RoleNet[R]     seed 42: sel 22.20 | UAR 24.42 WAR 36.53 | 21.0 min
+1429.8s 193 fold 2 RoleNet[R]     seed 123: sel 21.50 | UAR 22.79 WAR 34.03 | 21.1 min
+1436.1s 194 fold 2 RoleNet[R]     seed 456: sel 21.20 | UAR 25.54 WAR 36.53 | 21.2 min
+1441.9s 195 fold 2 RoleNet[R]     seed 7: sel 21.92 | UAR 23.13 WAR 33.82 | 21.3 min
+1449.3s 196 fold 2 RoleNet[R]     seed 11: sel 24.03 | UAR 24.18 WAR 33.40 | 21.4 min
+1455.5s 197 fold 2 RoleNet[R]     seed 19: sel 21.62 | UAR 23.65 WAR 34.45 | 21.5 min
+1461.4s 198 fold 2 RoleNet[R]     seed 23: sel 23.70 | UAR 26.23 WAR 38.62 | 21.6 min
+1466.2s 199 fold 2 RoleNet[R]     seed 31: sel 22.10 | UAR 20.85 WAR 32.15 | 21.7 min
+1473.4s 200 fold 2 RoleNet[R]     seed 37: sel 23.37 | UAR 24.38 WAR 34.86 | 21.8 min
+1480.0s 201 fold 2 RoleNet[R]     seed 43: sel 22.83 | UAR 23.45 WAR 34.03 | 21.9 min
+1486.1s 202 fold 2 RoleNet[R]-noAux seed 42: sel 24.85 | UAR 24.93 WAR 34.86 | 22.0 min
+1492.0s 203 fold 2 RoleNet[R]-noAux seed 123: sel 22.88 | UAR 24.05 WAR 34.45 | 22.1 min
+1497.2s 204 fold 2 RoleNet[R]-noAux seed 456: sel 21.71 | UAR 25.55 WAR 36.53 | 22.2 min
+1500.9s 205 fold 2 RoleNet[R]-noAux seed 7: sel 23.04 | UAR 21.81 WAR 32.15 | 22.3 min
+1505.5s 206 fold 2 RoleNet[R]-noAux seed 11: sel 21.72 | UAR 25.60 WAR 37.16 | 22.3 min
+1511.6s 207 fold 2 RoleNet[R]-noAux seed 19: sel 21.66 | UAR 23.70 WAR 31.32 | 22.4 min
+1516.9s 208 fold 2 RoleNet[R]-noAux seed 23: sel 21.89 | UAR 26.32 WAR 36.53 | 22.5 min
+1521.0s 209 fold 2 RoleNet[R]-noAux seed 31: sel 22.77 | UAR 23.00 WAR 33.82 | 22.6 min
+1526.4s 210 fold 2 RoleNet[R]-noAux seed 37: sel 23.71 | UAR 24.60 WAR 34.66 | 22.7 min
+1531.5s 211 fold 2 RoleNet[R]-noAux seed 43: sel 24.58 | UAR 23.65 WAR 35.28 | 22.8 min
+1538.3s 212 fold 2 ClipPool       seed 42: sel 24.30 | UAR 23.35 WAR 34.03 | 22.9 min
+1544.3s 213 fold 2 ClipPool       seed 123: sel 24.06 | UAR 24.00 WAR 35.28 | 23.0 min
+1551.5s 214 fold 2 ClipPool       seed 456: sel 24.90 | UAR 21.43 WAR 30.69 | 23.1 min
+1557.1s 215 fold 2 ClipPool       seed 7: sel 24.31 | UAR 24.93 WAR 34.45 | 23.2 min
+1563.6s 216 fold 2 ClipPool       seed 11: sel 25.77 | UAR 25.66 WAR 36.53 | 23.3 min
+1569.0s 217 fold 2 ClipPool       seed 19: sel 21.63 | UAR 23.23 WAR 33.61 | 23.4 min
+1575.3s 218 fold 2 ClipPool       seed 23: sel 23.40 | UAR 23.46 WAR 34.24 | 23.5 min
+1580.6s 219 fold 2 ClipPool       seed 31: sel 22.81 | UAR 24.07 WAR 35.07 | 23.6 min
+1587.1s 220 fold 2 ClipPool       seed 37: sel 24.08 | UAR 24.86 WAR 33.82 | 23.7 min
+1593.3s 221 fold 2 ClipPool       seed 43: sel 22.48 | UAR 24.92 WAR 35.70 | 23.8 min
+1599.3s 222 fold 2 ClipPool-noAux seed 42: sel 23.36 | UAR 23.06 WAR 32.99 | 23.9 min
+1605.0s 223 fold 2 ClipPool-noAux seed 123: sel 25.23 | UAR 25.20 WAR 35.28 | 24.0 min
+1613.2s 224 fold 2 ClipPool-noAux seed 456: sel 22.00 | UAR 22.33 WAR 30.69 | 24.1 min
+1618.7s 225 fold 2 ClipPool-noAux seed 7: sel 25.25 | UAR 22.83 WAR 32.99 | 24.2 min
+1623.9s 226 fold 2 ClipPool-noAux seed 11: sel 23.15 | UAR 23.26 WAR 33.19 | 24.3 min
+1629.6s 227 fold 2 ClipPool-noAux seed 19: sel 21.91 | UAR 24.28 WAR 33.19 | 24.4 min
+1634.0s 228 fold 2 ClipPool-noAux seed 23: sel 22.81 | UAR 22.64 WAR 31.94 | 24.5 min
+1639.4s 229 fold 2 ClipPool-noAux seed 31: sel 22.21 | UAR 23.66 WAR 34.45 | 24.6 min
+1644.2s 230 fold 2 ClipPool-noAux seed 37: sel 24.06 | UAR 21.51 WAR 31.11 | 24.6 min
+1648.9s 231 fold 2 ClipPool-noAux seed 43: sel 22.61 | UAR 23.69 WAR 33.61 | 24.7 min
+1655.8s 232 fold 3: train 1713 | early-stop 229 | eval 479
+1662.9s 233 fold 3 RoleNet        seed 42: sel 29.66 | UAR 20.48 WAR 32.78 | 25.0 min
+1673.0s 234 fold 3 RoleNet        seed 123: sel 28.03 | UAR 19.81 WAR 28.39 | 25.1 min
+1680.7s 235 fold 3 RoleNet        seed 456: sel 27.95 | UAR 20.23 WAR 32.15 | 25.3 min
+1687.9s 236 fold 3 RoleNet        seed 7: sel 27.40 | UAR 19.89 WAR 32.36 | 25.4 min
+1702.5s 237 fold 3 RoleNet        seed 11: sel 27.02 | UAR 20.66 WAR 30.27 | 25.6 min
+1708.6s 238 fold 3 RoleNet        seed 19: sel 26.42 | UAR 19.65 WAR 31.94 | 25.7 min
+1715.3s 239 fold 3 RoleNet        seed 23: sel 28.13 | UAR 19.89 WAR 31.94 | 25.8 min
+1732.9s 240 fold 3 RoleNet        seed 31: sel 27.89 | UAR 15.01 WAR 24.63 | 26.1 min
+1738.8s 241 fold 3 RoleNet        seed 37: sel 26.32 | UAR 18.45 WAR 27.97 | 26.2 min
+1747.7s 242 fold 3 RoleNet        seed 43: sel 28.87 | UAR 22.01 WAR 32.78 | 26.4 min
+1756.5s 243 fold 3 noRoleEmb      seed 42: sel 29.32 | UAR 20.44 WAR 32.36 | 26.5 min
+1766.9s 244 fold 3 noRoleEmb      seed 123: sel 26.51 | UAR 20.29 WAR 27.77 | 26.7 min
+1774.8s 245 fold 3 noRoleEmb      seed 456: sel 27.70 | UAR 21.14 WAR 33.19 | 26.8 min
+1781.1s 246 fold 3 noRoleEmb      seed 7: sel 26.51 | UAR 19.92 WAR 31.94 | 26.9 min
+1791.0s 247 fold 3 noRoleEmb      seed 11: sel 27.56 | UAR 20.17 WAR 30.69 | 27.1 min
+1797.5s 248 fold 3 noRoleEmb      seed 19: sel 25.87 | UAR 18.92 WAR 30.90 | 27.2 min
+1804.2s 249 fold 3 noRoleEmb      seed 23: sel 27.31 | UAR 20.74 WAR 32.99 | 27.3 min
+1814.1s 250 fold 3 noRoleEmb      seed 31: sel 26.29 | UAR 22.63 WAR 31.52 | 27.5 min
+1827.6s 251 fold 3 noRoleEmb      seed 37: sel 26.02 | UAR 20.07 WAR 27.35 | 27.7 min
+1840.2s 252 fold 3 noRoleEmb      seed 43: sel 27.73 | UAR 17.37 WAR 25.05 | 27.9 min
+1847.1s 253 fold 3 noL            seed 42: sel 26.23 | UAR 21.97 WAR 33.40 | 28.0 min
+1852.9s 254 fold 3 noL            seed 123: sel 25.94 | UAR 19.49 WAR 30.69 | 28.1 min
+1860.5s 255 fold 3 noL            seed 456: sel 26.38 | UAR 20.02 WAR 30.48 | 28.3 min
+1869.5s 256 fold 3 noL            seed 7: sel 25.86 | UAR 19.15 WAR 26.93 | 28.4 min
+1877.7s 257 fold 3 noL            seed 11: sel 25.33 | UAR 19.67 WAR 29.65 | 28.5 min
+1885.4s 258 fold 3 noL            seed 19: sel 24.50 | UAR 20.51 WAR 32.15 | 28.7 min
+1892.3s 259 fold 3 noL            seed 23: sel 24.55 | UAR 19.18 WAR 29.85 | 28.8 min
+1899.8s 260 fold 3 noL            seed 31: sel 24.79 | UAR 19.60 WAR 30.06 | 28.9 min
+1906.8s 261 fold 3 noL            seed 37: sel 25.65 | UAR 19.84 WAR 30.90 | 29.0 min
+1915.9s 262 fold 3 noL            seed 43: sel 26.06 | UAR 17.93 WAR 29.02 | 29.2 min
+1922.3s 263 fold 3 RoleNet[R]     seed 42: sel 29.38 | UAR 20.95 WAR 32.99 | 29.3 min
+1931.2s 264 fold 3 RoleNet[R]     seed 123: sel 28.65 | UAR 19.66 WAR 30.06 | 29.4 min
+1938.0s 265 fold 3 RoleNet[R]     seed 456: sel 28.09 | UAR 19.67 WAR 31.52 | 29.5 min
+1943.9s 266 fold 3 RoleNet[R]     seed 7: sel 26.96 | UAR 20.50 WAR 32.57 | 29.6 min
+1955.9s 267 fold 3 RoleNet[R]     seed 11: sel 27.62 | UAR 21.62 WAR 28.81 | 29.8 min
+1961.3s 268 fold 3 RoleNet[R]     seed 19: sel 26.42 | UAR 19.75 WAR 32.15 | 29.9 min
+1967.2s 269 fold 3 RoleNet[R]     seed 23: sel 28.13 | UAR 20.55 WAR 32.99 | 30.0 min
+1976.7s 270 fold 3 RoleNet[R]     seed 31: sel 26.05 | UAR 19.09 WAR 25.26 | 30.2 min
+1982.2s 271 fold 3 RoleNet[R]     seed 37: sel 26.32 | UAR 18.45 WAR 27.97 | 30.3 min
+1989.6s 272 fold 3 RoleNet[R]     seed 43: sel 29.03 | UAR 19.82 WAR 29.23 | 30.4 min
+1994.3s 273 fold 3 RoleNet[R]-noAux seed 42: sel 27.36 | UAR 19.94 WAR 33.82 | 30.5 min
+2000.3s 274 fold 3 RoleNet[R]-noAux seed 123: sel 27.18 | UAR 21.82 WAR 32.78 | 30.6 min
+2005.8s 275 fold 3 RoleNet[R]-noAux seed 456: sel 27.80 | UAR 19.82 WAR 29.02 | 30.7 min
+2012.2s 276 fold 3 RoleNet[R]-noAux seed 7: sel 25.64 | UAR 21.78 WAR 31.73 | 30.8 min
+2021.9s 277 fold 3 RoleNet[R]-noAux seed 11: sel 29.59 | UAR 19.93 WAR 28.18 | 30.9 min
+2027.2s 278 fold 3 RoleNet[R]-noAux seed 19: sel 26.82 | UAR 19.56 WAR 31.52 | 31.0 min
+2035.1s 279 fold 3 RoleNet[R]-noAux seed 23: sel 25.72 | UAR 19.71 WAR 26.93 | 31.2 min
+2047.9s 280 fold 3 RoleNet[R]-noAux seed 31: sel 29.13 | UAR 19.28 WAR 24.63 | 31.4 min
+2052.6s 281 fold 3 RoleNet[R]-noAux seed 37: sel 27.19 | UAR 20.88 WAR 33.19 | 31.5 min
+2061.3s 282 fold 3 RoleNet[R]-noAux seed 43: sel 27.92 | UAR 21.39 WAR 29.85 | 31.6 min
+2066.4s 283 fold 3 ClipPool       seed 42: sel 25.28 | UAR 21.25 WAR 34.24 | 31.7 min
+2072.5s 284 fold 3 ClipPool       seed 123: sel 25.42 | UAR 21.41 WAR 32.99 | 31.8 min
+2077.4s 285 fold 3 ClipPool       seed 456: sel 26.43 | UAR 22.16 WAR 35.28 | 31.9 min
+2082.2s 286 fold 3 ClipPool       seed 7: sel 25.88 | UAR 20.27 WAR 31.94 | 31.9 min
+2087.6s 287 fold 3 ClipPool       seed 11: sel 26.89 | UAR 20.54 WAR 32.57 | 32.0 min
+2094.7s 288 fold 3 ClipPool       seed 19: sel 26.75 | UAR 21.34 WAR 32.36 | 32.2 min
+2101.1s 289 fold 3 ClipPool       seed 23: sel 25.58 | UAR 19.98 WAR 31.73 | 32.3 min
+2109.8s 290 fold 3 ClipPool       seed 31: sel 27.19 | UAR 20.12 WAR 27.77 | 32.4 min
+2114.9s 291 fold 3 ClipPool       seed 37: sel 27.15 | UAR 20.58 WAR 32.57 | 32.5 min
+2121.2s 292 fold 3 ClipPool       seed 43: sel 26.74 | UAR 20.20 WAR 29.85 | 32.6 min
+2126.4s 293 fold 3 ClipPool-noAux seed 42: sel 24.19 | UAR 19.64 WAR 29.65 | 32.7 min
+2131.1s 294 fold 3 ClipPool-noAux seed 123: sel 25.66 | UAR 19.70 WAR 32.36 | 32.8 min
+2137.7s 295 fold 3 ClipPool-noAux seed 456: sel 24.40 | UAR 17.63 WAR 25.89 | 32.9 min
+2141.9s 296 fold 3 ClipPool-noAux seed 7: sel 24.58 | UAR 21.73 WAR 33.82 | 32.9 min
+2146.1s 297 fold 3 ClipPool-noAux seed 11: sel 26.51 | UAR 21.54 WAR 34.24 | 33.0 min
+2150.2s 298 fold 3 ClipPool-noAux seed 19: sel 27.72 | UAR 21.70 WAR 33.61 | 33.1 min
+2154.4s 299 fold 3 ClipPool-noAux seed 23: sel 25.50 | UAR 19.56 WAR 33.19 | 33.1 min
+2159.9s 300 fold 3 ClipPool-noAux seed 31: sel 25.90 | UAR 22.41 WAR 34.24 | 33.2 min
+2169.4s 301 fold 3 ClipPool-noAux seed 37: sel 27.79 | UAR 19.99 WAR 27.56 | 33.4 min
+2174.2s 302 fold 3 ClipPool-noAux seed 43: sel 26.28 | UAR 20.05 WAR 31.94 | 33.5 min
+2180.8s 303 fold 4: train 1567 | early-stop 359 | eval 495
+2186.5s 304 fold 4 RoleNet        seed 42: sel 25.36 | UAR 22.88 WAR 32.73 | 33.7 min
+2207.3s 305 fold 4 RoleNet        seed 123: sel 29.04 | UAR 23.18 WAR 28.08 | 34.0 min
+2213.9s 306 fold 4 RoleNet        seed 456: sel 26.34 | UAR 22.08 WAR 30.71 | 34.1 min
+2221.2s 307 fold 4 RoleNet        seed 7: sel 25.94 | UAR 22.71 WAR 34.34 | 34.3 min
+2229.0s 308 fold 4 RoleNet        seed 11: sel 25.73 | UAR 22.85 WAR 33.74 | 34.4 min
+2234.1s 309 fold 4 RoleNet        seed 19: sel 25.90 | UAR 19.69 WAR 31.31 | 34.5 min
+2241.4s 310 fold 4 RoleNet        seed 23: sel 25.56 | UAR 24.88 WAR 34.95 | 34.6 min
+2250.6s 311 fold 4 RoleNet        seed 31: sel 25.25 | UAR 20.17 WAR 27.47 | 34.8 min
+2258.2s 312 fold 4 RoleNet        seed 37: sel 26.29 | UAR 21.98 WAR 31.72 | 34.9 min
+2266.7s 313 fold 4 RoleNet        seed 43: sel 25.58 | UAR 20.16 WAR 28.89 | 35.0 min
+2272.3s 314 fold 4 noRoleEmb      seed 42: sel 25.55 | UAR 22.57 WAR 32.93 | 35.1 min
+2280.2s 315 fold 4 noRoleEmb      seed 123: sel 26.93 | UAR 24.90 WAR 35.35 | 35.2 min
+2286.7s 316 fold 4 noRoleEmb      seed 456: sel 26.31 | UAR 22.34 WAR 30.91 | 35.4 min
+2293.9s 317 fold 4 noRoleEmb      seed 7: sel 25.79 | UAR 23.48 WAR 34.95 | 35.5 min
+2299.5s 318 fold 4 noRoleEmb      seed 11: sel 24.75 | UAR 22.96 WAR 32.73 | 35.6 min
+2304.5s 319 fold 4 noRoleEmb      seed 19: sel 26.19 | UAR 20.78 WAR 33.13 | 35.7 min
+2311.7s 320 fold 4 noRoleEmb      seed 23: sel 24.35 | UAR 23.84 WAR 34.14 | 35.8 min
+2319.8s 321 fold 4 noRoleEmb      seed 31: sel 26.18 | UAR 20.52 WAR 29.09 | 35.9 min
+2327.1s 322 fold 4 noRoleEmb      seed 37: sel 25.07 | UAR 24.15 WAR 33.74 | 36.0 min
+2340.3s 323 fold 4 noRoleEmb      seed 43: sel 27.39 | UAR 16.82 WAR 25.05 | 36.2 min
+2345.7s 324 fold 4 noL            seed 42: sel 24.65 | UAR 19.54 WAR 28.89 | 36.3 min
+2351.7s 325 fold 4 noL            seed 123: sel 24.14 | UAR 21.39 WAR 32.32 | 36.4 min
+2357.3s 326 fold 4 noL            seed 456: sel 24.79 | UAR 22.02 WAR 30.91 | 36.5 min
+2363.3s 327 fold 4 noL            seed 7: sel 24.25 | UAR 20.84 WAR 30.51 | 36.6 min
+2372.7s 328 fold 4 noL            seed 11: sel 25.89 | UAR 18.64 WAR 26.06 | 36.8 min
+2381.2s 329 fold 4 noL            seed 19: sel 24.36 | UAR 17.57 WAR 25.25 | 36.9 min
+2395.3s 330 fold 4 noL            seed 23: sel 26.24 | UAR 18.45 WAR 24.85 | 37.2 min
+2403.6s 331 fold 4 noL            seed 31: sel 23.88 | UAR 19.24 WAR 27.27 | 37.3 min
+2412.9s 332 fold 4 noL            seed 37: sel 24.41 | UAR 19.86 WAR 29.49 | 37.5 min
+2424.7s 333 fold 4 noL            seed 43: sel 26.38 | UAR 18.56 WAR 25.05 | 37.7 min
+2431.0s 334 fold 4 RoleNet[R]     seed 42: sel 25.59 | UAR 23.02 WAR 32.93 | 37.8 min
+2439.4s 335 fold 4 RoleNet[R]     seed 123: sel 25.40 | UAR 23.76 WAR 33.54 | 37.9 min
+2446.2s 336 fold 4 RoleNet[R]     seed 456: sel 26.24 | UAR 23.84 WAR 32.53 | 38.0 min
+2453.9s 337 fold 4 RoleNet[R]     seed 7: sel 26.59 | UAR 23.57 WAR 35.15 | 38.1 min
+2462.7s 338 fold 4 RoleNet[R]     seed 11: sel 26.71 | UAR 23.97 WAR 33.74 | 38.3 min
+2468.0s 339 fold 4 RoleNet[R]     seed 19: sel 25.90 | UAR 19.69 WAR 31.31 | 38.4 min
+2476.2s 340 fold 4 RoleNet[R]     seed 23: sel 25.23 | UAR 24.49 WAR 34.34 | 38.5 min
+2488.8s 341 fold 4 RoleNet[R]     seed 31: sel 25.48 | UAR 18.52 WAR 26.06 | 38.7 min
+2496.7s 342 fold 4 RoleNet[R]     seed 37: sel 25.65 | UAR 23.95 WAR 33.54 | 38.9 min
+2510.9s 343 fold 4 RoleNet[R]     seed 43: sel 29.36 | UAR 18.40 WAR 25.45 | 39.1 min
+2515.8s 344 fold 4 RoleNet[R]-noAux seed 42: sel 27.29 | UAR 24.15 WAR 34.75 | 39.2 min
+2524.7s 345 fold 4 RoleNet[R]-noAux seed 123: sel 26.66 | UAR 25.15 WAR 31.52 | 39.3 min
+2529.3s 346 fold 4 RoleNet[R]-noAux seed 456: sel 26.93 | UAR 22.53 WAR 33.94 | 39.4 min
+2535.8s 347 fold 4 RoleNet[R]-noAux seed 7: sel 25.41 | UAR 23.59 WAR 35.76 | 39.5 min
+2541.0s 348 fold 4 RoleNet[R]-noAux seed 11: sel 26.11 | UAR 21.51 WAR 32.53 | 39.6 min
+2545.9s 349 fold 4 RoleNet[R]-noAux seed 19: sel 26.02 | UAR 21.73 WAR 33.74 | 39.7 min
+2551.8s 350 fold 4 RoleNet[R]-noAux seed 23: sel 24.48 | UAR 22.48 WAR 34.14 | 39.8 min
+2558.5s 351 fold 4 RoleNet[R]-noAux seed 31: sel 24.43 | UAR 20.19 WAR 29.09 | 39.9 min
+2563.7s 352 fold 4 RoleNet[R]-noAux seed 37: sel 24.89 | UAR 20.83 WAR 31.11 | 40.0 min
+2569.2s 353 fold 4 RoleNet[R]-noAux seed 43: sel 24.87 | UAR 21.06 WAR 31.31 | 40.1 min
+2576.0s 354 fold 4 ClipPool       seed 42: sel 26.12 | UAR 23.70 WAR 34.75 | 40.2 min
+2582.3s 355 fold 4 ClipPool       seed 123: sel 25.00 | UAR 24.74 WAR 35.96 | 40.3 min
+2590.0s 356 fold 4 ClipPool       seed 456: sel 30.20 | UAR 19.51 WAR 27.47 | 40.4 min
+2597.6s 357 fold 4 ClipPool       seed 7: sel 27.55 | UAR 22.49 WAR 32.32 | 40.5 min
+2603.5s 358 fold 4 ClipPool       seed 11: sel 24.55 | UAR 22.27 WAR 31.72 | 40.6 min
+2613.6s 359 fold 4 ClipPool       seed 19: sel 26.24 | UAR 18.12 WAR 24.04 | 40.8 min
+2621.0s 360 fold 4 ClipPool       seed 23: sel 27.05 | UAR 22.68 WAR 35.56 | 40.9 min
+2628.0s 361 fold 4 ClipPool       seed 31: sel 24.68 | UAR 21.96 WAR 32.32 | 41.0 min
+2635.4s 362 fold 4 ClipPool       seed 37: sel 26.45 | UAR 20.68 WAR 30.51 | 41.2 min
+2640.9s 363 fold 4 ClipPool       seed 43: sel 23.73 | UAR 23.02 WAR 34.95 | 41.3 min
+2646.1s 364 fold 4 ClipPool-noAux seed 42: sel 27.52 | UAR 22.44 WAR 31.52 | 41.3 min
+2653.0s 365 fold 4 ClipPool-noAux seed 123: sel 24.98 | UAR 21.61 WAR 31.72 | 41.5 min
+2659.1s 366 fold 4 ClipPool-noAux seed 456: sel 27.30 | UAR 22.04 WAR 32.32 | 41.6 min
+2669.5s 367 fold 4 ClipPool-noAux seed 7: sel 26.87 | UAR 19.04 WAR 24.85 | 41.7 min
+2679.9s 368 fold 4 ClipPool-noAux seed 11: sel 26.45 | UAR 18.86 WAR 25.05 | 41.9 min
+2687.1s 369 fold 4 ClipPool-noAux seed 19: sel 24.97 | UAR 21.38 WAR 31.92 | 42.0 min
+2696.9s 370 fold 4 ClipPool-noAux seed 23: sel 26.30 | UAR 18.39 WAR 28.08 | 42.2 min
+2703.0s 371 fold 4 ClipPool-noAux seed 31: sel 25.31 | UAR 20.15 WAR 27.68 | 42.3 min
+2710.0s 372 fold 4 ClipPool-noAux seed 37: sel 27.47 | UAR 19.78 WAR 29.49 | 42.4 min
+2715.0s 373 fold 4 ClipPool-noAux seed 43: sel 24.15 | UAR 22.75 WAR 34.14 | 42.5 min
+2715.0s 374 saved g47_oof_probs_proxy.npz and g47_fold_seed_log_proxy.csv
+2715.1s 375 ==== assignment mode: swapAL | arms: ['RoleShuffle'] ====
+2716.1s 376 HSEmotion embedding available: True | frame feature dim 146
+2724.0s 377 A found in III 80.1% | listener visible in III 79.8% | listener also in I/II 64.6%
+2724.0s 378 mode swapAL: >= 2 non-speaker candidates in clip III 16.2% | L differs from the proxy 0.0% (on the >= 2 subset 0.0%) | swapped 48.9% | L frames in III / I-II (mean, MCIS with L) [2.67 7.17]
+2724.1s 379 parameters: {}
+2724.2s 380 parameters: {'RoleShuffle': '0.709M'}
+2724.2s 381 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+2731.3s 382 fold 0: train 1733 | early-stop 207 | eval 481
+2741.2s 383 fold 0 RoleShuffle    seed 42: sel 23.25 | UAR 27.30 WAR 37.84 | 0.3 min
+2748.7s 384 fold 0 RoleShuffle    seed 123: sel 21.97 | UAR 28.74 WAR 40.75 | 0.4 min
+2760.0s 385 fold 0 RoleShuffle    seed 456: sel 22.10 | UAR 24.77 WAR 32.02 | 0.6 min
+2765.7s 386 fold 0 RoleShuffle    seed 7: sel 19.86 | UAR 22.33 WAR 36.80 | 0.7 min
+2771.5s 387 fold 0 RoleShuffle    seed 11: sel 22.87 | UAR 24.49 WAR 37.84 | 0.8 min
+2789.8s 388 fold 0 RoleShuffle    seed 19: sel 23.14 | UAR 24.02 WAR 35.97 | 1.1 min
+2796.1s 389 fold 0 RoleShuffle    seed 23: sel 21.23 | UAR 27.24 WAR 41.79 | 1.2 min
+2806.3s 390 fold 0 RoleShuffle    seed 31: sel 20.86 | UAR 28.85 WAR 35.97 | 1.4 min
+2816.4s 391 fold 0 RoleShuffle    seed 37: sel 21.19 | UAR 25.03 WAR 36.59 | 1.5 min
+2824.5s 392 fold 0 RoleShuffle    seed 43: sel 21.66 | UAR 27.44 WAR 38.05 | 1.7 min
+2831.9s 393 fold 1: train 1667 | early-stop 267 | eval 487
+2840.2s 394 fold 1 RoleShuffle    seed 42: sel 28.80 | UAR 26.76 WAR 40.25 | 1.9 min
+2848.3s 395 fold 1 RoleShuffle    seed 123: sel 30.84 | UAR 28.26 WAR 41.48 | 2.1 min
+2854.5s 396 fold 1 RoleShuffle    seed 456: sel 26.84 | UAR 26.87 WAR 40.86 | 2.2 min
+2862.1s 397 fold 1 RoleShuffle    seed 7: sel 27.84 | UAR 26.10 WAR 40.66 | 2.3 min
+2873.2s 398 fold 1 RoleShuffle    seed 11: sel 28.28 | UAR 24.71 WAR 39.84 | 2.5 min
+2880.3s 399 fold 1 RoleShuffle    seed 19: sel 28.66 | UAR 27.38 WAR 41.48 | 2.6 min
+2887.6s 400 fold 1 RoleShuffle    seed 23: sel 29.58 | UAR 29.09 WAR 41.68 | 2.7 min
+2895.1s 401 fold 1 RoleShuffle    seed 31: sel 28.34 | UAR 25.40 WAR 41.07 | 2.8 min
+2904.4s 402 fold 1 RoleShuffle    seed 37: sel 29.91 | UAR 26.59 WAR 37.99 | 3.0 min
+2911.0s 403 fold 1 RoleShuffle    seed 43: sel 27.31 | UAR 27.63 WAR 39.84 | 3.1 min
+2918.0s 404 fold 2: train 1634 | early-stop 308 | eval 479
+2924.9s 405 fold 2 RoleShuffle    seed 42: sel 23.24 | UAR 25.23 WAR 36.74 | 3.3 min
+2930.9s 406 fold 2 RoleShuffle    seed 123: sel 21.08 | UAR 22.45 WAR 32.99 | 3.4 min
+2937.4s 407 fold 2 RoleShuffle    seed 456: sel 21.59 | UAR 25.03 WAR 37.16 | 3.6 min
+2944.7s 408 fold 2 RoleShuffle    seed 7: sel 21.84 | UAR 24.29 WAR 35.49 | 3.7 min
+2952.2s 409 fold 2 RoleShuffle    seed 11: sel 24.10 | UAR 28.52 WAR 38.62 | 3.8 min
+2959.3s 410 fold 2 RoleShuffle    seed 19: sel 21.97 | UAR 23.52 WAR 34.45 | 3.9 min
+2965.7s 411 fold 2 RoleShuffle    seed 23: sel 22.62 | UAR 25.34 WAR 36.33 | 4.0 min
+2973.9s 412 fold 2 RoleShuffle    seed 31: sel 23.93 | UAR 24.35 WAR 34.24 | 4.2 min
+2980.5s 413 fold 2 RoleShuffle    seed 37: sel 22.24 | UAR 24.09 WAR 34.03 | 4.3 min
+2986.9s 414 fold 2 RoleShuffle    seed 43: sel 23.51 | UAR 24.48 WAR 36.12 | 4.4 min
+2994.2s 415 fold 3: train 1713 | early-stop 229 | eval 479
+3001.0s 416 fold 3 RoleShuffle    seed 42: sel 30.91 | UAR 20.50 WAR 31.73 | 4.6 min
+3010.7s 417 fold 3 RoleShuffle    seed 123: sel 27.39 | UAR 20.83 WAR 27.35 | 4.8 min
+3017.8s 418 fold 3 RoleShuffle    seed 456: sel 28.32 | UAR 21.75 WAR 33.82 | 4.9 min
+3024.4s 419 fold 3 RoleShuffle    seed 7: sel 27.35 | UAR 20.47 WAR 32.99 | 5.0 min
+3032.0s 420 fold 3 RoleShuffle    seed 11: sel 29.04 | UAR 22.13 WAR 32.36 | 5.1 min
+3039.7s 421 fold 3 RoleShuffle    seed 19: sel 25.84 | UAR 19.57 WAR 29.23 | 5.3 min
+3046.1s 422 fold 3 RoleShuffle    seed 23: sel 27.93 | UAR 19.84 WAR 32.15 | 5.4 min
+3055.5s 423 fold 3 RoleShuffle    seed 31: sel 27.50 | UAR 18.55 WAR 26.10 | 5.5 min
+3061.3s 424 fold 3 RoleShuffle    seed 37: sel 26.27 | UAR 17.39 WAR 26.93 | 5.6 min
+3069.0s 425 fold 3 RoleShuffle    seed 43: sel 27.01 | UAR 21.01 WAR 32.15 | 5.7 min
+3075.7s 426 fold 4: train 1567 | early-stop 359 | eval 495
+3082.7s 427 fold 4 RoleShuffle    seed 42: sel 26.58 | UAR 22.22 WAR 34.34 | 6.0 min
+3091.4s 428 fold 4 RoleShuffle    seed 123: sel 26.09 | UAR 25.40 WAR 36.16 | 6.1 min
+3098.1s 429 fold 4 RoleShuffle    seed 456: sel 28.05 | UAR 25.04 WAR 33.54 | 6.2 min
+3105.7s 430 fold 4 RoleShuffle    seed 7: sel 25.31 | UAR 22.39 WAR 33.94 | 6.4 min
+3111.7s 431 fold 4 RoleShuffle    seed 11: sel 26.16 | UAR 20.83 WAR 29.90 | 6.5 min
+3117.9s 432 fold 4 RoleShuffle    seed 19: sel 25.69 | UAR 22.77 WAR 33.74 | 6.6 min
+3125.5s 433 fold 4 RoleShuffle    seed 23: sel 26.00 | UAR 23.35 WAR 35.76 | 6.7 min
+3134.1s 434 fold 4 RoleShuffle    seed 31: sel 26.13 | UAR 20.38 WAR 29.70 | 6.8 min
+3142.4s 435 fold 4 RoleShuffle    seed 37: sel 25.31 | UAR 21.77 WAR 32.53 | 7.0 min
+3150.8s 436 fold 4 RoleShuffle    seed 43: sel 25.42 | UAR 19.88 WAR 28.08 | 7.1 min
+3150.8s 437 saved g47_oof_probs_swapAL.npz and g47_fold_seed_log_swapAL.csv
+3150.9s 438 ==== assignment mode: randL0 | arms: ['RandomL-0'] ====
+3151.8s 439 HSEmotion embedding available: True | frame feature dim 146
+3159.6s 440 A found in III 100.0% | listener visible in III 59.9% | listener also in I/II 42.3%
+3159.6s 441 mode randL0: >= 2 non-speaker candidates in clip III 16.2% | L differs from the proxy 9.7% (on the >= 2 subset 59.5%) | swapped 0.0% | L frames in III / I-II (mean, MCIS with L) [2.27 6.84]
+3159.7s 442 parameters: {}
+3159.7s 443 parameters: {'RandomL-0': '0.709M'}
+3159.8s 444 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+3166.5s 445 fold 0: train 1733 | early-stop 207 | eval 481
+3172.1s 446 fold 0 RandomL-0      seed 42: sel 24.37 | UAR 28.07 WAR 42.41 | 0.2 min
+3190.6s 447 fold 0 RandomL-0      seed 123: sel 22.36 | UAR 25.00 WAR 31.81 | 0.5 min
+3200.2s 448 fold 0 RandomL-0      seed 456: sel 21.76 | UAR 26.46 WAR 33.06 | 0.7 min
+3209.6s 449 fold 0 RandomL-0      seed 7: sel 21.91 | UAR 26.91 WAR 35.55 | 0.8 min
+3218.3s 450 fold 0 RandomL-0      seed 11: sel 23.01 | UAR 28.94 WAR 40.75 | 1.0 min
+3226.2s 451 fold 0 RandomL-0      seed 19: sel 20.59 | UAR 26.21 WAR 35.97 | 1.1 min
+3231.7s 452 fold 0 RandomL-0      seed 23: sel 20.95 | UAR 26.34 WAR 40.96 | 1.2 min
+3241.8s 453 fold 0 RandomL-0      seed 31: sel 22.15 | UAR 25.42 WAR 34.72 | 1.4 min
+3248.2s 454 fold 0 RandomL-0      seed 37: sel 21.56 | UAR 26.78 WAR 37.84 | 1.5 min
+3255.5s 455 fold 0 RandomL-0      seed 43: sel 21.84 | UAR 26.40 WAR 34.10 | 1.6 min
+3262.3s 456 fold 1: train 1667 | early-stop 267 | eval 487
+3270.0s 457 fold 1 RandomL-0      seed 42: sel 30.26 | UAR 28.02 WAR 40.25 | 1.8 min
+3277.7s 458 fold 1 RandomL-0      seed 123: sel 30.89 | UAR 27.23 WAR 41.89 | 2.0 min
+3284.7s 459 fold 1 RandomL-0      seed 456: sel 26.63 | UAR 26.59 WAR 38.81 | 2.1 min
+3292.6s 460 fold 1 RandomL-0      seed 7: sel 28.79 | UAR 28.42 WAR 39.84 | 2.2 min
+3300.9s 461 fold 1 RandomL-0      seed 11: sel 27.80 | UAR 27.73 WAR 39.63 | 2.4 min
+3307.7s 462 fold 1 RandomL-0      seed 19: sel 29.59 | UAR 26.98 WAR 41.07 | 2.5 min
+3314.4s 463 fold 1 RandomL-0      seed 23: sel 29.10 | UAR 30.06 WAR 42.30 | 2.6 min
+3321.4s 464 fold 1 RandomL-0      seed 31: sel 28.03 | UAR 24.72 WAR 39.63 | 2.7 min
+3328.8s 465 fold 1 RandomL-0      seed 37: sel 29.52 | UAR 28.73 WAR 41.48 | 2.8 min
+3334.7s 466 fold 1 RandomL-0      seed 43: sel 26.79 | UAR 27.77 WAR 41.68 | 2.9 min
+3341.6s 467 fold 2: train 1634 | early-stop 308 | eval 479
+3350.6s 468 fold 2 RandomL-0      seed 42: sel 22.91 | UAR 24.16 WAR 34.24 | 3.2 min
+3359.3s 469 fold 2 RandomL-0      seed 123: sel 21.92 | UAR 24.74 WAR 35.28 | 3.3 min
+3366.9s 470 fold 2 RandomL-0      seed 456: sel 21.47 | UAR 24.91 WAR 35.49 | 3.5 min
+3374.2s 471 fold 2 RandomL-0      seed 7: sel 22.44 | UAR 22.74 WAR 33.40 | 3.6 min
+3381.5s 472 fold 2 RandomL-0      seed 11: sel 23.96 | UAR 27.00 WAR 37.37 | 3.7 min
+3390.0s 473 fold 2 RandomL-0      seed 19: sel 21.23 | UAR 23.70 WAR 33.19 | 3.8 min
+3396.8s 474 fold 2 RandomL-0      seed 23: sel 23.13 | UAR 25.47 WAR 37.58 | 3.9 min
+3402.6s 475 fold 2 RandomL-0      seed 31: sel 21.94 | UAR 20.52 WAR 31.73 | 4.0 min
+3411.4s 476 fold 2 RandomL-0      seed 37: sel 23.43 | UAR 21.74 WAR 31.52 | 4.2 min
+3421.3s 477 fold 2 RandomL-0      seed 43: sel 22.31 | UAR 24.42 WAR 34.86 | 4.4 min
+3428.8s 478 fold 3: train 1713 | early-stop 229 | eval 479
+3438.3s 479 fold 3 RandomL-0      seed 42: sel 28.43 | UAR 24.47 WAR 33.40 | 4.6 min
+3447.8s 480 fold 3 RandomL-0      seed 123: sel 27.86 | UAR 20.15 WAR 30.27 | 4.8 min
+3455.3s 481 fold 3 RandomL-0      seed 456: sel 28.13 | UAR 20.40 WAR 32.78 | 4.9 min
+3461.7s 482 fold 3 RandomL-0      seed 7: sel 27.30 | UAR 19.66 WAR 31.94 | 5.0 min
+3469.6s 483 fold 3 RandomL-0      seed 11: sel 26.80 | UAR 20.68 WAR 31.11 | 5.2 min
+3475.5s 484 fold 3 RandomL-0      seed 19: sel 26.44 | UAR 19.48 WAR 31.52 | 5.3 min
+3481.8s 485 fold 3 RandomL-0      seed 23: sel 29.00 | UAR 19.58 WAR 32.15 | 5.4 min
+3498.1s 486 fold 3 RandomL-0      seed 31: sel 27.02 | UAR 18.88 WAR 23.17 | 5.6 min
+3503.7s 487 fold 3 RandomL-0      seed 37: sel 26.27 | UAR 18.45 WAR 27.56 | 5.7 min
+3509.8s 488 fold 3 RandomL-0      seed 43: sel 27.26 | UAR 19.49 WAR 33.19 | 5.8 min
+3516.2s 489 fold 4: train 1567 | early-stop 359 | eval 495
+3522.1s 490 fold 4 RandomL-0      seed 42: sel 25.75 | UAR 22.77 WAR 32.93 | 6.0 min
+3529.1s 491 fold 4 RandomL-0      seed 123: sel 25.47 | UAR 24.40 WAR 35.35 | 6.2 min
+3535.6s 492 fold 4 RandomL-0      seed 456: sel 26.53 | UAR 24.44 WAR 32.73 | 6.3 min
+3543.0s 493 fold 4 RandomL-0      seed 7: sel 25.78 | UAR 23.17 WAR 34.75 | 6.4 min
+3552.8s 494 fold 4 RandomL-0      seed 11: sel 25.87 | UAR 21.57 WAR 32.73 | 6.6 min
+3557.9s 495 fold 4 RandomL-0      seed 19: sel 25.69 | UAR 20.28 WAR 32.12 | 6.6 min
+3565.2s 496 fold 4 RandomL-0      seed 23: sel 25.49 | UAR 24.82 WAR 37.78 | 6.8 min
+3574.9s 497 fold 4 RandomL-0      seed 31: sel 24.96 | UAR 19.45 WAR 28.48 | 6.9 min
+3582.6s 498 fold 4 RandomL-0      seed 37: sel 26.66 | UAR 20.79 WAR 29.90 | 7.0 min
+3606.2s 499 fold 4 RandomL-0      seed 43: sel 33.89 | UAR 18.87 WAR 23.43 | 7.4 min
+3606.2s 500 saved g47_oof_probs_randL0.npz and g47_fold_seed_log_randL0.csv
+3606.2s 501 ==== assignment mode: randL1 | arms: ['RandomL-1'] ====
+3607.1s 502 HSEmotion embedding available: True | frame feature dim 146
+3614.1s 503 A found in III 100.0% | listener visible in III 59.9% | listener also in I/II 42.3%
+3614.1s 504 mode randL1: >= 2 non-speaker candidates in clip III 16.2% | L differs from the proxy 9.3% (on the >= 2 subset 57.3%) | swapped 0.0% | L frames in III / I-II (mean, MCIS with L) [2.28 6.88]
+3614.2s 505 parameters: {}
+3614.2s 506 parameters: {'RandomL-1': '0.709M'}
+3614.4s 507 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+3620.9s 508 fold 0: train 1733 | early-stop 207 | eval 481
+3626.4s 509 fold 0 RandomL-1      seed 42: sel 23.79 | UAR 27.12 WAR 41.37 | 0.2 min
+3637.2s 510 fold 0 RandomL-1      seed 123: sel 21.25 | UAR 25.66 WAR 35.14 | 0.4 min
+3646.9s 511 fold 0 RandomL-1      seed 456: sel 22.80 | UAR 24.16 WAR 31.60 | 0.5 min
+3652.6s 512 fold 0 RandomL-1      seed 7: sel 21.59 | UAR 25.80 WAR 39.29 | 0.6 min
+3663.5s 513 fold 0 RandomL-1      seed 11: sel 23.87 | UAR 28.05 WAR 38.88 | 0.8 min
+3669.6s 514 fold 0 RandomL-1      seed 19: sel 20.16 | UAR 27.06 WAR 42.62 | 0.9 min
+3676.2s 515 fold 0 RandomL-1      seed 23: sel 20.79 | UAR 27.23 WAR 42.62 | 1.0 min
+3685.0s 516 fold 0 RandomL-1      seed 31: sel 24.11 | UAR 26.59 WAR 41.79 | 1.2 min
+3692.0s 517 fold 0 RandomL-1      seed 37: sel 21.39 | UAR 27.10 WAR 38.25 | 1.3 min
+3701.9s 518 fold 0 RandomL-1      seed 43: sel 21.50 | UAR 24.84 WAR 35.34 | 1.5 min
+3709.7s 519 fold 1: train 1667 | early-stop 267 | eval 487
+3718.6s 520 fold 1 RandomL-1      seed 42: sel 28.94 | UAR 27.34 WAR 40.25 | 1.7 min
+3727.0s 521 fold 1 RandomL-1      seed 123: sel 31.58 | UAR 28.49 WAR 43.12 | 1.9 min
+3736.8s 522 fold 1 RandomL-1      seed 456: sel 26.24 | UAR 28.60 WAR 38.40 | 2.0 min
+3747.6s 523 fold 1 RandomL-1      seed 7: sel 29.32 | UAR 27.16 WAR 38.40 | 2.2 min
+3756.6s 524 fold 1 RandomL-1      seed 11: sel 27.92 | UAR 27.34 WAR 38.81 | 2.4 min
+3763.9s 525 fold 1 RandomL-1      seed 19: sel 29.45 | UAR 27.44 WAR 42.09 | 2.5 min
+3771.3s 526 fold 1 RandomL-1      seed 23: sel 29.32 | UAR 30.36 WAR 43.53 | 2.6 min
+3778.6s 527 fold 1 RandomL-1      seed 31: sel 28.86 | UAR 25.64 WAR 40.86 | 2.7 min
+3786.4s 528 fold 1 RandomL-1      seed 37: sel 29.95 | UAR 28.55 WAR 41.89 | 2.9 min
+3793.3s 529 fold 1 RandomL-1      seed 43: sel 26.63 | UAR 28.11 WAR 41.68 | 3.0 min
+3800.4s 530 fold 2: train 1634 | early-stop 308 | eval 479
+3808.5s 531 fold 2 RandomL-1      seed 42: sel 23.26 | UAR 26.25 WAR 37.58 | 3.2 min
+3814.8s 532 fold 2 RandomL-1      seed 123: sel 21.33 | UAR 23.10 WAR 34.66 | 3.3 min
+3824.8s 533 fold 2 RandomL-1      seed 456: sel 22.18 | UAR 23.52 WAR 34.66 | 3.5 min
+3831.3s 534 fold 2 RandomL-1      seed 7: sel 22.93 | UAR 22.44 WAR 32.99 | 3.6 min
+3838.2s 535 fold 2 RandomL-1      seed 11: sel 25.50 | UAR 27.32 WAR 38.00 | 3.7 min
+3844.9s 536 fold 2 RandomL-1      seed 19: sel 22.20 | UAR 24.61 WAR 35.70 | 3.8 min
+3850.9s 537 fold 2 RandomL-1      seed 23: sel 23.62 | UAR 25.56 WAR 36.33 | 3.9 min
+3856.4s 538 fold 2 RandomL-1      seed 31: sel 21.58 | UAR 20.64 WAR 31.94 | 4.0 min
+3864.8s 539 fold 2 RandomL-1      seed 37: sel 23.36 | UAR 21.88 WAR 31.32 | 4.2 min
+3870.0s 540 fold 2 RandomL-1      seed 43: sel 22.57 | UAR 23.99 WAR 35.70 | 4.3 min
+3876.7s 541 fold 3: train 1713 | early-stop 229 | eval 479
+3883.5s 542 fold 3 RandomL-1      seed 42: sel 28.81 | UAR 19.96 WAR 32.78 | 4.5 min
+3892.6s 543 fold 3 RandomL-1      seed 123: sel 29.18 | UAR 21.05 WAR 31.94 | 4.6 min
+3899.8s 544 fold 3 RandomL-1      seed 456: sel 27.44 | UAR 20.26 WAR 32.57 | 4.8 min
+3906.1s 545 fold 3 RandomL-1      seed 7: sel 26.93 | UAR 20.14 WAR 32.15 | 4.9 min
+3914.4s 546 fold 3 RandomL-1      seed 11: sel 26.67 | UAR 19.81 WAR 30.69 | 5.0 min
+3920.2s 547 fold 3 RandomL-1      seed 19: sel 26.66 | UAR 19.97 WAR 32.57 | 5.1 min
+3928.4s 548 fold 3 RandomL-1      seed 23: sel 26.87 | UAR 18.13 WAR 29.02 | 5.2 min
+3937.4s 549 fold 3 RandomL-1      seed 31: sel 26.57 | UAR 19.86 WAR 27.14 | 5.4 min
+3942.9s 550 fold 3 RandomL-1      seed 37: sel 25.90 | UAR 17.91 WAR 27.14 | 5.5 min
+3949.0s 551 fold 3 RandomL-1      seed 43: sel 27.93 | UAR 19.31 WAR 32.78 | 5.6 min
+3956.0s 552 fold 4: train 1567 | early-stop 359 | eval 495
+3961.9s 553 fold 4 RandomL-1      seed 42: sel 26.26 | UAR 23.56 WAR 34.14 | 5.8 min
+3970.2s 554 fold 4 RandomL-1      seed 123: sel 25.30 | UAR 24.11 WAR 34.55 | 5.9 min
+3975.6s 555 fold 4 RandomL-1      seed 456: sel 26.60 | UAR 22.01 WAR 33.13 | 6.0 min
+3983.0s 556 fold 4 RandomL-1      seed 7: sel 25.76 | UAR 22.96 WAR 34.55 | 6.1 min
+3988.8s 557 fold 4 RandomL-1      seed 11: sel 25.29 | UAR 22.34 WAR 32.32 | 6.2 min
+3994.0s 558 fold 4 RandomL-1      seed 19: sel 26.05 | UAR 20.35 WAR 32.32 | 6.3 min
+4001.3s 559 fold 4 RandomL-1      seed 23: sel 25.35 | UAR 23.38 WAR 33.33 | 6.5 min
+4008.6s 560 fold 4 RandomL-1      seed 31: sel 24.65 | UAR 22.53 WAR 31.72 | 6.6 min
+4016.4s 561 fold 4 RandomL-1      seed 37: sel 26.48 | UAR 21.44 WAR 31.72 | 6.7 min
+4032.7s 562 fold 4 RandomL-1      seed 43: sel 29.56 | UAR 19.26 WAR 23.03 | 7.0 min
+4032.7s 563 saved g47_oof_probs_randL1.npz and g47_fold_seed_log_randL1.csv
+4032.8s 564 ==== assignment mode: randL2 | arms: ['RandomL-2'] ====
+4033.8s 565 HSEmotion embedding available: True | frame feature dim 146
+4040.8s 566 A found in III 100.0% | listener visible in III 59.9% | listener also in I/II 42.1%
+4040.8s 567 mode randL2: >= 2 non-speaker candidates in clip III 16.2% | L differs from the proxy 9.4% (on the >= 2 subset 58.0%) | swapped 0.0% | L frames in III / I-II (mean, MCIS with L) [2.28 6.85]
+4040.9s 568 parameters: {}
+4041.3s 569 parameters: {'RandomL-2': '0.709M'}
+4041.5s 570 fold sizes (MCIS): [np.int64(481), np.int64(487), np.int64(479), np.int64(479), np.int64(495)]
+4048.0s 571 fold 0: train 1733 | early-stop 207 | eval 481
+4053.6s 572 fold 0 RandomL-2      seed 42: sel 23.50 | UAR 26.86 WAR 40.33 | 0.2 min
+4065.6s 573 fold 0 RandomL-2      seed 123: sel 21.76 | UAR 23.41 WAR 29.73 | 0.4 min
+4075.1s 574 fold 0 RandomL-2      seed 456: sel 22.51 | UAR 25.28 WAR 32.64 | 0.6 min
+4084.5s 575 fold 0 RandomL-2      seed 7: sel 22.23 | UAR 25.99 WAR 33.26 | 0.7 min
+4089.8s 576 fold 0 RandomL-2      seed 11: sel 21.96 | UAR 25.46 WAR 38.46 | 0.8 min
+4095.9s 577 fold 0 RandomL-2      seed 19: sel 20.13 | UAR 27.65 WAR 43.24 | 0.9 min
+4101.5s 578 fold 0 RandomL-2      seed 23: sel 21.06 | UAR 26.94 WAR 42.41 | 1.0 min
+4109.9s 579 fold 0 RandomL-2      seed 31: sel 22.80 | UAR 27.12 WAR 41.58 | 1.1 min
+4116.4s 580 fold 0 RandomL-2      seed 37: sel 22.19 | UAR 26.74 WAR 37.63 | 1.3 min
+4123.7s 581 fold 0 RandomL-2      seed 43: sel 21.99 | UAR 25.71 WAR 33.47 | 1.4 min
+4130.2s 582 fold 1: train 1667 | early-stop 267 | eval 487
+4137.5s 583 fold 1 RandomL-2      seed 42: sel 29.18 | UAR 28.05 WAR 39.63 | 1.6 min
+4144.8s 584 fold 1 RandomL-2      seed 123: sel 31.42 | UAR 28.35 WAR 42.92 | 1.7 min
+4151.3s 585 fold 1 RandomL-2      seed 456: sel 27.80 | UAR 26.50 WAR 39.01 | 1.8 min
+4160.7s 586 fold 1 RandomL-2      seed 7: sel 28.51 | UAR 27.23 WAR 39.63 | 2.0 min
+4169.0s 587 fold 1 RandomL-2      seed 11: sel 27.78 | UAR 29.05 WAR 40.45 | 2.1 min
+4175.7s 588 fold 1 RandomL-2      seed 19: sel 29.84 | UAR 27.44 WAR 42.09 | 2.2 min
+4182.3s 589 fold 1 RandomL-2      seed 23: sel 29.62 | UAR 31.21 WAR 44.56 | 2.4 min
+4190.7s 590 fold 1 RandomL-2      seed 31: sel 29.05 | UAR 25.83 WAR 38.19 | 2.5 min
+4197.6s 591 fold 1 RandomL-2      seed 37: sel 29.78 | UAR 29.59 WAR 42.30 | 2.6 min
+4203.7s 592 fold 1 RandomL-2      seed 43: sel 26.79 | UAR 26.85 WAR 40.45 | 2.7 min
+4210.5s 593 fold 2: train 1634 | early-stop 308 | eval 479
+4217.9s 594 fold 2 RandomL-2      seed 42: sel 23.43 | UAR 25.21 WAR 36.12 | 2.9 min
+4225.3s 595 fold 2 RandomL-2      seed 123: sel 20.88 | UAR 26.24 WAR 36.74 | 3.1 min
+4232.6s 596 fold 2 RandomL-2      seed 456: sel 21.89 | UAR 25.45 WAR 36.74 | 3.2 min
+4238.6s 597 fold 2 RandomL-2      seed 7: sel 21.90 | UAR 23.66 WAR 34.66 | 3.3 min
+4245.8s 598 fold 2 RandomL-2      seed 11: sel 24.29 | UAR 27.97 WAR 38.00 | 3.4 min
+4252.6s 599 fold 2 RandomL-2      seed 19: sel 23.17 | UAR 23.51 WAR 34.45 | 3.5 min
+4258.7s 600 fold 2 RandomL-2      seed 23: sel 22.71 | UAR 26.21 WAR 36.95 | 3.6 min
+4265.5s 601 fold 2 RandomL-2      seed 31: sel 22.15 | UAR 25.87 WAR 36.74 | 3.7 min
+4273.8s 602 fold 2 RandomL-2      seed 37: sel 22.81 | UAR 21.90 WAR 30.27 | 3.9 min
+4280.3s 603 fold 2 RandomL-2      seed 43: sel 22.71 | UAR 23.80 WAR 35.70 | 4.0 min
+4287.1s 604 fold 3: train 1713 | early-stop 229 | eval 479
+4293.8s 605 fold 3 RandomL-2      seed 42: sel 29.03 | UAR 19.83 WAR 31.73 | 4.2 min
+4303.0s 606 fold 3 RandomL-2      seed 123: sel 28.43 | UAR 19.63 WAR 29.65 | 4.4 min
+4310.3s 607 fold 3 RandomL-2      seed 456: sel 27.46 | UAR 19.74 WAR 31.73 | 4.5 min
+4317.1s 608 fold 3 RandomL-2      seed 7: sel 25.97 | UAR 21.65 WAR 33.40 | 4.6 min
+4324.8s 609 fold 3 RandomL-2      seed 11: sel 26.80 | UAR 20.25 WAR 30.27 | 4.7 min
+4330.6s 610 fold 3 RandomL-2      seed 19: sel 25.89 | UAR 19.67 WAR 31.94 | 4.8 min
+4336.9s 611 fold 3 RandomL-2      seed 23: sel 28.14 | UAR 20.31 WAR 32.57 | 4.9 min
+4346.1s 612 fold 3 RandomL-2      seed 31: sel 27.94 | UAR 20.40 WAR 27.97 | 5.1 min
+4351.6s 613 fold 3 RandomL-2      seed 37: sel 25.90 | UAR 18.23 WAR 27.35 | 5.2 min
+4359.6s 614 fold 3 RandomL-2      seed 43: sel 28.12 | UAR 20.83 WAR 30.27 | 5.3 min
+4366.2s 615 fold 4: train 1567 | early-stop 359 | eval 495
+4372.1s 616 fold 4 RandomL-2      seed 42: sel 25.55 | UAR 23.21 WAR 33.94 | 5.5 min
+4378.6s 617 fold 4 RandomL-2      seed 123: sel 24.97 | UAR 25.04 WAR 37.58 | 5.6 min
+4385.2s 618 fold 4 RandomL-2      seed 456: sel 26.45 | UAR 23.24 WAR 31.52 | 5.7 min
+4393.2s 619 fold 4 RandomL-2      seed 7: sel 26.16 | UAR 23.66 WAR 35.15 | 5.9 min
+4401.8s 620 fold 4 RandomL-2      seed 11: sel 26.59 | UAR 24.09 WAR 34.95 | 6.0 min
+4406.9s 621 fold 4 RandomL-2      seed 19: sel 25.92 | UAR 20.04 WAR 31.52 | 6.1 min
+4415.5s 622 fold 4 RandomL-2      seed 23: sel 26.09 | UAR 23.34 WAR 34.34 | 6.2 min
+4423.0s 623 fold 4 RandomL-2      seed 31: sel 24.94 | UAR 22.70 WAR 32.93 | 6.4 min
+4430.8s 624 fold 4 RandomL-2      seed 37: sel 26.52 | UAR 20.92 WAR 30.10 | 6.5 min
+4451.4s 625 fold 4 RandomL-2      seed 43: sel 32.13 | UAR 18.68 WAR 24.65 | 6.8 min
+4451.4s 626 saved g47_oof_probs_randL2.npz and g47_fold_seed_log_randL2.csv
+4451.6s 627 == 2421 MCIS, 45 episodes, 10 seeds; >= 2 non-speaker candidates in clip III: 393 MCIS ==
+4451.6s 628 
+4451.6s 629 -- all MCIS (n = 2421) --
+4451.6s 630 RoleNet           UAR 26.24 WAR 38.04 | per seed UAR 24.74 ± 0.97, WAR 35.15 ± 1.51
+4451.6s 631 noRoleEmb         UAR 26.41 WAR 38.33 | per seed UAR 24.79 ± 0.86, WAR 35.51 ± 1.42
+4451.6s 632 RoleShuffle       UAR 26.25 WAR 38.62 | per seed UAR 24.56 ± 0.77, WAR 35.35 ± 1.22
+4451.6s 633 RandomL           UAR 26.32 WAR 38.33 | per seed UAR 24.58 ± 0.95, WAR 35.28 ± 1.44
+4451.6s 634 RandomL-0         UAR 26.77 WAR 38.66 | per seed UAR 24.50 ± 1.23, WAR 34.92 ± 1.85
+4451.6s 635 RandomL-1         UAR 26.32 WAR 38.58 | per seed UAR 24.51 ± 0.87, WAR 35.49 ± 1.32
+4451.6s 636 RandomL-2         UAR 26.26 WAR 38.21 | per seed UAR 24.74 ± 0.98, WAR 35.44 ± 1.57
+4451.6s 637 noL               UAR 24.20 WAR 35.23 | per seed UAR 22.80 ± 0.75, WAR 32.63 ± 1.31
+4451.7s 638 RoleNet[R]        UAR 26.35 WAR 38.29 | per seed UAR 24.52 ± 1.21, WAR 35.21 ± 1.92
+4451.7s 639 ClipPool          UAR 25.33 WAR 37.13 | per seed UAR 24.16 ± 0.68, WAR 34.84 ± 1.27
+4451.7s 640 RoleNet[R]-noAux  UAR 26.68 WAR 38.83 | per seed UAR 24.76 ± 0.79, WAR 35.44 ± 1.15
+4451.7s 641 ClipPool-noAux    UAR 25.52 WAR 37.38 | per seed UAR 23.53 ± 0.72, WAR 34.03 ± 1.39
+4451.7s 642 
+4451.7s 643 -- >= 2 non-speaker candidates (n = 393) --
+4451.7s 644 RoleNet           UAR 28.63 WAR 42.49 | per seed UAR 27.32 ± 1.37, WAR 39.44 ± 1.95
+4451.7s 645 noRoleEmb         UAR 28.81 WAR 42.24 | per seed UAR 27.08 ± 1.22, WAR 39.52 ± 1.72
+4451.7s 646 RoleShuffle       UAR 29.61 WAR 43.51 | per seed UAR 27.00 ± 1.33, WAR 39.39 ± 1.56
+4451.7s 647 RandomL           UAR 28.84 WAR 42.49 | per seed UAR 26.85 ± 1.33, WAR 39.29 ± 1.75
+4451.7s 648 RandomL-0         UAR 29.77 WAR 43.26 | per seed UAR 26.88 ± 1.28, WAR 39.13 ± 1.35
+4451.7s 649 RandomL-1         UAR 30.61 WAR 45.04 | per seed UAR 26.86 ± 1.79, WAR 39.75 ± 2.38
+4451.7s 650 RandomL-2         UAR 28.04 WAR 41.98 | per seed UAR 26.82 ± 1.49, WAR 38.98 ± 2.14
+4451.7s 651 noL               UAR 27.62 WAR 40.46 | per seed UAR 26.14 ± 1.20, WAR 37.79 ± 1.80
+4451.7s 652 RoleNet[R]        UAR 29.13 WAR 43.26 | per seed UAR 27.49 ± 1.30, WAR 39.97 ± 1.58
+4451.7s 653 ClipPool          UAR 28.76 WAR 42.24 | per seed UAR 27.51 ± 1.19, WAR 39.90 ± 1.62
+4451.7s 654 RoleNet[R]-noAux  UAR 30.27 WAR 43.77 | per seed UAR 27.35 ± 1.27, WAR 39.44 ± 1.31
+4451.7s 655 ClipPool-noAux    UAR 30.74 WAR 44.27 | per seed UAR 26.34 ± 1.31, WAR 38.12 ± 1.85
+4451.7s 656 
+4451.7s 657 == contrasts (ensemble ΔUAR [95% two-level bootstrap]; paired per-seed ΔUAR mean ± SD; folds better) ==
+4453.8s 658 1 participant tokens vs clip pooling (aux)           [all MCIS] RoleNet[R] − ClipPool: +1.03 [-0.96,+2.35] | WAR +1.16 | per seed +0.36 ± 1.11 | 5/5 folds
+4455.6s 659 1 participant tokens vs clip pooling (no aux)        [all MCIS] RoleNet[R]-noAux − ClipPool-noAux: +1.16 [-0.30,+2.96] | WAR +1.45 | per seed +1.24 ± 1.19 | 4/5 folds
+4457.5s 660 1 reference: RoleNet (token class) vs clip pooling   [all MCIS] RoleNet − ClipPool: +0.92 [-0.96,+2.32] | WAR +0.91 | per seed +0.57 ± 0.84 | 5/5 folds
+4459.4s 661 1 auxiliary losses, participant tokens               [all MCIS] RoleNet[R] − RoleNet[R]-noAux: -0.33 [-2.39,+1.01] | WAR -0.54 | per seed -0.24 ± 1.24 | 3/5 folds
+4461.3s 662 1 auxiliary losses, clip pooling                     [all MCIS] ClipPool − ClipPool-noAux: -0.19 [-1.42,+1.61] | WAR -0.25 | per seed +0.63 ± 0.96 | 3/5 folds
+4463.2s 663 2 role embeddings                                    [all MCIS] RoleNet − noRoleEmb: -0.17 [-1.62,+1.35] | WAR -0.29 | per seed -0.06 ± 0.93 | 2/5 folds
+4465.1s 664 2 role assignment (A/L shuffled per MCIS)            [all MCIS] RoleNet − RoleShuffle: -0.01 [-1.71,+1.37] | WAR -0.58 | per seed +0.17 ± 0.66 | 3/5 folds
+4467.1s 665 3 proxy vs random non-speaker                        [>= 2 non-speaker candidates] RoleNet − RandomL: -0.21 [-2.46,+3.64] | WAR +0.00 | per seed +0.47 ± 1.13 | 3/5 folds
+4469.4s 666 3 proxy vs random non-speaker                        [all MCIS] RoleNet − RandomL: -0.08 [-1.83,+0.93] | WAR -0.29 | per seed +0.15 ± 0.49 | 1/5 folds
+4471.4s 667 3 random non-speaker vs no listener                  [>= 2 non-speaker candidates] RandomL − noL: +1.22 [-2.21,+4.96] | WAR +2.04 | per seed +0.71 ± 1.00 | 4/5 folds
+4473.0s 668 3 proxy vs no listener                               [>= 2 non-speaker candidates] RoleNet − noL: +1.01 [-2.32,+5.88] | WAR +2.04 | per seed +1.18 ± 0.89 | 4/5 folds
+4474.8s 669 3 proxy vs no listener                               [all MCIS] RoleNet − noL: +2.04 [+0.21,+3.46] | WAR +2.81 | per seed +1.94 ± 1.01 | 5/5 folds
+4476.4s 670 3 proxy vs random draw 0                             [>= 2 non-speaker candidates] RoleNet − RandomL-0: -1.14 [-2.62,+4.07] | WAR -0.76 | per seed +0.44 ± 0.90 | 2/5 folds
+4477.9s 671 3 proxy vs random draw 1                             [>= 2 non-speaker candidates] RoleNet − RandomL-1: -1.98 [-3.13,+3.72] | WAR -2.54 | per seed +0.47 ± 1.65 | 1/5 folds
+4479.3s 672 3 proxy vs random draw 2                             [>= 2 non-speaker candidates] RoleNet − RandomL-2: +0.59 [-2.50,+4.16] | WAR +0.51 | per seed +0.50 ± 1.43 | 3/5 folds
+4479.3s 673 
+4479.3s 674 == listener choice on MCIS with >= 2 non-speaker candidates ==
+4479.3s 675 proxy L: frames in clip III 4.13, in clips I-II 6.01
+4479.3s 676 random draw 0: equals the proxy in 40.5% | frames in clip III 2.66, in clips I-II 4.82
+4479.3s 677 random draw 1: equals the proxy in 42.7% | frames in clip III 2.72, in clips I-II 4.95
+4479.3s 678 random draw 2: equals the proxy in 42.0% | frames in clip III 2.73, in clips I-II 4.85
+4479.3s 679 
+4479.3s 680 VERDICT 1 (participant tokens vs clip pooling): NOT ESTABLISHED
+4479.3s 681 VERDICT 2 (role assignment carries information): NOT ESTABLISHED
+4479.3s 682 VERDICT 3 (the listener choice matters): NOT ESTABLISHED
+4479.3s 683 saved /kaggle/working/g47_summary.csv and g47_contrasts.csv
+4484.4s 684 /usr/local/lib/python3.13/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\|'
+4484.4s 685 cells[i][c] = re.sub('\\\\\|', '|', cell)
+4484.6s 686 /usr/local/lib/python3.13/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\_'
+4484.6s 687 text = re.sub(r'_', '\_', text) # Escape underscores in display text
+4485.3s 688 [NbConvertApp] Converting notebook __notebook__.ipynb to notebook
+4485.5s 689 [NbConvertApp] Writing 324736 bytes to __notebook__.ipynb
+4488.0s 690 [NbConvertApp] Converting notebook __notebook__.ipynb to html
+4489.6s 691 [NbConvertApp] Writing 1446365 bytes to __results__.html

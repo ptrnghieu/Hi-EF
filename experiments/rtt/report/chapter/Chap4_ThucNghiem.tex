@@ -268,4 +268,35 @@ Kết quả ở Mục 4.4 cho thấy gộp khuôn mặt theo clip chỉ kém \mo
 
 Quy tắc đọc kết quả được cố định trước: việc tổ chức theo người được coi là có lợi nếu cận dưới khoảng tin cậy của khác biệt dương ở cả cặp có và không có đầu dự đoán phụ; việc gán vai trò mang thông tin nếu \model{} hơn phiên bản hoán đổi một cách có ý nghĩa; và việc chọn người nghe có giá trị nếu \model{} hơn phiên bản chọn ngẫu nhiên trên các mẫu có ít nhất hai ứng viên.
 
-\choketqua{G47 -- bảng UAR/WAR (trung bình $\pm$ độ lệch chuẩn theo seed), khác biệt theo cặp, khoảng tin cậy và kết luận theo ba quy tắc trên}
+\begin{table}[!htb]
+\centering
+\caption{Kiểm soát vai trò của việc tổ chức theo người (G47; dữ liệu phát triển, 10 seed, cùng fold và seed cho mọi biến thể). UAR và WAR của ensemble, UAR theo seed (trung bình $\pm$ độ lệch chuẩn), và UAR trên 393 MCIS có ít nhất hai ứng viên người nghe}
+\label{tab:g47}
+{\fontsize{12}{14}\selectfont
+\begin{tabular}{lcccc}
+\toprule
+Biến thể & UAR & WAR & UAR theo seed & UAR ($\ge$2 ứng viên) \\
+\midrule
+\model{} & 26,24 & 38,04 & 24,74 $\pm$ 0,97 & 28,63 \\
+\quad bỏ vector nhúng vai trò & 26,41 & 38,33 & 24,79 $\pm$ 0,86 & 28,81 \\
+\quad hoán đổi A và L theo mẫu & 26,25 & 38,62 & 24,56 $\pm$ 0,77 & 29,61 \\
+\quad người nghe ngẫu nhiên (3 lần chọn) & 26,32 & 38,33 & 24,58 $\pm$ 0,95 & 28,84 \\
+\quad không có người nghe & 24,20 & 35,23 & 22,80 $\pm$ 0,75 & 27,62 \\
+\midrule
+Token theo người & 26,35 & 38,29 & 24,52 $\pm$ 1,21 & 29,13 \\
+Gộp theo clip & 25,33 & 37,13 & 24,16 $\pm$ 0,68 & 28,76 \\
+Token theo người, không đầu phụ & 26,68 & 38,83 & 24,76 $\pm$ 0,79 & 30,27 \\
+Gộp theo clip, không đầu phụ & 25,52 & 37,38 & 23,53 $\pm$ 0,72 & 30,74 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Bảng~\ref{tab:g47} tổng hợp kết quả. Biến thể \model{} trong lần chạy này tái lập chính xác kết quả 10 seed trước đó (26,24; theo seed 24,74 $\pm$ 0,97), cho thấy quy trình huấn luyện là tất định.
+
+\textbf{Token theo người so với gộp theo clip.} Token theo người cao hơn gộp theo clip 1,03 điểm khi có đầu dự đoán phụ (khoảng tin cậy [$-0{,}96$; $+2{,}35$], cao hơn ở cả năm fold) và 1,16 điểm khi không có đầu phụ ([$-0{,}30$; $+2{,}96$], bốn trên năm fold). Hướng của khác biệt nhất quán, nhưng theo quy tắc cố định trước thì lợi ích của việc tổ chức theo người \emph{chưa được chứng minh}. Các đầu dự đoán phụ không tạo khác biệt đo được ở cả hai kiểu tổ chức ($-0{,}33$ và $-0{,}19$).
+
+\textbf{Thông tin vai trò.} Bỏ vector nhúng vai trò ($-0{,}17$) hay hoán đổi A với L ở một nửa số mẫu ($-0{,}01$, khoảng tin cậy [$-1{,}71$; $+1{,}37$]) đều không làm kết quả thay đổi. Như vậy mô hình không dựa vào việc biết token nào là của người nói và token nào là của người nghe; điều nó dùng là nội dung của các khuôn mặt.
+
+\textbf{Chọn người nghe.} Chỉ 16,2\% số MCIS có từ hai ứng viên trở lên trong clip III, và trong số đó lần chọn ngẫu nhiên trùng với quy tắc ở 40--43\% trường hợp, nên phép so sánh này có độ nhạy thấp. Trên nhóm này, người nghe theo quy tắc không tốt hơn người nghe ngẫu nhiên ($-0{,}21$, khoảng tin cậy [$-2{,}46$; $+3{,}64$]), dù người nghe theo quy tắc xuất hiện nhiều hơn (trung bình 4,1 so với 2,7 khung hình trong clip III). Ngược lại, bỏ hẳn người nghe làm UAR giảm 2,04 điểm trên toàn bộ dữ liệu (khoảng tin cậy [+0,21; +3,46], cả năm fold).
+
+\textbf{Kết luận của thực nghiệm.} Trên Hi-EF, điều quan trọng là mô hình có được nhìn khuôn mặt của một người không nói trong clip III, thường là người nghe; còn việc chọn chính xác người nào trong số các ứng viên, hay gắn nhãn vai trò cho các token, không tạo khác biệt đo được. Việc giữ bằng chứng riêng theo người có xu hướng tốt hơn gộp theo clip khoảng một điểm UAR nhưng chưa vượt qua mức nhiễu.

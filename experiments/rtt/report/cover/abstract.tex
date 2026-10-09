@@ -1,0 +1,12 @@
+% Phụ lục 06 của quy định: tóm tắt tiếng Anh (yêu cầu với sinh viên chất lượng cao)
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{Abstract}
+\chapter*{\fontsize{13}{15}\selectfont{Abstract}}
+\fontsize{12}{14}\selectfont{
+\noindent\textbf{Abstract:}
+Emotion forecasting asks how a person will feel in the next conversational turn, before that turn takes place. The Hi-EF benchmark poses this task on TV-series video: from three consecutive clips, a model must forecast the emotion of the person who speaks in the fourth clip, whose identity is not given. This report describes the study of the task, from data analysis and the reproduction of the published model to the proposed model, \model{}. \model{} takes a listener as a proxy for the future responder without any future information, represents each person in each turn by one evidence token and reads these tokens with a small set encoder (0.71M parameters). On the locked test split, evaluated once under a preregistered plan, \model{} raises unweighted average recall (UAR) from 21.40 to 25.24 and accuracy from 32.52 to 36.43 over the retrained published model; the preregistered primary metric (UAR after logit adjustment) improves by a similar amount but not significantly. Controlled analyses on development data show that the listener's face and the context of the earlier turns are the two most important sources of information, each worth about two UAR points; that the automatically chosen listener performs as well as the true responder or a random non-speaker, and role labels bring no measurable gain; and that the model's advantage lies in cases where the responder mirrors the speaker or keeps their own emotion. The report also documents the directions that did not succeed and concludes that the current limit lies in recognising the participants' emotional states.
+
+\vspace{0.5cm}
+\noindent\textbf{\textit{Keywords:}} \textit{emotion forecasting, multimodal conversation, Hi-EF, listener.}
+}

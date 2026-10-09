@@ -72,7 +72,6 @@
 \makeatletter
 \renewcommand\@biblabel[1]{[#1]}
 \makeatother
-\renewcommand{\baselinestretch}{1.4}
 \flushbottom
 \renewcommand*{\bibfont}{\fontsize{13}{16}\selectfont}
 \usepackage[hidelinks,unicode]{hyperref}
@@ -83,27 +82,26 @@
 \newcommand{\choketqua}[1]{{\color{red}\itshape [Chờ kết quả: #1]}}
 
 \begin{document}
-\fontsize{13}{15.5}\selectfont
-
+% Thứ tự theo Quy định trình bày KLTN (Trường ĐH Công nghệ): bìa, phụ bìa tiếng Việt, phụ bìa tiếng Anh, tóm tắt tiếng
+% Việt, tóm tắt tiếng Anh, lời cam đoan, mục lục, ký hiệu và chữ viết tắt, nội dung, phụ lục, tài liệu tham khảo.
+% Chữ 13pt, giãn dòng 1,3, cách đoạn 6pt, thụt đầu dòng 1 cm; lề 2,5/3/3/2 cm (geometry ở trên).
+\fontsize{13}{15}\selectfont
 \pagestyle{empty}
 \input{cover/Biangoai}
-\newpage
-\pagestyle{plain}
-\pagenumbering{gobble}
 \input{cover/Biatrong}
-\newpage
-\def\baselinestretch{1.3}
-\input{cover/loicamdoan}
-\newpage
-\input{cover/loicamon}
-\newpage
-\input{cover/tomtat}
-\newpage
+\input{cover/Biatrong_EN}
+\pagestyle{plain}
 \pagenumbering{roman}
-
+\setstretch{1.3}
 \setlength{\parindent}{1cm}
-\setlength{\parskip}{0.6ex}
-\fontsize{13}{16}\selectfont
+\setlength{\parskip}{6pt}
+\input{cover/tomtat}
+\input{cover/abstract}
+\fontsize{13}{15}\selectfont
+\input{cover/loicamdoan}
+\input{cover/loicamon}
+
+\fontsize{13}{15}\selectfont
 \renewcommand{\contentsname}{\vspace{-70pt}\centerline{\fontsize{14}{16}\selectfont\MakeUppercase{Mục lục}}}
 \clearpage
 \phantomsection
@@ -116,17 +114,17 @@
 \addcontentsline{toc}{chapter}{Danh mục hình vẽ}
 \renewcommand{\listfigurename}{\vspace{-70pt}\centerline{\fontsize{14}{16}\selectfont{\MakeUppercase{Danh mục hình vẽ}}}}
 \listoffigures
-\fontsize{13}{16}\selectfont
 \clearpage
 \phantomsection
 \addcontentsline{toc}{chapter}{Danh mục bảng biểu}
 \renewcommand{\listtablename}{\vspace{-70pt}\centerline{\fontsize{14}{16}\selectfont{\MakeUppercase{Danh mục bảng biểu}}}}
 \listoftables
-\fontsize{13}{16}\selectfont
-\newpage
+\clearpage
 
+% số trang Ả-rập liên tục từ Mở đầu đến hết phần sau cùng, ở giữa cuối trang
 \pagenumbering{arabic}
 \pagestyle{plain}
+\fontsize{13}{15}\selectfont
 
 \input{chapter/Chap0_MoDau}
 \newpage
@@ -143,15 +141,13 @@
 \input{chapter/Chap6_KetLuan}
 \newpage
 
-\def\baselinestretch{1}
-\renewcommand{\bibname}{Tài liệu tham khảo}
-\clearpage
-\phantomsection
-\addcontentsline{toc}{chapter}{Tài liệu tham khảo}
-\bibliographystyle{unsrtnat}
-\bibliography{references}
-
 \appendix
 \input{cover/phuluc}
+
+\clearpage
+\renewcommand{\bibname}{Tài liệu tham khảo}
+\phantomsection
+\addcontentsline{toc}{chapter}{Tài liệu tham khảo}
+{\setstretch{1.15}\input{cover/tailieuthamkhao}}
 
 \end{document}

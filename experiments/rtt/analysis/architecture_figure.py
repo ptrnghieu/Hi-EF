@@ -69,7 +69,7 @@ enc_box(13.2, 8.0, 12.4, 4.8, 'Audio Encoder', 'AudioCLIP, ECAPA', FILL['purple'
 arrow(ax, 11.8, rows['audio'], 13.2, rows['audio'])
 
 # ============ (2) role-based evidence set
-container(ax, 28.2, 5.0, 29.6, 36.2, 'Role-Based Evidence Set')
+container(ax, 28.2, 5.0, 29.6, 36.2, 'Participant Evidence Set')
 # identity clusters -> roles
 box(ax, 29.5, 29.4, 4.6, 10.4, '', fill='none', ec=INK, ls=(0, (2, 1.5)), lw=0.7, r=0.8)
 ycl = {'A': 37.6, 'L': 34.6, 'O': 31.6}

@@ -61,8 +61,10 @@ def find_meld_raw():
     for base in ["/kaggle/input"] + sorted(glob.glob("/kaggle/input/datasets/*")):
         for d in sorted(glob.glob(base + "/*")):
             n = os.path.basename(d).lower()
-            if os.path.isdir(d) and "meld" in n and "m1" not in n and "hief" not in n and "features" not in n:
-                out.append(d)
+            if os.path.isdir(d) and "meld" in n and "m1" not in n and "hief" not in n and "features" not in n and "probs" not in n:
+                has = next(glob.iglob(d + "/**/*.mp4", recursive=True), None) or next(glob.iglob(d + "/**/*.tar.gz", recursive=True), None)
+                if has:
+                    out.append(d)
     return out
 
 

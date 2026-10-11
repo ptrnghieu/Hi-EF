@@ -412,8 +412,8 @@ ViT & F,B,S,T,A & Avg & LSTM+Trans & 23.19 & 34.49 & 19.01 & 28.85 & 15.14 & 40.
 ViT (Baseline) & F,B,S,T,A & Trans & LSTM+Trans & 23.72 & 35.19 & 21.30 & 31.30 & 15.27 & 45.34 \\
 \quad without body branch & F,S,T,A & Trans & LSTM+Trans & -- & -- & 21.40 & 32.52 & 15.50 & 46.09 \\
 \midrule
-Qwen2.5-VL-7B, zero-shot & video, subtitles & \multicolumn{2}{c}{prompt only} & -- & -- & 15.75 & 21.76 & \textit{TBD} & \textit{TBD} \\
-Qwen2.5-VL-7B, few-shot & video, subtitles & \multicolumn{2}{c}{7 examples} & -- & -- & 17.80 & 23.88 & \textit{TBD} & \textit{TBD} \\
+Qwen2.5-VL-7B, zero-shot & video, subtitles & \multicolumn{2}{c}{prompt only} & -- & -- & 15.75 & 21.76 & 22.65 & 25.80 \\
+Qwen2.5-VL-7B, few-shot & video, subtitles & \multicolumn{2}{c}{7 examples} & -- & -- & 17.80 & 23.88 & 24.85 & 23.19 \\
 \midrule
 \multicolumn{4}{l}{\model{} (ours)} & -- & -- & \textbf{25.24} & \textbf{36.43} & \textbf{16.85} & 39.30 \\
 \bottomrule
@@ -423,8 +423,8 @@ all inputs is the Baseline. Inputs: F face, B body, S scene (whole frame), T tex
 Numbers as published, on a different random split of Hi-EF with other seeds and training details; they are not comparable
 with the columns to their right and the ResNet18 and I3D models were not rerun (`--'). The ViT rows of the two right-hand
 column groups are our retrained models (face, body, scene features from CLIP ViT-B/32). The row without body branch is the
-Baseline of the preregistered run. Bottom: Qwen2.5-VL-7B-Instruct, zero-shot and few-shot (mean of three example sets;
-no audio), and \model{}. Hi-EF test: 409 samples, 8 episodes; MELD test: 1{,}341 windows, chance UAR 14.29; seed
+Baseline of the preregistered run. Bottom: Qwen2.5-VL-7B-Instruct, zero-shot and few-shot (mean of three example sets on Hi-EF, one
+example set on MELD; no audio), and \model{}. Hi-EF test: 409 samples, 8 episodes; MELD test: 1{,}341 windows, chance UAR 14.29; seed
 ensembles (five seeds on Hi-EF, three on MELD).}
 \label{tab:main}
 \end{table*}
@@ -459,13 +459,22 @@ UAR (17.10, 17.31 and 18.97 for the three sets) and 23.88 WAR, mainly through \e
 (0\% to 5\%), while \emph{fear} stays at zero. Even the best example set is 6.3 UAR points below \model{} and 2.3 below the
 Baseline, so a general vision-language model that sees the video and the subtitles but not the audio does not replace a
 model trained on the benchmark. The label is read from the first token of each class word, which only approximates its
-probability (Appendix~\ref{app:llm}). \todo{MELD results of Qwen2.5-VL-7B.}
+probability (Appendix~\ref{app:llm}).
+
+On MELD the language model reaches a higher UAR than every trained model (Table~\ref{tab:main}): 22.65 zero-shot and 24.85 with
+one set of seven examples, against 16.85 for \model{} and 15.27 for the Baseline, with 14.29 as chance. Its WAR is
+lower (25.80 and 23.19, against 39.30 for \model{} and 45.34 for the Baseline), mainly because it does not collapse to
+\emph{neutral}: it predicts \emph{neutral} for 21\% (zero-shot) and 13\% (few-shot) of the windows, against 48\% in the test
+labels, and it recognises \emph{angry} (49\% and 34\%) and \emph{happy} (30\% and 45\%) but never \emph{fear}. The few-shot result comes from a single example set, so we cannot say how much it varies, as it did on Hi-EF
+(17.10 to 18.97 UAR). We also cannot rule out that the model has seen the series or its subtitles during pretraining. A model that reads the
+subtitles and sees the frames therefore does better on MELD, in UAR, than the models trained on its 5{,}405 training windows; this does not
+change the comparison among the trained models.
 
 On MELD, \model{}'s UAR is higher than the Baseline's (16.85 against 15.27) and than all other retrained configurations,
 but the differences are not significant (against the Baseline $+1.58$ $[-0.35, 3.90]$; against the best retrained
 configuration, 16.42, $+0.43$). Five of the seven retrained configurations obtain a WAR above 45 by predicting
 \emph{neutral} for most windows, whereas \model{} spreads its forecasts. MELD is dominated by \emph{neutral} (48\% of the
-test windows), so WAR rewards the majority-class collapse that UAR penalises. All models are close to chance, so MELD
+test windows), so WAR rewards the majority-class collapse that UAR penalises. All trained models are close to chance, so MELD
 shows that the setting is hard rather than that the approach transfers.
 
 \begin{figure*}[t]
@@ -773,7 +782,7 @@ single preregistered run; invalid for the trajectory arms (caching bug) \\
 4 & \model{}, the Baseline without body branch and internal variants (Table~\ref{tab:main}) & single preregistered run \\
 5 & a class-rebalanced variant of \model{} & single read after access 4; not reported \\
 6 & seven ViT baselines with body branch (Table~\ref{tab:main}) & read after access 4; not preregistered \\
-7 & Qwen2.5-VL-7B-Instruct, zero-shot and few-shot (Appendix~\ref{app:llm}) & prompt fixed on validation rows before the read; read once on Hi-EF, MELD \todo{pending} \\
+7 & Qwen2.5-VL-7B-Instruct, zero-shot and few-shot (Appendix~\ref{app:llm}) & prompt fixed on validation rows before the read; read once on Hi-EF and once on MELD \\
 \bottomrule
 \end{tabular}
 \caption{Every access to the Hi-EF test split. \model{} was designed after access 1 using development data only; no
@@ -874,7 +883,7 @@ few-shot setting it is preceded by seven worked examples, one per emotion class,
 consists of the same instruction, the subtitles and the middle frame of each of its three clips (a still image of
 $224 \times 168$ pixels, to keep the prompt short), and the true emotion of the next speaker as the assistant's answer. Examples are drawn from the training rows of
 the same dataset (Hi-EF: the training and validation episodes; MELD: the training windows), never from test, and we use three
-independent example sets (seeds 0, 1 and 2); we report the mean over the sets.
+independent example sets (seeds 0, 1 and 2) on Hi-EF and report the mean over the sets; on MELD only the first set (seed 0) was run.
 
 \paragraph{Scoring.} We do not let the model generate text. At the position of the answer, we read the logits of the first
 token of each of the seven label words (\texttt{ang}, \texttt{dis}, \texttt{f}, \texttt{happy}, \texttt{neutral}, \texttt{sad},

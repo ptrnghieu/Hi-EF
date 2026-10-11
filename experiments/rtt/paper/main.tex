@@ -849,8 +849,8 @@ will express. Answer with exactly one word from: angry, disgust, fear, happy, ne
 
 \paragraph{Zero-shot and few-shot.} In the zero-shot setting the prompt is the instruction followed by the three clips. In the
 few-shot setting it is preceded by seven worked examples, one per emotion class, in a random but fixed class order. An example
-consists of the same instruction, the subtitles and the middle frame of each of its three clips (a still image, to keep the
-prompt short), and the true emotion of the next speaker as the assistant's answer. Examples are drawn from the training rows of
+consists of the same instruction, the subtitles and the middle frame of each of its three clips (a still image of
+$224 \times 168$ pixels, to keep the prompt short), and the true emotion of the next speaker as the assistant's answer. Examples are drawn from the training rows of
 the same dataset (Hi-EF: the training and validation episodes; MELD: the training windows), never from test, and we use three
 independent example sets (seeds 0, 1 and 2); we report the mean over the sets.
 

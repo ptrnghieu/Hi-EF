@@ -28,7 +28,7 @@ give a 7-class distribution (softmax over the seven logits), from which UAR / WA
 
 * **Zero-shot**: instruction + the three clips.
 * **Few-shot**: 7 worked examples, one per class, drawn from the training rows of the same dataset (Hi-EF: train+val
-  episodes; MELD: train), each shown as subtitles + the middle frame of each clip and the true label of the next
+  episodes; MELD: train), each shown as subtitles + the middle frame of each clip (224×168) and the true label of the next
   speaker; the example classes are shuffled with a fixed seed. `SHOT_SEEDS` gives independent example sets
   (results are reported per set and as mean).
 * Evaluation on the **test split** only (Hi-EF: 409 MCIS; MELD: 1,341 windows), read once by this notebook (an
@@ -42,10 +42,13 @@ give a 7-class distribution (softmax over the seven logits), from which UAR / WA
 import os, glob
 SOURCE = "hief"                         # "hief" or "meld"
 OUT_DIR = "/kaggle/working"
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
 DTYPE = "float16"                       # T4 has no bfloat16; use "bfloat16" on A100/L4
 N_FRAMES = 8                            # frames per clip for the video input
 FRAME_WH = (336, 252)                   # multiples of 28, as required by the vision tower
+FRAME_WH_SHOT = (224, 168)              # few-shot example stills (smaller, to fit the memory of a 15 GB GPU)
+RESUME_NPZ = None                       # path of a previous l1_<SOURCE>_probs.npz: finished settings are loaded and skipped
 SHOT_SEEDS = [0, 1, 2]                  # independent few-shot example sets (set [] to skip few-shot)
 RUN_ZERO_SHOT = True
 SMOKE_N = 12                            # validation rows printed before the test run
@@ -144,7 +147,7 @@ def clip_video(c):
 
 
 def clip_still(c):
-    return clip_video(c)[N_FRAMES // 2]
+    return clip_video(c)[N_FRAMES // 2].resize(FRAME_WH_SHOT)
 
 
 # ---- the fixed prompt
@@ -195,7 +198,7 @@ def pick_shots(seed, rows):
 ("code", '''
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
 DT = getattr(torch, DTYPE)
-model = Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_ID, torch_dtype=DT, device_map="auto",
+model = Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_ID, torch_dtype=DT, device_map="balanced",
                                                            attn_implementation="sdpa").eval()
 proc = AutoProcessor.from_pretrained(MODEL_ID)
 tok = proc.tokenizer
@@ -233,12 +236,21 @@ if DEBUG_N:
     te = te.head(DEBUG_N)
 yt = te.yB.values
 PROBS = {}
+if RESUME_NPZ and os.path.exists(RESUME_NPZ):
+    _z = np.load(RESUME_NPZ, allow_pickle=True)
+    assert (_z['sample_id'] == te.sample_id.values).all(), "the resumed file belongs to another sample list"
+    PROBS = {k.replace('_', '-') if k.startswith(('zero', 'few')) else k: _z[k] for k in _z.files if k not in ('sample_id', 'y')}
+    print("resumed:", list(PROBS))
 
 
 def run(name, shots):
+    if name in PROBS:
+        print("skip", name, "(resumed)"); return
     out, t0 = [], time.time()
     for n, (_, r) in enumerate(te.iterrows()):
         out.append(score(shots, r))
+        if (n + 1) % 10 == 0:
+            torch.cuda.empty_cache()
         if (n + 1) % 100 == 0:
             el = (time.time() - t0) / 60
             print(f"{name}: {n + 1}/{len(te)} | {el:.1f} min | ETA {el / (n + 1) * (len(te) - n - 1):.0f} min", flush=True)

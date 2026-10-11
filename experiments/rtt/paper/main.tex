@@ -37,8 +37,9 @@ We make the \emph{participant}, rather than the turn, the unit of evidence. \mod
 people without any identity information, summarises each person in each turn by one token, and reads these tokens
 together with speech and scene tokens in a small set encoder (0.71M parameters). Evaluated once on the held-out test
 split of a multi-party video benchmark under a preregistered plan, \model{} improves unweighted average recall over
-the strongest published model, retrained on the same split, by 3.84 points and wins seven of eight test episodes; on a
-second benchmark the difference is not significant. Controlled analyses show what matters and what does not. The
+the strongest published model, retrained on the same split with all its inputs, by 3.9 points; it is on par with the best
+of seven retrained configurations of that model (+1.0, not significant) with about fifty times fewer parameters, and on a
+second benchmark the differences are not significant. Controlled analyses show what matters and what does not. The
 faces of co-present participants and the earlier turns are worth about two points each, whereas which participant is
 taken as the likely responder, the true responder's identity and the role labels of the slots make no measurable
 difference. The remaining errors lie in recognising participants' emotional states, not in how their evidence is
@@ -95,7 +96,7 @@ token, participants are found without identity information, and a set encoder re
 tokens.
 \item An evaluation on two multi-party video benchmarks against all published baselines of the original benchmark.
 Under a preregistered single test read, \model{} improves UAR over the strongest published model, retrained on our
-split, by 3.84 points and wins seven of eight test episodes.
+split with all its inputs, by 3.9 points; it is on par with the best of seven retrained configurations.
 \item Controlled analyses of what drives the gain. Co-present participants' faces and earlier turns are worth about
 two UAR points each, and the gain survives the removal of the end of the current turn, whereas participant identity,
 role labels and extra encoder structure bring no measurable gain. An error analysis locates the limit in the
@@ -111,13 +112,13 @@ Emotion recognition in conversation (ERC) labels utterances that are observed \c
 are speaker-centric: they keep a state for each \emph{known} speaker with memory networks or graphs
 \citep{hazarika2018icon,majumder2019dialoguernn,ghosal2019dialoguegcn,shen2021dagerc}. More recent work fuses text,
 audio and video with correlation-aware attention \citep{shi2023multiemo} or unified multimodal models
-\citep{hu2022unimse}, adapts large language models to ERC \citep{lei2023instructerc}, or builds multimodal large
-language models that recognise and explain emotion \citep{cheng2024emotionllama,lian2025affectgpt}. PFA-ERC even
+\citep{hu2022unimse}, or builds multimodal large language models that recognise and explain emotion
+\citep{cheng2024emotionllama,lian2025affectgpt}. PFA-ERC even
 predicts pseudo-future context to help recognition \citep{khule2024pfaerc}. All of them label utterances that are
 available, and multi-party benchmarks such as MELD \citep{poria2019meld} supply the speaker names that they exploit.
 Forecasting the emotion of a turn that has not happened yet is much less studied. It has been addressed in text
-dialogue \citep{wang2020sentiment,altarawneh2024predicting}, in call-centre speech \citep{debsharma2025erfc}, and in
-multimodal video by \citet{wang2026hief}, who withhold the responder's identity, which removes the speaker tracking
+dialogue \citep{wang2020sentiment,li2021emotion,koga2024forecasting}, where even large language models struggle
+\citep{koga2024forecasting}, and in multimodal video by \citet{wang2026hief}, who withhold the responder's identity, which removes the speaker tracking
 that ERC models rely on. We keep the idea that individuals matter but drop the need to know who they are: participants
 are grouped within a sample and treated as exchangeable evidence, motivated by emotional contagion
 \citep{hatfield1994contagion} and inertia \citep{kuppens2010inertia}.
@@ -126,8 +127,8 @@ are grouped within a sample and treated as exchangeable evidence, motivated by e
 
 Multimodal learning combines complementary signals from several modalities \citep{baltrusaitis2019multimodal}.
 Cross-modal transformers \citep{tsai2019mult}, shared embedding spaces \citep{radford2021clip,girdhar2023imagebind}
-and, more recently, omni-modal large models that take text, audio, image and video \citep{xu2025qwen25omni} make strong
-frozen or pretrained encoders widely available; we follow the efficient recipe of a small fusion module on frozen
+and, more recently, vision-language models that read images, video and text \citep{chen2024internvl,bai2025qwen25vl}
+make strong frozen or pretrained encoders widely available; we follow the efficient recipe of a small fusion module on frozen
 encoders. A recurring difficulty is that one modality dominates training, and balanced-learning methods counter it
 by modulating gradients or re-learning the weaker modality \citep{wang2020makes,peng2022balanced,wei2024diagnosing};
 modality dropout \citep{neverova2016moddrop} serves the same purpose, as do our auxiliary heads. Whether a trained
@@ -140,8 +141,8 @@ Several recent lines of work make the interacting people, rather than the frame 
 Ego-Exo4D, for instance, offers synchronised views of people performing skilled activities, as a basis for
 understanding human behaviour from video \citep{grauman2024egoexo4d}. Dyadic generation models learn to produce a
 listener's facial and body reaction from the speaker's behaviour \citep{ng2022learning}, with joint pretraining of
-speaker and listener \citep{tran2024dim}, or from thousands of hours of face-to-face interaction
-\citep{agrawal2025seamless}. These works
+speaker and listener \citep{tran2024dim}, or with a multimodal language model that reads speech content, acoustics
+and speaker emotion \citep{lai2025listening}. These works
 show that a person's reaction is predictable from their partner's behaviour, but they generate behaviour for known
 people and do not forecast the emotion of an unobserved next speaker in multi-party edited video. We transfer the
 person-centric view to this setting without person tracks or identity: participants are formed by clustering faces
@@ -344,11 +345,19 @@ episodes (2{,}000 draws). For structural comparisons with small effects we also 
 \paragraph{Baselines.} We compare with all 15 configurations reported by \citet{wang2026hief}. They vary the visual
 backbone (ResNet18, I3D, ViT), the visual inputs (face only, or face, body and scene), the modalities (video, plus
 CLIP text and AudioCLIP audio), the fusion within a clip (average or transformer) and the fusion across clips
-(average, transformer, or LSTM plus transformer). Their best configuration (ViT features of face, body and scene,
-transformer fusion with CLIP text and AudioCLIP audio, LSTM plus transformer across clips) is the \emph{Baseline} that
-we retrain on our split from the released code, and on MELD. The other 14 configurations are listed with the numbers
-published for the original split (marked $\dagger$); they are not retrained and not comparable to the other columns.
-In the analyses we also use a feature-matched version of the Baseline, fed with \model{}'s features aggregated per clip.
+(average, transformer, or LSTM plus transformer). The eight ResNet18 and I3D configurations are end-to-end video
+networks that need the raw videos and the authors' preprocessing, which is not released, so they are listed with the
+numbers published for the original split (marked $\dagger$) and are not retrained. The seven ViT configurations work on
+frozen CLIP features, and we retrain all of them, on our Hi-EF split and on MELD, with face, body and scene input as in
+the paper (Section~\ref{sec:setting}, implementation details). Their best configuration (face, body and scene
+features, transformer fusion with CLIP text and AudioCLIP audio, LSTM plus transformer across clips) is the
+\emph{Baseline}. Our reimplementation of the intra-clip \emph{Average} fusion (mean over frames, then over branches and
+modalities) and of the inter-clip \emph{Average} (mean of the three clip vectors) follows our reading of the paper, since
+the released code has no separate class for them. Before the body features existed we had also trained the Baseline
+without the body branch in the preregistered run; it is listed separately. As multimodal large language model
+baselines we add Qwen2.5-VL-7B-Instruct \citep{bai2025qwen25vl}, zero-shot and few-shot, which reads the three clips as video
+with their subtitles but not the audio (Appendix~\ref{app:llm}). In the analyses we also use a feature-matched version of
+the Baseline, fed with \model{}'s features aggregated per clip.
 
 \paragraph{Implementation details.} Faces are detected at 4\,fps (at most 32 frames per clip, at most 24 per slot
 cell) and embedded with ArcFace; clustering uses average linkage with a cosine threshold of 0.45. A frame is
@@ -359,21 +368,26 @@ has $L=2$ pre-norm SABs, 4 heads, a 512-dimensional FFN and dropout 0.2, and rea
 heads have weight $\lambda=0.3$; modality dropout removes all speech and scene tokens with probability 0.3, or else all
 face tokens with probability 0.15. We use AdamW (learning rate $3\cdot10^{-4}$, weight decay $10^{-2}$, batch 64, at
 most 80 epochs) and keep the checkpoint with the best UAR on five held-out training episodes (patience 12). The
-Baseline is retrained with AdamW (learning rate $10^{-4}$, batch 32, 50 epochs, checkpoint by selection UAR). On
-Hi-EF, development results use 10 seeds; for the test, \model{} and the Baseline were trained on the 45 development
-episodes with five seeds, and the test split was read once under a plan committed before the run (models, seeds,
-metrics and the order of confirmatory contrasts). The preregistered primary metric was 7-class UAR after logit
-adjustment \citep{menon2021logit}; plain scoring was registered as a descriptive analysis. Earlier, unrelated model
-families had been evaluated on the same test split (Appendix~\ref{app:extra}). On MELD, both models are trained with
-three seeds. Appendix~\ref{app:extra} lists all hyper-parameters.
+retrained ViT baselines use AdamW (learning rate $10^{-4}$, weight decay $10^{-5}$, batch 32, 50 epochs, checkpoint by
+selection UAR, as in the replication of the paper's code). Their body branch is not in the released features, so we add it:
+16 evenly spaced frames per clip, the largest person detected in each frame by a YOLOv8-small detector
+(confidence $\geq$ 0.4, height $\geq$ 64 px), and the CLIP ViT-B/32 features of the crop, the same encoder as the face and
+scene features. \model{} does not use these features. On
+Hi-EF, development results use 10 seeds; for the test, \model{} and the Baseline without body branch were trained on the
+45 development episodes with five seeds, and the test split was read once under a plan committed before the run (models,
+seeds, metrics and the order of confirmatory contrasts). The preregistered primary metric was 7-class UAR after logit
+adjustment \citep{menon2021logit}; plain scoring was registered as a descriptive analysis. The later runs (seven ViT
+baselines with body branch, large language model) read the test split again, and earlier, unrelated model families had
+been evaluated on it too; every access is listed in Appendix~\ref{app:extra}. On MELD, all models are trained with three
+seeds. Appendix~\ref{app:extra} lists all hyper-parameters, and Appendix~\ref{app:split} describes the splits.
 
 \subsection{Experimental Results}
 \label{sec:main}
 
 \begin{table*}[t]
 \centering\small
-\setlength{\tabcolsep}{4.5pt}
-\begin{tabular}{llllcccccccc}
+\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{lll@{\hspace{9pt}}l@{\hspace{9pt}}cccccccc}
 \toprule
  & & & & \multicolumn{2}{c}{Hi-EF, published$^\dagger$} & \multicolumn{2}{c}{Hi-EF, our split} & \multicolumn{2}{c}{MELD, our split} \\
 \cmidrule(lr){5-6}\cmidrule(lr){7-8}\cmidrule(lr){9-10}
@@ -387,61 +401,82 @@ I3D & F & -- & Avg & 21.73 & 28.57 & -- & -- & -- & -- \\
 I3D & F,B,S & Avg & Avg & 21.16 & 29.62 & -- & -- & -- & -- \\
 I3D & F,B,S & Trans & Avg & 21.19 & 29.63 & -- & -- & -- & -- \\
 I3D & F,B,S & Avg & Trans & 22.99 & 29.62 & -- & -- & -- & -- \\
-ViT & F,B,S & Trans & LSTM+Trans & 22.39 & 31.37 & -- & -- & -- & -- \\
-ViT & F,B,S,A & Trans & LSTM+Trans & 21.27 & 33.34 & -- & -- & -- & -- \\
-ViT & F,B,S,T & Trans & LSTM+Trans & 21.80 & 31.03 & -- & -- & -- & -- \\
-ViT & F,B,S,T,A & Avg & Avg & 18.55 & 31.44 & -- & -- & -- & -- \\
-ViT & F,B,S,T,A & Trans & Avg & 21.71 & 33.38 & -- & -- & -- & -- \\
-ViT & F,B,S,T,A & Avg & LSTM+Trans & 23.19 & 34.49 & -- & -- & -- & -- \\
-ViT & F,B,S,T,A & Trans & LSTM+Trans & 23.72 & 35.19 & 21.40 & 32.52 & 15.50 & \textbf{46.09} \\
+\midrule
+ViT & F,B,S & Trans & LSTM+Trans & 22.39 & 31.37 & 21.62 & 32.27 & 14.87 & 46.09 \\
+ViT & F,B,S,A & Trans & LSTM+Trans & 21.27 & 33.34 & 22.72 & 33.74 & 15.05 & \textbf{46.16} \\
+ViT & F,B,S,T & Trans & LSTM+Trans & 21.80 & 31.03 & 20.82 & 30.81 & 14.97 & 45.64 \\
+ViT & F,B,S,T,A & Avg & Avg & 18.55 & 31.44 & 22.84 & 32.52 & 14.41 & \textbf{46.16} \\
+ViT & F,B,S,T,A & Trans & Avg & 21.71 & 33.38 & 24.23 & 32.76 & 16.42 & 38.85 \\
+ViT & F,B,S,T,A & Avg & LSTM+Trans & 23.19 & 34.49 & 19.01 & 28.85 & 15.14 & 40.64 \\
+ViT (Baseline) & F,B,S,T,A & Trans & LSTM+Trans & 23.72 & 35.19 & 21.30 & 31.30 & 15.27 & 45.34 \\
+\quad without body branch & F,S,T,A & Trans & LSTM+Trans & -- & -- & 21.40 & 32.52 & 15.50 & 46.09 \\
+\midrule
+Qwen2.5-VL-7B, zero-shot & video, subtitles & \multicolumn{2}{c}{prompt only} & -- & -- & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
+Qwen2.5-VL-7B, few-shot & video, subtitles & \multicolumn{2}{c}{7 examples} & -- & -- & \textit{TBD} & \textit{TBD} & \textit{TBD} & \textit{TBD} \\
 \midrule
 \multicolumn{4}{l}{\model{} (ours)} & -- & -- & \textbf{25.24} & \textbf{36.43} & \textbf{16.85} & 39.30 \\
 \bottomrule
 \end{tabular}
-\caption{Emotion forecasting results (\%). Rows 1--15: all configurations of \citet{wang2026hief}; the last of them
-is the Baseline that we retrain. Inputs: F face, B body, S scene, T text (CLIP), A audio (AudioCLIP). $^\dagger$ Numbers
-as published, on a different random split of Hi-EF with other seeds and training details; they are not comparable
-with the columns to their right and were not rerun (`--'). Hi-EF test: 409 samples, 8 episodes; MELD test: 1{,}341
-windows, chance UAR 14.29; both with seed ensembles.}
+\caption{Emotion forecasting results (\%). Top: the 15 configurations of \citet{wang2026hief}; the ViT configuration with
+all inputs is the Baseline. Inputs: F face, B body, S scene (whole frame), T text (CLIP), A audio (AudioCLIP). $^\dagger$
+Numbers as published, on a different random split of Hi-EF with other seeds and training details; they are not comparable
+with the columns to their right and the ResNet18 and I3D models were not rerun (`--'). The ViT rows of the two right-hand
+column groups are our retrained models (face, body, scene features from CLIP ViT-B/32). The row without body branch is the
+Baseline of the preregistered run. Bottom: Qwen2.5-VL-7B-Instruct, zero-shot and few-shot (mean of three example sets;
+no audio), and \model{}. Hi-EF test: 409 samples, 8 episodes; MELD test: 1{,}341 windows, chance UAR 14.29; seed
+ensembles (five seeds on Hi-EF, three on MELD).}
 \label{tab:main}
 \end{table*}
 
-Table~\ref{tab:main} gathers all results. On the Hi-EF test split, \model{} improves UAR by 3.84 points and WAR by
-3.91 points over the retrained Baseline and wins seven of the eight test episodes. The Baseline lies close to the
-numbers published for the same configuration (23.72 UAR, 35.19 WAR on their split), which suggests that the retraining
-is faithful. \model{} is also better than every published configuration by UAR, although those numbers come from
-another split. Under logit adjustment, the preregistered primary metric, the gain is similar ($+3.77$; 19.55 vs
-23.31) but not significant. The main cause is the \emph{fear} class: with six test examples, one correct \emph{fear}
-prediction is worth 2.38 UAR points, and logit adjustment pushes the Baseline to predict \emph{fear} for 27.6\% of the
-test samples (true rate 1.5\%). Without \emph{fear}, the adjusted gain is $+9.95$. We therefore regard the test result as
-consistent with the development evidence rather than as a confirmation of it. The gain comes with a much smaller model:
-\model{} has 0.71M parameters against 27.7M, and fuses 16 tokens at width 128 instead of 96 frames at width 512, about
-40--75 times fewer fusion FLOPs (Appendix~\ref{app:extra}); the price is a richer pre-processing that runs once per
-clip.
+Table~\ref{tab:main} gathers all results. On the Hi-EF test split, \model{} improves UAR by 3.94 points (95\% interval
+$[1.22, 7.91]$, bootstrap over test episodes) and WAR by 5.13 points over the Baseline, the benchmark's best
+configuration retrained on our split with all its inputs, and wins six of the eight test episodes. The Baseline lies
+close to the numbers published for the same configuration (23.72 UAR, 35.19 WAR on their split), which suggests that the
+retraining is faithful; adding the body branch did not change it (21.30 against 21.40 without). \model{} is also
+significantly better than three further retrained configurations (ViT with face, body and scene only: $+3.63$
+$[0.49, 8.14]$; with text and no audio: $+4.42$; with average intra-clip fusion and LSTM plus transformer across clips:
+$+6.23$). It is not distinguishable from the other three: the audio-only variant ($+2.52$ $[-0.06, 6.80]$), the all-average
+variant ($+2.40$) and the configuration with transformer intra-clip fusion and averaged clips ($+1.01$
+$[-1.98, 4.60]$), which is the best retrained configuration on test. That configuration was not selected on development
+data, so the comparison with the best of seven is the more demanding one, and on it the two models are on par. Under logit
+adjustment, the preregistered primary metric, the gain over the Baseline without body branch is similar ($+3.77$; 23.31 vs
+19.55) but not significant, and so is the gain over the Baseline with body ($+0.75$; 22.56). The main cause is the
+\emph{fear} class: with six test examples, one correct \emph{fear} prediction is worth 2.38 UAR points, and logit
+adjustment pushes the Baseline without body branch to predict \emph{fear} for 27.6\% of the test samples (true rate
+1.5\%); without \emph{fear}, the adjusted gain over it is $+9.95$. We therefore regard the test result as consistent with
+the development evidence rather than as a confirmation of it. The gain comes with a much smaller model: \model{} has
+0.71M parameters against 34.1M, and fuses 16 tokens at width 128 instead of 144 frames at width 512, about 65--110 times
+fewer fusion FLOPs (Appendix~\ref{app:extra}); the price is a richer pre-processing that runs once per clip.
+\todo{Qwen2.5-VL-7B results: one paragraph on zero-shot and few-shot (UAR/WAR, share of \emph{neutral} predictions, effect of the examples).}
 
-On MELD, \model{}'s UAR is slightly higher than the Baseline's (16.85 against 15.50), although the difference is not
-significant (+1.35, 95\% interval $[-1.02, 4.24]$). The Baseline obtains a higher WAR by predicting \emph{neutral} for
-most windows (recall 93\%), whereas \model{} spreads its forecasts. MELD is dominated by \emph{neutral} (48\% of the
-test windows), so WAR rewards the majority-class collapse that UAR penalises. Both models are close to chance, so MELD
+On MELD, \model{}'s UAR is higher than the Baseline's (16.85 against 15.27) and than all other retrained configurations,
+but the differences are not significant (against the Baseline $+1.58$ $[-0.35, 3.90]$; against the best retrained
+configuration, 16.42, $+0.43$). Five of the seven retrained configurations obtain a WAR above 45 by predicting
+\emph{neutral} for most windows, whereas \model{} spreads its forecasts. MELD is dominated by \emph{neutral} (48\% of the
+test windows), so WAR rewards the majority-class collapse that UAR penalises. All models are close to chance, so MELD
 shows that the setting is hard rather than that the approach transfers.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figs/confusion_test.pdf}
-\caption{Row-normalised confusion matrices of the Baseline and \model{} on the Hi-EF test split (seed ensembles). Row
-labels give the number of test samples per class.}
+\caption{Row-normalised confusion matrices on the Hi-EF test split (seed ensembles): (a) the Baseline (the benchmark's
+best configuration with face, body and scene input, retrained) and (b) \model{}. Row labels give the number of test
+samples per class.}
 \label{fig:confusion}
 \end{figure*}
 
 The confusion matrices (Figure~\ref{fig:confusion}) show where the test gain lies. The Baseline confuses polarity: it
-forecasts \emph{happy} for 58\% of the \emph{sad} responses and recalls only 3\% of them. \model{} reduces this
-confusion to 18\% and raises \emph{sad} recall to 23\%, while keeping \emph{angry}, \emph{happy} and \emph{neutral} at
-a similar level. Neither model forecasts \emph{fear} or \emph{surprise} correctly.
+forecasts \emph{happy} for 37\% of the \emph{sad} responses and recalls only 12\% of them. \model{} reduces this
+confusion to 18\% and raises \emph{sad} recall to 23\%, and it raises \emph{happy} (42\% to 50\%) and \emph{neutral}
+(46\% to 53\%) recall, while \emph{angry} stays at a similar level. Neither model forecasts \emph{fear} or
+\emph{surprise} correctly.
 
 \section{Ablation Study and Analysis}
 \label{sec:ablation}
 
-All analyses in this section use development cross-validation on Hi-EF only. We ask three questions: where does the gain come from,
+All analyses in this section use development cross-validation on Hi-EF only. The Baseline in them is the benchmark's
+best configuration without the body branch (the runs predate the body features; on test the body branch did not change
+it, Table~\ref{tab:main}). We ask three questions: where does the gain come from,
 what does the model not need, and does it need more structure? A last part analyses its errors.
 
 \subsection{Where Does the Gain Come From?}
@@ -467,8 +502,9 @@ Baseline, \model{}'s features & 23.25 & 32.71 \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}
-\caption{Where the gain over the Baseline comes from. All models are trained in one run on the same folds and seeds.
-The feature-matched Baseline is the architecture of \citet{wang2026hief} fed with \model{}'s face, synchrony and voice
+\caption{Where the gain over the Baseline comes from, in development cross-validation. All models are trained in one run
+on the same folds and seeds. Here the Baseline is the architecture of \citet{wang2026hief} on the CLIP face and scene
+features without the body branch, because these runs predate the body features. The feature-matched Baseline is the architecture of \citet{wang2026hief} fed with \model{}'s face, synchrony and voice
 features, aggregated per clip. In the cut variants only \model{} loses the end of clip III; the baselines see the
 full clip.}
 \label{tab:origin}
@@ -642,7 +678,7 @@ they raise the recognition of B's earlier turn only from 27.2 to 29.7 UAR and le
 \label{sec:conclusion}
 
 In multi-party video the person who is about to respond is usually already in view, and treating each participant in
-each turn as separate evidence improves emotion forecasting over turn-level fusion with a model forty times smaller.
+each turn as separate evidence improves emotion forecasting over turn-level fusion with a model about fifty times smaller.
 The gain does not depend on knowing who the participants are: the true responder, a random co-present participant and
 the role labels of the slots all perform alike, and further encoder structure adds nothing measurable. The limit is
 instead the recognition of participants' emotional states, in particular the responder's own earlier state. The rare
@@ -657,9 +693,10 @@ The test split of the main benchmark is small (eight episodes; six \emph{fear} e
 logit-adjusted contrast was not significant, and the gain on MELD is not significant. The benefit of keeping
 participants apart, over pooling each clip, is about one UAR point and not significant; much of the margin over the
 baseline comes from the compact set encoder. The grouping rule relies on shot and reverse-shot editing and may not
-transfer to fixed-camera recordings, and the features come from general-purpose encoders. The 14 other published
-baselines are reported with their published numbers on a different split. Details of every test access are in
-Appendix~\ref{app:extra}.
+transfer to fixed-camera recordings, and the features come from general-purpose encoders. The best of the seven retrained
+ViT configurations (chosen on test, not on development data) is not significantly below \model{}, the eight ResNet18 and
+I3D configurations are reported with their published numbers on a different split and not retrained, and the language
+model does not read audio. Details of every test access are in Appendix~\ref{app:extra}.
 
 We use public benchmarks of scripted TV content. Face and voice embeddings are used only to group observations
 within a short sample, and no identity is linked to a name. Forecasting a person's emotion could be misused for
@@ -685,10 +722,10 @@ our code and logs.
  & Baseline & \model{} \\
 \midrule
 Unit of fusion & frame, then clip & participant $\times$ turn \\
-Tokens fused & 96 frames, 3 clips & 16 \\
+Tokens fused & 144 frames, 3 clips & 16 \\
 Width $d$ & 512 & 128 \\
-Parameters & 27.7M & 0.71M \\
-Fusion FLOPs / MCIS & $\approx$1.3G & 17--29M \\
+Parameters & 34.1M & 0.71M \\
+Fusion FLOPs / MCIS & $\approx$1.9G & 17--29M \\
 \bottomrule
 \end{tabular}
 \end{adjustbox}
@@ -707,12 +744,16 @@ Access & Models & Status \\
 1 & recognise-then-transition and trajectory forecasters, a benchmark-style forecaster (earlier model family) &
 single preregistered run; invalid for the trajectory arms (caching bug) \\
 2, 3 & same family: re-run after the fix; 5-fold CV over all 53 episodes & announced; execution not verified \\
-4 & \model{}, the baseline and internal variants (Table~\ref{tab:main}) & single preregistered run \\
+4 & \model{}, the Baseline without body branch and internal variants (Table~\ref{tab:main}) & single preregistered run \\
 5 & a class-rebalanced variant of \model{} & single read after access 4; not reported \\
+6 & seven ViT baselines with body branch (Table~\ref{tab:main}) & read after access 4; not preregistered \\
+7 & Qwen2.5-VL-7B-Instruct, zero-shot and few-shot (Appendix~\ref{app:llm}) & prompt fixed on validation rows before the read; \todo{result pending} \\
 \bottomrule
 \end{tabular}
-\caption{Every access to the test split. \model{} was designed after access 1 using development data only; no
-\model{} hyper-parameter was chosen after any test access.}
+\caption{Every access to the Hi-EF test split. \model{} was designed after access 1 using development data only; no
+\model{} hyper-parameter was chosen after any test access. The MELD test split was read by \model{} and the baselines
+(the first run produced no usable \model{} output because three input values were not finite, and was repeated after
+setting them to zero), by the body-branch baselines and by the language model.}
 \label{tab:access}
 \end{table}
 
@@ -737,5 +778,93 @@ Baseline & AdamW lr $10^{-4}$, wd $10^{-5}$, batch 32, 50 epochs \\
 \caption{Hyper-parameters (fixed before the test run; none tuned on test).}
 \label{tab:hparams}
 \end{table}
+
+
+\section{Data Splits}
+\label{app:split}
+
+\paragraph{Hi-EF.} The benchmark holds 2{,}830 multilayered-contextual interaction samples from 53 episodes of TV
+series. Consecutive samples of an episode share clips (the target clip of one sample can be an observed clip of the next),
+so partitions must not cut through an episode. We therefore split by episode, with the assignment fixed in a file (seed 42)
+before any model was trained: 37 episodes (1{,}993 samples) for training, 8 (428) for validation and 8 (409) for test
+(Figure~\ref{fig:split_hief}a). The three partitions have similar class distributions (Figure~\ref{fig:split_hief}b), and
+\emph{fear} has six test samples. Design decisions use only the 45 training and validation episodes. In development
+cross-validation these episodes are divided into five folds of whole episodes, balanced by sample count, and every model is
+trained five times, each time on four folds and evaluated on the fifth (Figure~\ref{fig:split_hief}c). For the test run,
+a model is fitted on 40 of the 45 episodes and early-stopped on the other five, which are drawn once with
+\texttt{random.Random(2026)} (episodes 08, 09, 26, 39 and 49) and shared by all models; the test episodes are not used
+for any choice. The split printed in the benchmark paper is a different, random 70/30 split over samples, so its numbers
+are not comparable with ours.
+
+\paragraph{MELD.} MELD has no forecasting task, so we turn each dialogue into samples of the same form
+(Figure~\ref{fig:split_meld}a). A window is four consecutive utterances $u_{i-3}, \dots, u_i$ of one dialogue; the first
+three are the observed turns and the emotion label of $u_i$ is the target. A window is kept only if the speaker of $u_i$
+differs from the speaker of $u_{i-1}$, as the next speaker differs from the last observed one in the benchmark. The
+official partition of MELD into training, development and test dialogues is kept, so no dialogue and no
+utterance appears in two partitions. The rule gives 5{,}405 / 595 / 1{,}341 windows (the training set loses one window whose video
+cannot be decoded) from 821 / 95 / 223 dialogues; \emph{neutral} makes up 47\% of the test windows (Figure~\ref{fig:split_meld}b).
+Utterances are processed as Hi-EF clips: 16 frames per video, CLIP features of the whole frame and of the face, AudioCLIP
+audio features, CLIP text features of the transcript, and the same face and voice grouping. The target utterance and the
+speaker names are never an input. Training uses the training windows, early stopping the development windows, and the
+test windows are read at the end; the models are trained with three seeds.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/split_hief.pdf}
+\caption{Hi-EF split. (a) The 53 episodes (id and number of samples), coloured by partition; hatched episodes are the five
+used for early stopping. (b) Class distribution of the target emotion per partition. (c) Development protocol: five-fold
+cross-validation over the 45 development episodes, and the fit and early-stopping episodes of the test run.}
+\label{fig:split_hief}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/split_meld.pdf}
+\caption{MELD in the Hi-EF setting. (a) Windows of a dialogue (an illustrative speaker sequence): a window is kept when
+the target speaker differs from the speaker of the last observed utterance. (b) Class distribution of the target emotion
+per partition (number of windows in brackets). (c) The official partition into dialogues is kept.}
+\label{fig:split_meld}
+\end{figure*}
+
+\section{Large Language Model Baselines}
+\label{app:llm}
+
+We evaluate Qwen2.5-VL-7B-Instruct \citep{bai2025qwen25vl}, a vision-language model, without any training on our data
+(Figure~\ref{fig:llm}). The same protocol is used on Hi-EF and on MELD.
+
+\paragraph{Input.} For each sample the three observed clips are given as three videos of eight evenly spaced frames,
+resized to $336 \times 252$ pixels, each followed by the subtitle of the clip; the model has no audio input. The target clip
+and the speaker names are not shown. The instruction is fixed before the test run, written once and tested on validation
+rows only:
+
+\begin{quote}\small\ttfamily
+You are shown three consecutive clips (I, II, III) of a conversation from a TV series, each with its subtitle. A different
+person than the speaker of clip III will speak in the next clip, which is not shown. Predict which emotion that next speaker
+will express. Answer with exactly one word from: angry, disgust, fear, happy, neutral, sad, surprise.
+\end{quote}
+
+\paragraph{Zero-shot and few-shot.} In the zero-shot setting the prompt is the instruction followed by the three clips. In the
+few-shot setting it is preceded by seven worked examples, one per emotion class, in a random but fixed class order. An example
+consists of the same instruction, the subtitles and the middle frame of each of its three clips (a still image, to keep the
+prompt short), and the true emotion of the next speaker as the assistant's answer. Examples are drawn from the training rows of
+the same dataset (Hi-EF: the training and validation episodes; MELD: the training windows), never from test, and we use three
+independent example sets (seeds 0, 1 and 2); we report the mean over the sets.
+
+\paragraph{Scoring.} We do not let the model generate text. At the position of the answer, we read the logits of the first
+token of each of the seven label words (\texttt{ang}, \texttt{dis}, \texttt{f}, \texttt{happy}, \texttt{neutral}, \texttt{sad},
+\texttt{sur}; all distinct) and apply a softmax over the seven values. This gives a seven-class distribution without parsing
+and makes the run deterministic; UAR and WAR are computed from its argmax as for the other models. Because four labels are
+split into word pieces, the first-token probability is only an approximation of the label probability, which can penalise
+\emph{fear} (a single letter). The model runs in half precision on two 16-GB GPUs; one sample takes about 3.6 seconds in the
+zero-shot setting.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figs/llm_protocol.pdf}
+\caption{Qwen2.5-VL protocol. (a) Zero-shot prompt: instruction, three clips as video with subtitles, question. (b)
+Few-shot prompt: seven training examples (one per class) precede the same target prompt. (c) The answer is the softmax over
+the logits of the seven label tokens; nothing is generated.}
+\label{fig:llm}
+\end{figure*}
 
 \end{document}

@@ -19,24 +19,27 @@ partiset/     the method
   metrics.py        WAR / UAR, episode bootstrap, two-level bootstrap over seeds and episodes
   data.py, pipeline.py, config.py   tables, feature loading, hyper-parameters
 scripts/      run_partiset_cv.py (5-fold episode CV, 10 seeds), run_partiset_test.py (test split, 5 seeds)
-notebooks/    feature extraction and the baselines
+notebooks/    the baselines (ViT, Qwen2.5-VL)
 tests/        checks that the package matches the first implementation (synthetic data, no dataset needed)
 ```
 
 ## Notebooks
 | Notebook | Purpose |
 |---|---|
-| `extract_participant_features` | per-face (ArcFace, HSEmotion, pose, mouth) and per-voice (ECAPA) features that `partiset/` reads |
-| `meld_prepare`, `meld_participant_features` | build MELD in the Hi-EF format and extract the same features |
-| `baseline_person_features` | person-crop (body) CLIP features used by the ViT baselines |
 | `baseline_vit` | our retraining of the Hi-EF paper's ViT baselines on our splits |
 | `baseline_qwen_vl` | Qwen2.5-VL-7B zero- and few-shot |
 
 The notebooks were written for Kaggle (GPU); dataset paths are set in the configuration cell at the top.
 
-## Data (not included)
-Hi-EF and MELD must be obtained from their owners. `partiset/` expects the split table of the paper, the pre-extracted CLIP /
-AudioCLIP clip features of Hi-EF, and the output folder of `extract_participant_features` (`shard_*.pkl`).
+## Inputs (not included)
+Feature extraction is not part of this repository. `partiset/` and the notebooks expect:
+* the split table (`source_folder_split_seed42.csv`) and `annotation.csv` of Hi-EF;
+* one `<clip>.pt` per clip with the pre-extracted CLIP ViT-B/32 features of the dataset (`face_features`, `ori_features`,
+  `text_feature`, AudioCLIP `audio_feature`);
+* for PartiSet, `shard_*.pkl` files with, per clip, `faces` (a list of per-frame face records with `fer`, `fer_emb`, `arc`,
+  `box`, `pose`, `mouth`, `t`, `frame`), `audio` (`env`, `ecapa`) and `meta` (`duration`, `n_sampled`);
+* for the ViT baselines, `body_<SOURCE>.pt` = `{clip_id: (features [16, 512], valid mask [16])}`, CLIP ViT-B/32 features of the
+  largest detected person in 16 frames per clip.
 
 ## Running
 ```

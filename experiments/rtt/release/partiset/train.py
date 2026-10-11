@@ -1,4 +1,4 @@
-"""Training loop of the notebooks (AdamW, early stopping on the UAR of held-out training episodes, gradient clipping)."""
+"""Training loop (AdamW, early stopping on the UAR of held-out training episodes, gradient clipping)."""
 import random
 
 import numpy as np
@@ -8,8 +8,7 @@ import torch.nn.functional as F
 from .config import RN
 from .metrics import war_uar
 
-HP = {'role': dict(lr=RN['lr'], wd=RN['wd'], epochs=RN['epochs'], patience=RN['patience'], batch=RN['batch'])}
-HP['tok'] = HP['role']
+HP = dict(lr=RN['lr'], wd=RN['wd'], epochs=RN['epochs'], patience=RN['patience'], batch=RN['batch'])
 
 
 def seed_all(s):

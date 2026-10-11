@@ -1,4 +1,4 @@
-"""5-fold episode cross-validation, 10 seeds (G14 protocol) on the development episodes; test rows are never read."""
+"""5-fold episode cross-validation, 10 seeds on the development episodes (episodes never cross folds); the test split is never read. Arms: PartiSet and four ablations."""
 import argparse
 import os
 import re
@@ -18,16 +18,16 @@ ARMS = [("Full", lambda B: PartiSet(BASE, B.FDIM, 9)),
         ("Q-meanpool", lambda B: PartiSet({**BASE, 'readout': 'mean'}, B.FDIM, 9)),
         ("minus-L", lambda B: PartiSet({**BASE, 'drop': ('L',)}, B.FDIM, 9)),
         ("T-clipIIIonly", lambda B: PartiSet({**BASE, 'clips': (2,)}, B.FDIM, 9)),
-        ("noRole", lambda B: PartiSetCore({**FULL, 'role': False}, B.FDIM, 9))]
+        ("noSlots", lambda B: PartiSetCore({**FULL, 'slots': False}, B.FDIM, 9))]
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--dataset', required=True); ap.add_argument('--features', required=True)
-ap.add_argument('--split-csv', required=True); ap.add_argument('--g8', required=True)
+ap.add_argument('--split-csv', required=True); ap.add_argument('--participant-features', required=True)
 ap.add_argument('--out', default='.'); ap.add_argument('--folds', type=int, default=5)
 a = ap.parse_args()
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
-sp, B, X = prepare(a.dataset, a.features, a.split_csv, a.g8, dev, rows=lambda t: t.split != 'test')
+sp, B, X = prepare(a.dataset, a.features, a.split_csv, a.participant_features, dev, rows=lambda t: t.split != 'test')
 src, y = sp.source_folder.values, sp.yB.values
 fold, load = assign_folds(src, a.folds)
 fold_of_row = np.array([fold[e] for e in src])
@@ -40,7 +40,7 @@ for f in range(a.folds):
     X.set_faces(*B.build_face_tensors(sorted(set(sp.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())), dev)[:2])
     for name, mk in ARMS:
         for si, s in enumerate(SEEDS):
-            p, sel = train_eval(lambda: mk(B), HP['role'], X, T(fit), T(dv), T(te), s + 1000 * f, dev)
+            p, sel = train_eval(lambda: mk(B), HP, X, T(fit), T(dv), T(te), s + 1000 * f, dev)
             oof[name][si, te] = p
             w, u = war_uar(p.argmax(1), y[te])
             log.append(dict(fold=f, arm=name, seed=s, sel_UAR=sel, UAR=u, WAR=w)); print(log[-1], flush=True)

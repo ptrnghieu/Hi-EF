@@ -1,59 +1,51 @@
-# PartiSet: participant-centric evidence for emotion forecasting (code release)
+# PartiSet
 
-Code, notebooks and result tables for the paper *Watch the Listener: Participant-Centric Evidence for Emotion Forecasting
-in Multi-Party Video* (anonymous submission). The notebooks were run on Kaggle (GPU); paths that point to Kaggle datasets
-use `USER` as a placeholder for the dataset owner and can be edited in each notebook's CONFIG cell.
+Implementation of **PartiSet**, a participant-centric model for emotion forecasting in multi-party video (anonymous submission).
+The repository contains code only: no data, no trained weights and no result tables.
 
-## Data (not included)
-* Hi-EF benchmark (videos, audio, annotations) and the MELD videos are not redistributed here; follow the licences and
-  download pages of the original authors. The Hi-EF repository with the original code is the one cited in the paper.
-* The episode-level split of Hi-EF is a CSV (`source_folder_split_seed42.csv`, columns `sample_id, split, source_folder,
-  clip1..clip4, clip3_emotion, clip4_emotion`); see Appendix A of the paper for how it is built and used. MELD windows are built
-  by `notebooks/m1_meld_prepare_features.ipynb`.
-* Pre-computed features (CLIP ViT-B/32 face and whole-frame vectors, text and AudioCLIP vectors) follow the Hi-EF feature layout;
-  our face/voice features come from `notebooks/g8a_role_features.ipynb` (Hi-EF) and `m2_meld_g8a_features.ipynb` (MELD).
+## Method in one paragraph
+The faces of a sample are clustered into people and sorted into three slots: **A** (the speaker of the last turn), **L** (the
+second most visible person, the likely listener) and **O** (everyone else). Each (slot, turn) cell is summarised by one
+attention-pooled token; speech (text, audio, voice descriptor) and scene give one token per turn. A learned query and the 15
+tokens are read by a 2-layer pre-norm transformer (d = 128), trained with auxiliary heads and modality dropout.
 
 ## Layout
 ```
-partiset/     the model, participant grouping, training loop and evaluation as a package (refactored from the notebooks)
-scripts/      run_partiset_cv.py (5-fold episode CV, 10 seeds), run_partiset_test.py (single preregistered test read)
-tests/        equivalence tests: the package gives the same logits / folds / bootstrap as the notebook code (CPU, synthetic data)
-notebooks/    notebooks behind the numbers in the paper
-analysis/     scripts that draw the figures and tables from the saved results
-tools/        scripts that generate some of the notebooks (build_*.py)
-results/      saved result tables (CSV) used in the paper
-docs/         preregistration of the single test run and the list of test-split accesses
+partiset/     the method
+  participants.py   face clustering -> slots A / L / O, frame selection, turn descriptors
+  model.py          PartiSetCore (the model and its ablation switches), PartiSet (token-level switches)
+  train.py          training loop (AdamW, early stopping on the UAR of held-out training episodes)
+  cv.py             episode-level splits (early-stopping episodes, cross-validation folds)
+  metrics.py        WAR / UAR, episode bootstrap, two-level bootstrap over seeds and episodes
+  data.py, pipeline.py, config.py   tables, feature loading, hyper-parameters
+scripts/      run_partiset_cv.py (5-fold episode CV, 10 seeds), run_partiset_test.py (test split, 5 seeds)
+notebooks/    feature extraction and the baselines
+tests/        checks that the package matches the first implementation (synthetic data, no dataset needed)
 ```
 
-## Notebooks in `notebooks/`
-* **features**: `g8a_role_features`, `m1_meld_prepare_features`, `m2_meld_g8a_features`, `b1_body_features`
-* **model, development CV and test**: `g8b_rolenet_cv`, `g10_test_preregistered`, `g14_ten_seed_confirmation_cv`
-* **ablations and analyses**: `g11_channel_ablations_cv`, `g12_cs_rolenet_cv`, `g13_token_ablations_cv`, `g33a_temporal_audit_cv`, `g33b_relational_bias_cv`, `g33c_order_probe`, `g35_group_emap_cv`, `g40_clip3_truncation_cv`, `g41_feature_matched_baseline_cv`, `g43_listener_history_vs_current_cv`, `g44_oracle_listener_truncation_cv`, `g44a_clip4_faces_dev`, `g26a_clip4_faces`, `g47_organisation_controls_cv`, `g48_proxy_oracle_groups`, `g32_mirror_diagnostics`, `g45_emotion_features_gate_cv`, `g6a_listener_visibility`, `g6b_listener_expression`, `g39_party_statistics`, `g37_case_frames`
-* **baselines and other benchmarks**: `b2_vit_baselines_body`, `b3_released_code_baseline`, `l1_qwen_vl_zero_few_shot`, `m3_meld_rolenet`
-
-## From the paper to the code
-| Paper | Where |
+## Notebooks
+| Notebook | Purpose |
 |---|---|
-| Table 1 (main results) | PartiSet: `g10_test_preregistered` (Hi-EF), `m3_meld_rolenet` (MELD); ViT baselines: `b2_vit_baselines_body`; released-code baseline: `b3_released_code_baseline`; Qwen2.5-VL: `l1_qwen_vl_zero_few_shot` |
-| Table 2 (where the gain comes from) | `g41_feature_matched_baseline_cv`, `g43_listener_history_vs_current_cv`, `g40_clip3_truncation_cv`, `g44_oracle_listener_truncation_cv` |
-| Table 3 (ablations) | `g8b_rolenet_cv`, `g11`, `g13`, `g14`, `g28`, `g29`, `g30`, `g47` |
-| Table 4 (proxy vs oracle) | `g44`, `g48_proxy_oracle_groups` |
-| Table 5 (structure, EMAP) | `g33a`, `g33b`, `g33c`, `g35_group_emap_cv` |
-| Figures 1, 3, 4, 6, 7, 8 | `analysis/motivation_figure.py` (with `g37_case_frames`), `analysis/data_stats_figure.py` and `analysis/paper_figures_v2.py` (from `g6a_listener_visibility`, `g39_party_statistics` and the saved predictions), `analysis/architecture_figure.py` |
+| `extract_participant_features` | per-face (ArcFace, HSEmotion, pose, mouth) and per-voice (ECAPA) features that `partiset/` reads |
+| `meld_prepare`, `meld_participant_features` | build MELD in the Hi-EF format and extract the same features |
+| `baseline_body_features` | person-crop CLIP features used by the baselines with a body branch |
+| `baseline_vit_with_body` | our retraining of the Hi-EF paper's ViT baselines on our splits, with a body branch |
+| `baseline_authors_code` | the authors' released model ported to precomputed features |
+| `baseline_qwen_vl` | Qwen2.5-VL-7B zero- and few-shot |
 
-## Package
-```
-python -m pytest tests                                   # equivalence with the notebooks, no data needed
-python scripts/run_partiset_cv.py --dataset D --features F --split-csv S --g8 G --out out/
-```
-`--g8` is the folder with the `shard_*.pkl` files written by `g8a_role_features`. The package reproduces the notebook code line
-by line (same parameter creation order, same seeds); the tests check the model, the folds and the bootstrap against the
-notebook cells. The participant grouping (`partiset/participants.py`) needs the real face/voice shards and is not covered
-by a synthetic test.
+The notebooks were written for Kaggle (GPU); dataset paths are set in the configuration cell at the top.
 
-## Notes
-* Seeds: 10 for development CV, 5 for the Hi-EF test run, 3 for MELD. Results use seed ensembles.
-* The Hi-EF test split was read by the notebooks listed in `docs/test_accesses.md` (including earlier work that is not part of
-  this release); `docs/PREREG_G10_TEST.md` is the plan fixed before the preregistered run.
-* The language-model notebook needs a GPU with about 16 GB per device and internet access for the weights.
-* No identity is linked to a name: faces and voices are only grouped inside one sample.
+## Data (not included)
+Hi-EF and MELD must be obtained from their owners. `partiset/` expects the split table of the paper, the pre-extracted CLIP /
+AudioCLIP clip features of Hi-EF, and the output folder of `extract_participant_features` (`shard_*.pkl`).
+
+## Running
+```
+pip install -r requirements.txt
+python -m pytest tests
+python scripts/run_partiset_cv.py   --dataset D --features F --split-csv S --participant-features P --out out/
+python scripts/run_partiset_test.py --dataset D --features F --split-csv S --participant-features P --out out/ --unlock-test
+```
+`run_partiset_test.py` is meant to be run once; it refuses to read the test split without `--unlock-test`.
+`tests/` check the model, the fold construction and the bootstrap against the first implementation. `participants.py` needs the real
+feature shards and is not covered by a synthetic test.

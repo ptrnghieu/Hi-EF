@@ -1,5 +1,5 @@
-"""Preregistered single read of the test split (G10 protocol): 5 seeds, PartiSet and PartiSet without slots.
-Needs --unlock-test; see docs/PREREG_G10_TEST.md and docs/test_accesses.md before running."""
+"""Train on the 45 development episodes (5 of them held out for early stopping) and evaluate once on the test split, with
+5 seeds, for PartiSet and PartiSet without slots. The test split is only read when --unlock-test is given."""
 import argparse
 import os
 import sys
@@ -14,18 +14,18 @@ from partiset.cv import test_protocol_rows
 from partiset.pipeline import prepare
 
 SEEDS = [42, 123, 456, 789, 1024]
-ARMS = [('PartiSet', FULL), ('PartiSet-noSlots', {**FULL, 'role': False})]
+ARMS = [('PartiSet', FULL), ('PartiSet-noSlots', {**FULL, 'slots': False})]
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--dataset', required=True); ap.add_argument('--features', required=True)
-ap.add_argument('--split-csv', required=True); ap.add_argument('--g8', required=True)
+ap.add_argument('--split-csv', required=True); ap.add_argument('--participant-features', required=True)
 ap.add_argument('--out', default='.'); ap.add_argument('--unlock-test', action='store_true')
 a = ap.parse_args()
 if not a.unlock_test:
     sys.exit('The test split is locked. Pass --unlock-test for the single preregistered run.')
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
-sp, B, X = prepare(a.dataset, a.features, a.split_csv, a.g8, dev)
+sp, B, X = prepare(a.dataset, a.features, a.split_csv, a.participant_features, dev)
 src, y = sp.source_folder.values, sp.yB.values
 fit, dv, te, sel = test_protocol_rows(src, (sp.split == 'test').values)
 trr = np.where(sp.split.values != 'test')[0]
@@ -35,7 +35,7 @@ probs, log = {}, []
 for name, cfg in ARMS:
     probs[name] = []
     for s in SEEDS:
-        p, sel_u = train_eval(lambda: PartiSetCore(cfg, B.FDIM, 9), HP['role'], X, T(fit), T(dv), T(te), s, dev)
+        p, sel_u = train_eval(lambda: PartiSetCore(cfg, B.FDIM, 9), HP, X, T(fit), T(dv), T(te), s, dev)
         probs[name].append(p)
         w, u = war_uar(p.argmax(1), y[te])
         log.append(dict(arm=name, seed=s, sel_UAR=sel_u, test_UAR=u, test_WAR=w)); print(log[-1], flush=True)

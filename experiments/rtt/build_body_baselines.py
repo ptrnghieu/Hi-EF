@@ -51,7 +51,25 @@ DEBUG_N = None                                    # e.g. 40 clips for a smoke te
 
 DATASET_DIR = "/kaggle/input/datasets/ptrnghieu/hi-ef-dataset"
 SPLIT_CSV = "/kaggle/input/datasets/ptrnghieu/hi-ef-split/source_folder_split_seed42.csv"
-MELD_LOCAL = None                                 # MELD.Raw dataset folder, or None to download (about 10 GB)
+MELD_LOCAL = None                                 # MELD.Raw dataset folder; None = auto-detect an attached MELD dataset
+
+
+def find_meld_raw():
+    # an attached dataset whose folder name contains "meld", other than the M1 output (meld-m1 / meld_hief / meld_features)
+    out = []
+    for base in ["/kaggle/input"] + sorted(glob.glob("/kaggle/input/datasets/*")):
+        for d in sorted(glob.glob(base + "/*")):
+            n = os.path.basename(d).lower()
+            if os.path.isdir(d) and "meld" in n and "m1" not in n and "hief" not in n and "features" not in n:
+                out.append(d)
+    return out
+
+
+if SOURCE == "meld" and MELD_LOCAL is None:
+    _c = find_meld_raw()
+    assert _c, "attach the MELD.Raw dataset (the Kaggle 'Multimodal EmotionLines Dataset (MELD)') or set MELD_LOCAL"
+    MELD_LOCAL = _c[0]
+    print("MELD_LOCAL =", MELD_LOCAL)
 WORK = "/tmp/meld"
 
 

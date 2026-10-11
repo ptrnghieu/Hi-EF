@@ -89,32 +89,6 @@ class ReferenceCore(nn.Module):
         return self.head(out[:, 0]), aux
 
 
-class B1Wrap(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.f = Forecaster(use_raw=True, use_traj=False)
-
-    def forward(self, ix, train=False):
-        return self.f(CLIPIDX[ix], ZREC[ix]), {}
-
-
-class B1FaceWrap(nn.Module):
-    # (reference code, see header)
-    def __init__(self, n_face=60, d=512):
-        super().__init__()
-        self.f = Forecaster(use_raw=True, use_traj=False, d=d)
-        self.face = nn.Sequential(nn.Linear(n_face, d // 2), nn.GELU(), nn.Dropout(0.3), nn.Linear(d // 2, d))
-        nn.init.zeros_(self.face[-1].weight); nn.init.zeros_(self.face[-1].bias)
-
-    def forward(self, ix, train=False):
-        b, clip_idx = self.f, CLIPIDX[ix]
-        B, n = clip_idx.shape
-        feats = gather(clip_idx)
-        tok = b.enc({k: v.reshape(B * n, *v.shape[2:]) for k, v in feats.items()}).reshape(B, n, -1)
-        h = b.inter(tok + b.clip_pos[:, 3 - n:])
-        return b.head(h.mean(1) + self.face(LRFZ[ix])), {}
-
-
 class ReferenceTokenModel(ReferenceCore):
     # ReferenceCore with switches for the readout, the embeddings, the absent token, and which speech/scene/clip tokens exist.
     # Token layout: [queries] + 9 face tokens (role r, clip k at 3r+k) + 3 speech tokens (clip k) + 3 scene tokens (clip k).

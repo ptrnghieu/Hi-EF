@@ -68,6 +68,8 @@ Part (a) is the bottleneck, so these gates test ways to recognize A better.
 | `m1_meld_prepare_features.ipynb` | M1: MELD in the Hi-EF format — MCIS windows (I–III → IV by a different speaker), Hi-EF-layout annotation file, `hi-ef-features-v2`-style clip features (CLIP ViT-B/32 face/frame/text, AudioCLIP ESResNeXt-FBSP 527) for clips I–III |
 | `m2_meld_g8a_features.ipynb` | M2: the unchanged G8a face/voice extraction on MELD clips I–III, split into chunks (`N_CHUNKS`, `CHUNK`) |
 | `m3_meld_rolenet.ipynb` | M3: G10's RoleNet / RoleNet-noRole / B1 / LateFusion / PaperBest on MELD (train → fit, dev → early stopping, test once; 3 seeds; no speaker names as input), plus mirroring-vs-shift analysis |
+| `b1_body_features.ipynb` | B1: body branch for the Hi-EF paper's visual input (face + body + scene): 16 evenly spaced frames per clip I–III, largest person per frame (ultralytics YOLO, class person), CLIP ViT-B/32 features of the crop; `SOURCE = 'hief'` or `'meld'` (needs M1 output); output `body_<SOURCE>.pt` = `{clip: (features [16,512] fp16, mask [16])}`; GPU, internet on |
+| `b2_vit_baselines_body.ipynb` | B2: the seven ViT rows (5–11) of the Hi-EF paper's Table 2 retrained with face + body + scene on the G10 protocol (`SOURCE = 'hief'`, 5 seeds, **test read again**) or the M3 protocol (`'meld'`, 3 seeds); outputs `b2_<SOURCE>_per_seed.csv`, `_summary.csv`, `_probs.npz`; inputs as G10/M3 plus B1's output; built by `build_body_baselines.py`; GPU |
 | `build_notebooks.py` | Regenerates the notebooks |
 
 All notebooks use the locked split `source_folder_split_seed42.csv` (1,993 / 428 / 409 MCIS, 37 / 8 / 8 episodes).

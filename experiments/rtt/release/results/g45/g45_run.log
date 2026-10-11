@@ -1,0 +1,58 @@
+8.0s 1 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+8.0s 2 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+8.0s 3 0.00s - to python to disable frozen modules.
+8.0s 4 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+8.6s 5 0.00s - Debugger warning: It seems that frozen modules are being used, which may
+8.6s 6 0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+8.6s 7 0.00s - to python to disable frozen modules.
+8.6s 8 0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+67.1s 9 development MCIS 2421 | clips I-III 5515 | labelled 2843 | B's previous turn known 654
+68.7s 10 audio files found for 100.0% of the clips
+90.7s 11 Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+90.7s 12 
+90.7s 13 Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+123.4s 14 emotion models OK: audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim | SamLowe/roberta-base-go_emotions
+123.5s 15 cached 0 | to do 5515
+356.4s 16 done in 3.9 min | speech features for 100.0% of the clips
+404.7s 17 {'clip_text': (512,), 'audioclip': (527,), 'afound': (1,), 'ecapa': (192,), 'face10': (10,), 'face_emb': (1280,), 'ser_h': (1024,), 'ser_avd': (4,), 'txt_p': (28,), 'txt_h': (768,)}
+514.7s 18 recognition current       UAR 29.78
+663.8s 19 recognition +speech       UAR 31.51
+824.7s 20 recognition +text         UAR 31.16
+975.1s 21 recognition +speech+text  UAR 31.46
+975.3s 22 recognition subsets: clip III 2421 | B's previous turn 652
+1125.4s 23 forecast    current       UAR 18.86
+1225.7s 24 forecast    +speech       UAR 19.69
+1324.0s 25 forecast    +text         UAR 18.37
+1414.7s 26 forecast    +speech+text  UAR 18.92
+1427.0s 27 probe          set              subset    n  UAR_current  UAR_new   dUAR     lo   hi
+1427.0s 28 recognition      +speech           all clips 2843        29.78    31.51   1.74  -0.23 3.76
+1427.0s 29 recognition      +speech        clip III (A) 2421        29.26    30.86   1.60  -0.29 3.39
+1427.0s 30 recognition      +speech   B's previous turn  652        27.19    31.70   4.50  -0.09 9.82
+1427.0s 31 forecast      +speech            all MCIS 2421        18.86    19.69   0.83  -1.01 2.70
+1427.0s 32 forecast      +speech B keeps own emotion  320        37.00    25.46 -11.54 -16.13 8.19
+1427.0s 33 forecast      +speech   B not mirroring A 1561        17.97    17.36  -0.61  -2.41 1.12
+1427.0s 34 recognition        +text           all clips 2843        29.78    31.16   1.38  -0.54 3.44
+1427.0s 35 recognition        +text        clip III (A) 2421        29.26    31.57   2.31   0.38 4.59
+1427.0s 36 recognition        +text   B's previous turn  652        27.19    30.58   3.38  -0.07 6.38
+1427.0s 37 forecast        +text            all MCIS 2421        18.86    18.37  -0.50  -2.34 1.30
+1427.0s 38 forecast        +text B keeps own emotion  320        37.00    24.86 -12.14 -16.18 5.85
+1427.0s 39 forecast        +text   B not mirroring A 1561        17.97    17.02  -0.95  -3.01 1.05
+1427.0s 40 recognition +speech+text           all clips 2843        29.78    31.46   1.68  -0.14 3.74
+1427.0s 41 recognition +speech+text        clip III (A) 2421        29.26    31.33   2.07   0.15 4.31
+1427.0s 42 recognition +speech+text   B's previous turn  652        27.19    29.67   2.47  -1.27 5.58
+1427.0s 43 forecast +speech+text            all MCIS 2421        18.86    18.92   0.06  -1.49 1.76
+1427.0s 44 forecast +speech+text B keeps own emotion  320        37.00    22.20 -14.80 -18.19 2.70
+1427.0s 45 forecast +speech+text   B not mirroring A 1561        17.97    16.34  -1.63  -3.54 0.56
+1427.0s 46 
+1427.0s 47 B's previous turn: recognition 27.19 -> 29.67 (+2.47 [-1.27,+5.58])
+1427.0s 48 forecast all +0.06 [-1.49,+1.76] | B keeps -14.80 [-18.19,+2.70]
+1427.0s 49 VERDICT: STOP: the emotion features do not recognise B's previous turn better
+1427.0s 50 saved /kaggle/working/g45_summary.csv and /kaggle/working/g45_emofeat.pkl
+1432.2s 51 /usr/local/lib/python3.13/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\|'
+1432.2s 52 cells[i][c] = re.sub('\\\\\|', '|', cell)
+1432.4s 53 /usr/local/lib/python3.13/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\_'
+1432.4s 54 text = re.sub(r'_', '\_', text) # Escape underscores in display text
+1433.2s 55 [NbConvertApp] Converting notebook __notebook__.ipynb to notebook
+1433.3s 56 [NbConvertApp] Writing 228541 bytes to __notebook__.ipynb
+1435.7s 57 [NbConvertApp] Converting notebook __notebook__.ipynb to html
+1436.3s 58 [NbConvertApp] Writing 550107 bytes to __results__.html

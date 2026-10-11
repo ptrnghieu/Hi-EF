@@ -452,23 +452,15 @@ adjustment pushes the Baseline without body branch to predict \emph{fear} for 27
 the development evidence rather than as a confirmation of it. The gain comes with a much smaller model: \model{} has
 0.71M parameters against 34.1M, and fuses 16 tokens at width 128 instead of 144 frames at width 512, about 65--110 times
 fewer fusion FLOPs (Appendix~\ref{app:extra}); the price is a richer pre-processing that runs once per clip.
-On Hi-EF, the language model stays below the trained models (Table~\ref{tab:main}). Zero-shot, it reaches 15.75 UAR and
-21.76 WAR, and it predicts \emph{neutral} for 55\% of the test samples; it recognises \emph{neutral} (56\%) and
-\emph{angry} (36\%) but almost none of the other classes. Seven examples help: the mean over three example sets is 17.80
-UAR (17.10, 17.31 and 18.97 for the three sets) and 23.88 WAR, mainly through \emph{sad} (8\% to 21\%) and \emph{disgust}
-(0\% to 5\%), while \emph{fear} stays at zero. Even the best example set is 6.3 UAR points below \model{} and 2.3 below the
-Baseline, so a general vision-language model that sees the video and the subtitles but not the audio does not replace a
-model trained on the benchmark. The label is read from the first token of each class word, which only approximates its
-probability (Appendix~\ref{app:llm}).
-
-On MELD the language model reaches a higher UAR than every trained model (Table~\ref{tab:main}): 22.65 zero-shot and 24.85 with
-one set of seven examples, against 16.85 for \model{} and 15.27 for the Baseline, with 14.29 as chance. Its WAR is
-lower (25.80 and 23.19, against 39.30 for \model{} and 45.34 for the Baseline), mainly because it does not collapse to
-\emph{neutral}: it predicts \emph{neutral} for 21\% (zero-shot) and 13\% (few-shot) of the windows, against 48\% in the test
-labels, and it recognises \emph{angry} (49\% and 34\%) and \emph{happy} (30\% and 45\%) but never \emph{fear}. The few-shot result comes from a single example set, so we cannot say how much it varies, as it did on Hi-EF
-(17.10 to 18.97 UAR). We also cannot rule out that the model has seen the series or its subtitles during pretraining. A model that reads the
-subtitles and sees the frames therefore does better on MELD, in UAR, than the models trained on its 5{,}405 training windows; this does not
-change the comparison among the trained models.
+Qwen2.5-VL-7B, which sees the video and the subtitles but not the audio, behaves differently on the two benchmarks
+(Table~\ref{tab:main}). On Hi-EF it stays below the trained models: zero-shot it reaches 15.75 UAR and 21.76 WAR and predicts
+\emph{neutral} for 55\% of the samples; seven examples raise it to 17.80 UAR and 23.88 WAR (mean of three example sets, 17.10 to
+18.97), mainly through \emph{sad} and \emph{disgust}, but even the best set is 6.3 UAR points below \model{} and 2.3 below the
+Baseline. On MELD it is above every trained model in UAR (22.65 zero-shot, 24.85 with one example set, against 16.85 for
+\model{}) and well below them in WAR (25.80 and 23.19, against 39.30 and 45.34), since it predicts \emph{neutral} for only 21\% and
+13\% of the windows, against 48\% in the labels. On both datasets the examples add about two UAR points and \emph{fear} stays
+at zero. The MELD few-shot result comes from one example set, and we cannot rule out that the model saw the series
+during pretraining.
 
 On MELD, \model{}'s UAR is higher than the Baseline's (16.85 against 15.27) and than all other retrained configurations,
 but the differences are not significant (against the Baseline $+1.58$ $[-0.35, 3.90]$; against the best retrained

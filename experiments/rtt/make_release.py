@@ -4,8 +4,17 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 OUT = HERE / "release"
+KEEP = ("partiset", "scripts", "tests")          # hand-written package: lives in release/, survives regeneration
+import tempfile
+_keep = Path(tempfile.mkdtemp())
+for k in KEEP:
+    if (OUT / k).exists():
+        shutil.copytree(OUT / k, _keep / k, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
 if OUT.exists():
     shutil.rmtree(OUT)
+for k in KEEP:
+    if (_keep / k).exists():
+        shutil.copytree(_keep / k, OUT / k)
 for d in ("notebooks", "analysis", "tools", "results", "docs"):
     (OUT / d).mkdir(parents=True)
 
@@ -79,6 +88,9 @@ use `USER` as a placeholder for the dataset owner and can be edited in each note
 
 ## Layout
 ```
+partiset/     the model, participant grouping, training loop and evaluation as a package (refactored from the notebooks)
+scripts/      run_partiset_cv.py (5-fold episode CV, 10 seeds), run_partiset_test.py (single preregistered test read)
+tests/        equivalence tests: the package gives the same logits / folds / bootstrap as the notebook code (CPU, synthetic data)
 notebooks/    notebooks behind the numbers in the paper
 analysis/     scripts that draw the figures and tables from the saved results
 tools/        scripts that generate some of the notebooks (build_*.py)
@@ -99,6 +111,16 @@ docs/         preregistration of the single test run and the list of test-split 
 | Table 5 (structure, EMAP) | `g33a`, `g33b`, `g33c`, `g35_group_emap_cv` |
 | Figures 1, 3, 4, 6, 7, 8 | `analysis/motivation_figure.py` (with `g37_case_frames`), `analysis/data_stats_figure.py` and `analysis/paper_figures_v2.py` (from `g6a_listener_visibility`, `g39_party_statistics` and the saved predictions), `analysis/architecture_figure.py` |
 
+## Package
+```
+python -m pytest tests                                   # equivalence with the notebooks, no data needed
+python scripts/run_partiset_cv.py --dataset D --features F --split-csv S --g8 G --out out/
+```
+`--g8` is the folder with the `shard_*.pkl` files written by `g8a_role_features`. The package reproduces the notebook code line
+by line (same parameter creation order, same seeds); the tests check the model, the folds and the bootstrap against the
+notebook cells. The participant grouping (`partiset/participants.py`) needs the real face/voice shards and is not covered
+by a synthetic test.
+
 ## Notes
 * Seeds: 10 for development CV, 5 for the Hi-EF test run, 3 for MELD. Results use seed ensembles.
 * The Hi-EF test split was read by the notebooks listed in `docs/test_accesses.md` (including earlier work that is not part of
@@ -108,6 +130,7 @@ docs/         preregistration of the single test run and the list of test-split 
 """)
 (OUT / "requirements.txt").write_text("""numpy
 pandas
+pytest
 scikit-learn
 scipy
 torch

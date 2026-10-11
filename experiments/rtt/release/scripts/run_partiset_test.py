@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from partiset import FULL, HP, PartiSetCore, train_eval, war_uar, source_boot_ci
+from partiset import FULL, HP, PartiSetCore, train_eval, war_uar
 from partiset.cv import test_protocol_rows
 from partiset.pipeline import prepare
 
@@ -38,12 +38,10 @@ for name, cfg in ARMS:
         p, sel_u = train_eval(lambda: PartiSetCore(cfg, B.FDIM, 9), HP, X, T(fit), T(dv), T(te), s, dev)
         probs[name].append(p)
         w, u = war_uar(p.argmax(1), y[te])
-        log.append(dict(arm=name, seed=s, sel_UAR=sel_u, test_UAR=u, test_WAR=w)); print(log[-1], flush=True)
+        log.append(dict(arm=name, seed=s, sel_UAR=sel_u, test_UAR=u, test_WAR=w)); print(f'{name} seed {s} done', flush=True)
     probs[name] = np.stack(probs[name])
-    w, u = war_uar(probs[name].mean(0).argmax(1), y[te])
-    lo, hi = source_boot_ci(probs[name].mean(0).argmax(1), y[te], src[te])
-    print(f'{name}: ensemble UAR {u:.2f} [{lo[1]:.1f},{hi[1]:.1f}] WAR {w:.2f}')
 os.makedirs(a.out, exist_ok=True)
 pd.DataFrame(log).to_csv(os.path.join(a.out, 'partiset_test_per_seed.csv'), index=False)
 np.savez(os.path.join(a.out, 'partiset_test_probs.npz'), sample_id=sp.sample_id.values[te],
          **{k.replace('-', '_'): v for k, v in probs.items()})
+print('saved', a.out)

@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from partiset import BASE, FULL, HP, PartiSet, PartiSetCore, train_eval, war_uar, two_level_boot
+from partiset import BASE, FULL, HP, PartiSet, PartiSetCore, train_eval, war_uar
 from partiset.cv import assign_folds, cv_fold_rows
 from partiset.pipeline import prepare
 
@@ -43,14 +43,10 @@ for f in range(a.folds):
             p, sel = train_eval(lambda: mk(B), HP, X, T(fit), T(dv), T(te), s + 1000 * f, dev)
             oof[name][si, te] = p
             w, u = war_uar(p.argmax(1), y[te])
-            log.append(dict(fold=f, arm=name, seed=s, sel_UAR=sel, UAR=u, WAR=w)); print(log[-1], flush=True)
+            log.append(dict(fold=f, arm=name, seed=s, sel_UAR=sel, UAR=u, WAR=w)); print(f'fold {f} {name} seed {s} done', flush=True)
 os.makedirs(a.out, exist_ok=True)
 pd.DataFrame(log).to_csv(os.path.join(a.out, 'partiset_cv_log.csv'), index=False)
 safe = lambda s: re.sub(r'[^0-9A-Za-z]+', '_', s).strip('_')
 np.savez(os.path.join(a.out, 'partiset_cv_oof.npz'), sample_id=sp.sample_id.values, fold=fold_of_row, y=y, src=src,
          **{safe(k): v for k, v in oof.items()})
-full = oof['Full'].mean(0).argmax(1)
-print(f"Full: ensemble UAR {war_uar(full, y)[1]:.2f}")
-for n, _ in ARMS[1:]:
-    lo, hi = two_level_boot(oof['Full'], oof[n], y, src)
-    print(f"Full - {n}: ΔUAR {war_uar(full, y)[1] - war_uar(oof[n].mean(0).argmax(1), y)[1]:+.2f} [{lo:+.2f},{hi:+.2f}]")
+print("saved", os.path.join(a.out, "partiset_cv_log.csv"), "and", os.path.join(a.out, "partiset_cv_oof.npz"))

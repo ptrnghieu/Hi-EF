@@ -33,6 +33,10 @@ What is kept from the released code:
 * Adam (lr 2e-4, weight decay 1e-6), ReduceLROnPlateau (factor 0.1, patience 5, threshold 0.001) on the validation loss,
   batch 32, 50 epochs, cross-entropy.
 
+* **Feature scale.** The released model uses raw (un-normalised) CLIP embeddings; the Hi-EF feature files hold L2-normalised ones, which
+  are rescaled to the raw CLIP norm (image 9.8, text 12.7). Without this the learned position embeddings (N(0, 1), norm ~22)
+  swamp the unit-norm features, and the model collapsed to one class in a first run.
+
 Two quirks of the released code are **reproduced by default** and can be switched off (variant `fixed`):
 1. `o_visual_output = f_video_features`: the whole-frame branch re-reads the *face* features (flag `ORI_FROM_FACE`);
 2. `QKVTransformerClip.forward` returns `resblocks((q, kv))[0]`, which is the unchanged query, so the two 12-layer
@@ -71,6 +75,10 @@ LR, WEIGHT_DECAY = 2e-4, 1e-6          # released train script
 EPOCHS, BATCH = 50, 32
 LOGIT = 4.60517
 DEBUG_PER_EPISODE = None
+# The released model feeds the RAW CLIP embeddings (image norm ~9.8, text norm ~12.7 for ViT-B/32; the normalisation lines are
+# commented out in the released code). The Hi-EF feature files hold L2-normalised vectors (norm 1), so they are rescaled;
+# the MELD files (M1) hold raw embeddings and are left alone. The rescaling is applied only if the mean norm is below 2.
+IMG_SCALE, TXT_SCALE = 9.8, 12.7
 # name, ORI_FROM_FACE, QKV_RETURNS_QUERY
 VARIANTS = [("released", True, True), ("fixed", False, False)]
 '''),
@@ -136,6 +144,15 @@ for c in tqdm(all_clips, desc='loading features'):
 FEAT = {k: torch.nan_to_num(torch.stack(v).float()).to(DEVICE) for k, v in bufs.items()}
 del bufs
 print({k: tuple(v.shape) for k, v in FEAT.items()})
+for k, sc in (('face', IMG_SCALE), ('ori', IMG_SCALE), ('text', TXT_SCALE)):
+    nz = FEAT[k].reshape(-1, FEAT[k].shape[-1])
+    nz = nz[nz.abs().sum(-1) > 0]
+    mn = nz.norm(dim=-1).mean().item()
+    if mn < 2:
+        FEAT[k] = FEAT[k] * sc
+        print(f"{k}: mean norm {mn:.2f} (normalised) -> rescaled by {sc}")
+    else:
+        print(f"{k}: mean norm {mn:.2f} (raw), left as is")
 CLIPIDX = torch.tensor([[CIDX[c] for c in r] for r in DEV[['clip1', 'clip2', 'clip3']].values], device=DEVICE)
 YB = torch.tensor(y_all, device=DEVICE)
 

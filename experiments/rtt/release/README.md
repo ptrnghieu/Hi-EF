@@ -30,7 +30,6 @@ tests/        checks that the package matches the first implementation (syntheti
 | `meld_prepare`, `meld_participant_features` | build MELD in the Hi-EF format and extract the same features |
 | `baseline_person_features` | person-crop (body) CLIP features used by the ViT baselines |
 | `baseline_vit` | our retraining of the Hi-EF paper's ViT baselines on our splits |
-| `baseline_authors_code` | the authors' released model ported to precomputed features |
 | `baseline_qwen_vl` | Qwen2.5-VL-7B zero- and few-shot |
 
 The notebooks were written for Kaggle (GPU); dataset paths are set in the configuration cell at the top.

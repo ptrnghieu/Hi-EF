@@ -28,8 +28,8 @@ tests/        checks that the package matches the first implementation (syntheti
 |---|---|
 | `extract_participant_features` | per-face (ArcFace, HSEmotion, pose, mouth) and per-voice (ECAPA) features that `partiset/` reads |
 | `meld_prepare`, `meld_participant_features` | build MELD in the Hi-EF format and extract the same features |
-| `baseline_body_features` | person-crop CLIP features used by the baselines with a body branch |
-| `baseline_vit_with_body` | our retraining of the Hi-EF paper's ViT baselines on our splits, with a body branch |
+| `baseline_person_features` | person-crop (body) CLIP features used by the ViT baselines |
+| `baseline_vit` | our retraining of the Hi-EF paper's ViT baselines on our splits |
 | `baseline_authors_code` | the authors' released model ported to precomputed features |
 | `baseline_qwen_vl` | Qwen2.5-VL-7B zero- and few-shot |
 

@@ -348,8 +348,9 @@ CLIP text and AudioCLIP audio), the fusion within a clip (average or transformer
 (average, transformer, or LSTM plus transformer). The eight ResNet18 and I3D configurations are end-to-end video
 networks that need the raw videos and the authors' preprocessing, which is not released, so they are listed with the
 numbers published for the original split (marked $\dagger$) and are not retrained. The seven ViT configurations work on
-frozen CLIP features, and we retrain all of them, on our Hi-EF split and on MELD, with face, body and scene input as in
-the paper (Section~\ref{sec:setting}, implementation details). Their best configuration (face, body and scene
+frozen CLIP features; we reimplement all of them following the description of \citet{wang2026hief}, with face, body and
+scene input, and train them on our Hi-EF split and on MELD (Section~\ref{sec:setting}, Appendix~\ref{app:extra}). Our
+reimplementation is smaller than the released training code (Appendix~\ref{app:extra}). Their best configuration (face, body and scene
 features, transformer fusion with CLIP text and AudioCLIP audio, LSTM plus transformer across clips) is the
 \emph{Baseline}. Our reimplementation of the intra-clip \emph{Average} fusion (mean over frames, then over branches and
 modalities) and of the inter-clip \emph{Average} (mean of the three clip vectors) follows our reading of the paper, since
@@ -369,7 +370,7 @@ heads have weight $\lambda=0.3$; modality dropout removes all speech and scene t
 face tokens with probability 0.15. We use AdamW (learning rate $3\cdot10^{-4}$, weight decay $10^{-2}$, batch 64, at
 most 80 epochs) and keep the checkpoint with the best UAR on five held-out training episodes (patience 12). The
 retrained ViT baselines use AdamW (learning rate $10^{-4}$, weight decay $10^{-5}$, batch 32, 50 epochs, checkpoint by
-selection UAR, as in the replication of the paper's code). Their body branch is not in the released features, so we add it:
+selection UAR). Their body branch is not in the released features, so we add it:
 16 evenly spaced frames per clip, the largest person detected in each frame by a YOLOv8-small detector
 (confidence $\geq$ 0.4, height $\geq$ 64 px), and the CLIP ViT-B/32 features of the crop, the same encoder as the face and
 scene features. \model{} does not use these features. On
@@ -431,8 +432,8 @@ ensembles (five seeds on Hi-EF, three on MELD).}
 Table~\ref{tab:main} gathers all results. On the Hi-EF test split, \model{} improves UAR by 3.94 points (95\% interval
 $[1.22, 7.91]$, bootstrap over test episodes) and WAR by 5.13 points over the Baseline, the benchmark's best
 configuration retrained on our split with all its inputs, and wins six of the eight test episodes. The Baseline lies
-close to the numbers published for the same configuration (23.72 UAR, 35.19 WAR on their split), which suggests that the
-retraining is faithful; adding the body branch did not change it (21.30 against 21.40 without). \model{} is also
+within 2.4 UAR of the numbers published for the same configuration (23.72 UAR, 35.19 WAR, on their split), which supports
+the reimplementation; adding the body branch did not change it (21.30 against 21.40 without). \model{} is also
 significantly better than three further retrained configurations (ViT with face, body and scene only: $+3.63$
 $[0.49, 8.14]$; with text and no audio: $+4.42$; with average intra-clip fusion and LSTM plus transformer across clips:
 $+6.23$). It is not distinguishable from the other three: the audio-only variant ($+2.52$ $[-0.06, 6.80]$), the all-average
@@ -713,6 +714,21 @@ and should not be used to make decisions about individuals.
 
 \section{Additional Details}
 \label{app:extra}
+
+\paragraph{Baseline implementation.} The ViT baselines of Table~\ref{tab:main} are our reimplementation of the architecture
+described by \citet{wang2026hief} on the frozen CLIP ViT-B/32 and AudioCLIP features, not the released training code. The
+best configuration (34.1M parameters) processes each clip as follows. Three temporal transformers (2 layers, width 512,
+8 heads, learned position embeddings) encode the 16 face, whole-frame and body vectors, each followed by a mean over
+frames. A one-layer cross-attention fuses them with the face vector as the query, and a second one-layer cross-attention
+fuses the result with the CLIP text vector and the AudioCLIP vector (through a linear layer). A three-layer LSTM followed
+by a two-layer transformer reads the three clip vectors, and a two-layer MLP classifier outputs the seven classes. It is
+trained with AdamW, the cross-entropy loss and a checkpoint selected on UAR. Compared with the released code, we use
+shallower stacks (2 layers instead of 12 in the temporal and fusion transformers, 3 LSTM layers instead of 5), an MLP
+classifier instead of a cosine adapter head, a transformer after the LSTM (the released model uses the LSTM alone), real
+cross-attention in the fusion (in the released code the output of the cross-attention stack is its unchanged query), and
+a different optimiser and checkpoint rule; the released code also feeds no body vector. The average-fusion variants have
+no counterpart in the released code and follow our reading of the paper. The split also differs, as described in
+Appendix~\ref{app:split}.
 
 Table~\ref{tab:complexity} compares the cost of the fusion stage, Table~\ref{tab:access} lists every access to the test
 split, and Table~\ref{tab:hparams} the hyper-parameters of \model{} and the baseline. \model{} is called RoleNet in

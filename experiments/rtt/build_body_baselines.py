@@ -20,6 +20,7 @@ def nb(cells):
 
 m1 = json.load(open(HERE / "m1_meld_prepare_features.ipynb"))
 M1_FETCH = "".join(m1["cells"][3]["source"])          # MELD download / unpack / video index code, reused verbatim
+M1_FETCH = M1_FETCH[:M1_FETCH.index("vids, csvs = fetch_meld()")]   # keep the definitions, drop M1's own call
 
 # ------------------------------------------------------------------------------------------------ B1
 B1 = [

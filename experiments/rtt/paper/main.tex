@@ -48,6 +48,16 @@ combined.
 % ======================================================================================================
 \section{Introduction}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figs/motivation.pdf}
+\caption{A multi-party conversation whose responder is still unobserved. The speaker A of the last observed turn
+and a listener L are sorted into separate groups without future information. A model that summarises every turn as a
+whole is dominated by the speaker and forecasts \emph{neutral}; keeping each participant as separate evidence
+forecasts the responder's \emph{happy} reply. The next speaker is the listener L.}
+\label{fig:motivation}
+\end{figure}
+
 Recognising an emotion that is displayed is a perception problem; forecasting one that has not yet been displayed is
 a problem about people. Affective forecasting has a long history in psychology \citep{wilson2003affective}, and
 recent work has begun to cast it as a learning problem on conversational video \citep{wang2026hief}: given the turns
@@ -55,15 +65,7 @@ of a conversation observed so far, predict the emotion of the person who speaks 
 properties. The target turn is never observed, and neither is the identity of the next speaker, the
 \emph{responder}.
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{figs/motivation.pdf}
-\caption{A multi-party conversation in which the responder is still unobserved. Left: the speaker A of the last
-observed turn and a listener L, whom \model{} sorts into separate groups without future information. Right: a model
-that summarises every turn as a whole is dominated by the speaker and forecasts \emph{neutral}; keeping each
-participant as separate evidence forecasts the responder's \emph{happy} reply.}
-\label{fig:motivation}
-\end{figure*}
+
 
 Multimodal models for this task fuse each observed turn as a whole and then fuse the turns over time
 \citep{wang2026hief}. This is natural for a two-party exchange, but conversations in films and television are often
@@ -105,47 +107,53 @@ recognition of participants' emotional states.
 
 \subsection{Emotion Recognition and Forecasting in Conversation}
 
-Emotion recognition in conversation (ERC) labels utterances that are observed \citep{poria2019emotion}. Its models are
-speaker-centric: they keep a state for each \emph{known} speaker with memory networks or graphs
-\citep{hazarika2018icon,majumder2019dialoguernn,ghosal2019dialoguegcn,shen2021dagerc}, add commonsense knowledge about
-the mental states of the participants \citep{ghosal2020cosmic}, or fuse text, audio and video with graph or unified
-multimodal models \citep{hu2021mmgcn,hu2022unimse}. Multi-party benchmarks such as MELD \citep{poria2019meld} supply
-speaker names, which these models exploit. Forecasting the emotion of a turn that has not happened yet is much less
-studied: sentiment forecasting has been addressed in text dialogue \citep{wang2020sentiment}, and
-\citet{wang2026hief} bring the task to multimodal video, withholding the responder's identity, which removes the
-speaker tracking ERC models rely on. We keep the idea that individuals matter but drop the need to know who they are:
-participants are grouped within a sample and treated as exchangeable evidence. The psychology of contagion
-\citep{hatfield1994contagion} and inertia \citep{kuppens2010inertia} motivates why the faces of several participants
-should be kept apart.
+Emotion recognition in conversation (ERC) labels utterances that are observed \citep{poria2019emotion}. Classic models
+are speaker-centric: they keep a state for each \emph{known} speaker with memory networks or graphs
+\citep{hazarika2018icon,majumder2019dialoguernn,ghosal2019dialoguegcn,shen2021dagerc}. More recent work fuses text,
+audio and video with correlation-aware attention \citep{shi2023multiemo} or unified multimodal models
+\citep{hu2022unimse}, adapts large language models to ERC \citep{lei2023instructerc}, or builds multimodal large
+language models that recognise and explain emotion \citep{cheng2024emotionllama,lian2025affectgpt}. PFA-ERC even
+predicts pseudo-future context to help recognition \citep{khule2024pfaerc}. All of them label utterances that are
+available, and multi-party benchmarks such as MELD \citep{poria2019meld} supply the speaker names that they exploit.
+Forecasting the emotion of a turn that has not happened yet is much less studied. It has been addressed in text
+dialogue \citep{wang2020sentiment,altarawneh2024predicting}, in call-centre speech \citep{debsharma2025erfc}, and in
+multimodal video by \citet{wang2026hief}, who withhold the responder's identity, which removes the speaker tracking
+that ERC models rely on. We keep the idea that individuals matter but drop the need to know who they are: participants
+are grouped within a sample and treated as exchangeable evidence, motivated by emotional contagion
+\citep{hatfield1994contagion} and inertia \citep{kuppens2010inertia}.
 
 \subsection{Multimodal Learning}
 
-Multimodal learning combines complementary signals from several modalities \citep{baltrusaitis2019multimodal}. For
-emotion, transformers with cross-modal attention \citep{tsai2019mult} and large pretrained encoders with a shared
-embedding space \citep{radford2021clip,guzhov2022audioclip,girdhar2023imagebind} are common, and small fusion modules
-on frozen encoders are an efficient recipe that we also follow. A recurring difficulty is that one modality dominates
-training: balanced training and gradient modulation \citep{wang2020makes,peng2022balanced} and modality dropout
-\citep{neverova2016moddrop} counter it. Our auxiliary heads and modality dropout serve the same purpose. Whether a
-trained model uses interactions between modalities, rather than adding independent contributions, is hard to tell, and
-\citet{hessel2020emap} propose to compare it with its best additive approximation (EMAP), which we apply to groups of
-participant tokens.
+Multimodal learning combines complementary signals from several modalities \citep{baltrusaitis2019multimodal}.
+Cross-modal transformers \citep{tsai2019mult}, shared embedding spaces \citep{radford2021clip,girdhar2023imagebind}
+and, more recently, omni-modal large models that take text, audio, image and video \citep{xu2025qwen25omni} make strong
+frozen or pretrained encoders widely available; we follow the efficient recipe of a small fusion module on frozen
+encoders. A recurring difficulty is that one modality dominates training, and balanced-learning methods counter it
+by modulating gradients or re-learning the weaker modality \citep{wang2020makes,peng2022balanced,wei2024diagnosing};
+modality dropout \citep{neverova2016moddrop} serves the same purpose, as do our auxiliary heads. Whether a trained
+model uses interactions between modalities, rather than adding independent contributions, is hard to tell; we use the
+EMAP analysis of \citet{hessel2020emap} on groups of participant tokens.
 
-\subsection{Person-Centric Video Understanding}
+\subsection{Person-Centric Video and Social Interaction Modelling}
 
-Several video tasks make the person, rather than the frame or clip, the unit of reasoning. Actor-centric models
-represent each person detected in a clip and relate them to each other and to the scene \citep{sun2018actor,girdhar2019video}.
-Social video benchmarks such as Ego4D ask who looks at or talks to whom \citep{grauman2022ego4d}, and listener
-modelling generates the facial reaction of a listener from the speaker \citep{ng2022learning}. Anticipation models
-predict what happens next from past video \citep{girdhar2021anticipative}, but target actions, not the emotion of an
-unobserved next speaker. We transfer the person-centric view to emotion forecasting, and we do so without
-person tracks or identity: participants are formed by clustering faces within the sample.
+Several recent lines of work make the interacting people, rather than the frame or clip, the unit of modelling.
+Ego-Exo4D, for instance, offers synchronised views of people performing skilled activities, as a basis for
+understanding human behaviour from video \citep{grauman2024egoexo4d}. Dyadic generation models learn to produce a
+listener's facial and body reaction from the speaker's behaviour \citep{ng2022learning}, with joint pretraining of
+speaker and listener \citep{tran2024dim}, or from thousands of hours of face-to-face interaction
+\citep{agrawal2025seamless}. These works
+show that a person's reaction is predictable from their partner's behaviour, but they generate behaviour for known
+people and do not forecast the emotion of an unobserved next speaker in multi-party edited video. We transfer the
+person-centric view to this setting without person tracks or identity: participants are formed by clustering faces
+within the sample.
 
 \subsection{Set-Based and Object-Centric Representations}
 
 Permutation-invariant networks process unordered collections of elements \citep{zaheer2017deep}, and attention-based
-variants add pooling by a learned seed \citep{lee2019set}. Object-centric models decompose a scene into a set of slots
-\citep{locatello2020slot}, and latent-bottleneck transformers read arbitrary inputs through a small set of latents
-\citep{jaegle2021perceiver}, building on the transformer \citep{vaswani2017attention}. \model{} follows this line of
+variants add pooling by a learned seed \citep{lee2019set}. Object-centric models decompose a scene into a small set of
+slots \citep{locatello2020slot}, which scales to real-world images when built on frozen self-supervised features
+\citep{seitzer2023dinosaur}, and latent-bottleneck transformers read arbitrary inputs through a small set of latents
+\citep{jaegle2022perceiverio}, building on the transformer \citep{vaswani2017attention}. \model{} follows this line of
 work in spirit: it represents a conversation as a small typed set of participant, speech and scene tokens and reads it
 with set attention, which makes it easy to test which parts of the set the forecast needs.
 
@@ -430,13 +438,13 @@ forecasts \emph{happy} for 58\% of the \emph{sad} responses and recalls only 3\%
 confusion to 18\% and raises \emph{sad} recall to 23\%, while keeping \emph{angry}, \emph{happy} and \emph{neutral} at
 a similar level. Neither model forecasts \emph{fear} or \emph{surprise} correctly.
 
-\subsection{Ablation Study and Analysis}
+\section{Ablation Study and Analysis}
 \label{sec:ablation}
 
-All analyses below use Hi-EF development cross-validation only. We ask three questions: where does the gain come from,
+All analyses in this section use development cross-validation on Hi-EF only. We ask three questions: where does the gain come from,
 what does the model not need, and does it need more structure? A last part analyses its errors.
 
-\subsubsection{Where Does the Gain Come From?}
+\subsection{Where Does the Gain Come From?}
 \label{sec:origin}
 
 \begin{table}[t]
@@ -483,7 +491,7 @@ feature-matched Baseline are small. The listener's own contribution shrinks with
 significant on its own. The forecast thus draws on a participant's earlier appearances and, to a similar extent, on
 their reaction late in the current turn.
 
-\subsubsection{Does the Model Need Identities and Role Labels?}
+\subsection{Does the Model Need Identities and Role Labels?}
 \label{sec:identity}
 
 \begin{table}[t]
@@ -564,7 +572,7 @@ listener tokens help where the proxy is the responder ($+5.18$ UAR, significant)
 including the 215 samples where B is visible in clip III. In short, what matters is that the faces of the people in the
 scene reach the model as separate evidence; which of them is called the listener does not.
 
-\subsubsection{Does It Need More Structure?}
+\subsection{Does It Need More Structure?}
 \label{sec:structure}
 
 \begin{table}[t]
@@ -595,7 +603,7 @@ history (other tokens of clips I--II) and the current event (other tokens of cli
 best additive approximation over these groups. Held-out NLL rises significantly, by 0.011, and each group interacts
 with the rest. The interactions are modest, about 5\% of the logit variance, and they do not involve the transcript.
 
-\subsubsection{Where Does It Fail?}
+\subsection{Where Does It Fail?}
 \label{sec:analysis}
 
 \begin{figure}[t]

@@ -1,6 +1,5 @@
-# Paper Figure 1 (full text width): frames of one multi-party sample (G37 strip) plus a contrast between clip-level
-# fusion and participant-centric evidence. Print- and colour-blind-safe: black outlines on white, hatching instead of
-# colour, no blue/red/green/grey; text is 9-10 pt at final size. The role boxes burnt into the G37 frames are removed
+# Paper Figure 1 (one column, top right of page 1): frames of one multi-party sample (G37 strip) plus a contrast between clip-level
+# fusion and participant-centric evidence. Colour-blind-safe Okabe-Ito fills with black text (no red/green/blue/grey text); text is 9-10 pt at final size. The role boxes burnt into the G37 frames are removed
 # by inpainting and redrawn in matplotlib.
 #   G37_PNG=.../sample01305_paper.png OUT=paper/figs python analysis/motivation_figure.py
 import os
@@ -12,8 +11,8 @@ import matplotlib.patheffects as pe
 
 SRC = os.environ['G37_PNG']
 OUT = os.environ.get('OUT', 'figs')
-FS, FS_SMALL = 9.5, 9.0
-YELLOW = '#F0E442'                                      # colour-blind safe, prints as a light tone
+FS, FS_SMALL = 10.0, 9.0
+YELLOW = '#F0E442'; ORANGE = '#E69F00'; SKY = '#56B4E9'                                      # colour-blind safe, prints as a light tone
 plt.rcParams['hatch.linewidth'] = 0.8
 
 # ---- cut the five frame panels out of the G37 strip; drop the burnt-in subtitles (bottom 20%)
@@ -55,10 +54,9 @@ def crop_square(p, box, scale=3.2):
 A_crop, A_b, A_side = crop_square(A_img, A_box)
 L_crop, L_b, L_side = crop_square(L_img, L_box)
 
-W, H = 6.3, 2.75
+W, H = 3.05, 3.85
 fig = plt.figure(figsize=(W, H))
 ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis('off')
-STROKE = [pe.withStroke(linewidth=2.6, foreground='black')]
 
 
 def photo(x, y, s, crop, b, side, color, tag):
@@ -67,61 +65,64 @@ def photo(x, y, s, crop, b, side, color, tag):
     k = s / side
     l, t, r, bb = b
     bx, by, bw, bh = x + l * k, y + s - bb * k, (r - l) * k, (bb - t) * k
-    ax.add_patch(Rectangle((bx, by), bw, bh, fc='none', ec='black', lw=3.2, zorder=3))
-    ax.add_patch(Rectangle((bx, by), bw, bh, fc='none', ec=color, lw=1.6, zorder=3.1))
+    ax.add_patch(Rectangle((bx, by), bw, bh, fc='none', ec='black', lw=3.4, zorder=3))
+    ax.add_patch(Rectangle((bx, by), bw, bh, fc='none', ec=color, lw=2.0, zorder=3.1))
     ax.text(bx - 0.01, by + bh + 0.02, tag, ha='left', va='bottom', fontsize=FS, weight='bold', color='black', zorder=5,
-            bbox=dict(boxstyle='square,pad=0.12', fc='white', ec='black', lw=0.7))
+            bbox=dict(boxstyle='square,pad=0.12', fc=color, ec='black', lw=0.7))
 
 
-# ---- left: observed frames of turn 3
-ax.text(0.05, H - 0.04, 'Observed turn', ha='left', va='top', fontsize=FS + 0.5, weight='bold')
-S_ = 1.02
-photo(0.06, 1.45, S_, A_crop, A_b, A_side, 'white', 'A')
-photo(1.18, 1.45, S_, L_crop, L_b, L_side, YELLOW, 'L')
-ax.text(0.06 + S_ / 2, 1.38, 'speaker A', ha='center', va='top', fontsize=FS)
-ax.text(1.18 + S_ / 2, 1.38, 'listener L', ha='center', va='top', fontsize=FS)
-ax.text(0.06, 0.92, 'The next speaker is not\nobserved. Here it is the\nlistener L, who answers.', ha='left', va='top',
-        fontsize=FS_SMALL, style='italic', linespacing=1.15)
+# ---- top: last observed turn
+ax.text(0.04, H - 0.02, 'Last observed turn', ha='left', va='top', fontsize=FS, weight='bold')
+S_ = 1.2
+PY = H - 0.25 - S_
+photo(0.05, PY, S_, A_crop, A_b, A_side, ORANGE, 'A')
+photo(1.6, PY, S_, L_crop, L_b, L_side, SKY, 'L')
+ax.text(0.05 + S_ / 2, PY - 0.03, 'speaker A', ha='center', va='top', fontsize=FS)
+ax.text(1.6 + S_ / 2, PY - 0.03, 'listener L', ha='center', va='top', fontsize=FS)
 
-# ---- right: two ways to turn the observed turns into a forecast
-X0, WB = 2.45, 3.8
+X0, WB = 0.02, 3.01
+FSB = FS
 
 
-def row_box(y, h, title):
-    ax.add_patch(FancyBboxPatch((X0, y), WB, h, boxstyle='round,pad=0,rounding_size=0.05', fc='white', ec=INK, lw=0.9,
+def row_box(y, h, title, bg):
+    ax.add_patch(FancyBboxPatch((X0, y), WB, h, boxstyle='round,pad=0,rounding_size=0.05', fc=bg, ec=INK, lw=0.9,
                                 zorder=1))
-    ax.text(X0 + 0.07, y + h - 0.05, title, ha='left', va='top', fontsize=FS + 0.5, weight='bold')
+    ax.text(X0 + 0.07, y + h - 0.04, title, ha='left', va='top', fontsize=FS, weight='bold')
 
 
-YT, HT = 1.45, 1.25
-row_box(YT, HT, 'Clip-level fusion')
-cx, cy = X0 + 0.95, YT + 0.72
-ax.add_patch(plt.matplotlib.patches.Ellipse((cx, cy), 1.55, 0.62, fc='white', ec=INK, lw=1.0, zorder=2))
+def forecast(y, word, mark):
+    ax.text(2.0, y + 0.13, 'forecast:', ha='left', va='center', fontsize=FS)
+    ax.text(2.0, y - 0.12, word, ha='left', va='center', fontsize=FS, weight='bold')
+    ax.text(2.0 + 0.62, y - 0.12, mark, ha='left', va='center', fontsize=FS, weight='bold', family='DejaVu Sans')
+
+
+HR = 1.0
+YT = PY - 0.3 - HR
+row_box(YT, HR, 'Clip-level fusion', '#FBE3B8')
+cx, cy = 0.9, YT + 0.5
+ax.add_patch(plt.matplotlib.patches.Ellipse((cx, cy), 1.5, 0.52, fc='white', ec=INK, lw=1.0, zorder=2))
 for j, k in enumerate(['T1', 'T2', 'T3']):
-    ax.add_patch(Rectangle((cx - 0.66 + 0.45 * j, cy - 0.15), 0.4, 0.3, fc='white', ec=INK, lw=0.8, zorder=3))
-    ax.text(cx - 0.46 + 0.45 * j, cy, k, ha='center', va='center', fontsize=FS_SMALL, zorder=4)
-ax.text(cx, YT + 0.14, 'one summary per turn,\nspeaker dominates', ha='center', va='center', fontsize=FS_SMALL, style='italic',
-        linespacing=1.1)
-hollow_arrow(ax, X0 + 1.9, cy, 0.55, 0, width=0.1, head_width=0.2, head_length=0.1)
-ax.text(X0 + 2.55, cy + 0.14, 'forecast:', ha='left', va='center', fontsize=FS)
-ax.text(X0 + 2.55, cy - 0.12, 'neutral', ha='left', va='center', fontsize=FS + 0.5, weight='bold')
-ax.text(X0 + 3.07, cy - 0.12, '✗', ha='left', va='center', fontsize=FS + 1, weight='bold', family='DejaVu Sans')
+    ax.add_patch(Rectangle((cx - 0.64 + 0.43 * j, cy - 0.12), 0.38, 0.24, fc='white', ec=INK, lw=0.8, zorder=3))
+    ax.text(cx - 0.45 + 0.43 * j, cy, k, ha='center', va='center', fontsize=FS_SMALL, zorder=4)
+ax.text(cx, YT + 0.13, 'speaker dominates', ha='center', va='center', fontsize=FS_SMALL, style='italic')
+hollow_arrow(ax, 1.68, cy, 0.25, 0, width=0.09, head_width=0.18, head_length=0.09)
+forecast(cy, 'neutral', '\u2717')
 
-YB, HB = 0.1, 1.25
-row_box(YB, HB, 'Participant-centric')
-HATCH = {'A': '////', 'L': 'xxxx', 'O': '....'}
-pos = {'A': (X0 + 0.55, YB + 0.86), 'L': (X0 + 1.0, YB + 0.86), 'O': (X0 + 0.78, YB + 0.64)}
+YB = YT - 0.1 - HR
+row_box(YB, HR, 'Participant-centric', '#CFEAF8')
+HATCH = {'A': None, 'L': 'xxxx', 'O': None}
+COL = {'A': ORANGE, 'L': SKY, 'O': YELLOW}
+pos = {'A': (0.5, YB + 0.55), 'L': (0.98, YB + 0.55), 'O': (0.74, YB + 0.37)}
 for r_, (px, py) in pos.items():
-    ax.add_patch(Circle((px, py), 0.2, fc='white', ec=INK, lw=0.9, hatch=HATCH[r_], zorder=2))
+    ax.add_patch(Circle((px, py), 0.19, fc=COL[r_], ec=INK, lw=0.9, zorder=2))
+    if HATCH[r_]:
+        ax.add_patch(Circle((px, py), 0.19, fc='none', ec=(0, 0, 0, 0.3), lw=0, hatch=HATCH[r_], zorder=2.1))
 for r_, (px, py) in pos.items():
-    ax.text(px, py + (0.05 if r_ != 'O' else -0.02), r_, ha='center', va='center', fontsize=FS, weight='bold', zorder=5,
-            bbox=dict(boxstyle='circle,pad=0.12', fc='white', ec='none'))
-ax.text(X0 + 0.78, YB + 0.16, 'one token per person\nand turn', ha='center', va='center', fontsize=FS_SMALL, style='italic',
-        linespacing=1.1)
-hollow_arrow(ax, X0 + 1.9, YB + 0.72, 0.55, 0, width=0.1, head_width=0.2, head_length=0.1)
-ax.text(X0 + 2.55, YB + 0.86, 'forecast:', ha='left', va='center', fontsize=FS)
-ax.text(X0 + 2.55, YB + 0.6, 'happy', ha='left', va='center', fontsize=FS + 0.5, weight='bold')
-ax.text(X0 + 3.0, YB + 0.6, '✓', ha='left', va='center', fontsize=FS + 1, weight='bold', family='DejaVu Sans')
+    ax.text(px, py + (0.04 if r_ != 'O' else -0.01), r_, ha='center', va='center', fontsize=FS, weight='bold', zorder=5,
+            bbox=dict(boxstyle='circle,pad=0.1', fc='white', ec='none', alpha=0.85))
+ax.text(0.78, YB + 0.1, 'one token per person', ha='center', va='center', fontsize=FS_SMALL, style='italic')
+hollow_arrow(ax, 1.68, YB + 0.5, 0.25, 0, width=0.09, head_width=0.18, head_length=0.09)
+forecast(YB + 0.5, 'happy', '\u2713')
 
 os.makedirs(OUT, exist_ok=True)
 fig.savefig(os.path.join(OUT, 'motivation.pdf'), bbox_inches='tight', pad_inches=0.02, dpi=400)

@@ -2,7 +2,7 @@
 
 Inputs (written by notebooks g41 and g39 on Kaggle):
   --oof    g41_oof_probs.npz   sample_id, y, src, RoleNet [seeds,N,7] (= PartiSet), PaperBest_FM [seeds,N,7] (= feature-matched Baseline)
-  --people g39_per_mcis.csv    sample_id, n_people (distinct people in clips I-III, as in the 47% statistic of the paper)
+  --people people_per_sample.csv (from analysis/count_people.py; or g39_per_mcis.csv)  sample_id, n_people (distinct people in clips I-III, as in the 47% statistic of the paper)
 Per group: UAR / WAR of the seed ensemble (mean of the seed probabilities), per-seed mean, and the PartiSet - Baseline difference
 with a 95% interval from resampling episodes (2000 draws). Also the difference of the two group differences."""
 import argparse

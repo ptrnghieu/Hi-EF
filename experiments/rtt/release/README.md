@@ -17,8 +17,10 @@ partiset/     the method
   train.py          training loop (AdamW, early stopping on the UAR of held-out training episodes)
   cv.py             episode-level splits (early-stopping episodes, cross-validation folds)
   metrics.py        WAR / UAR, episode bootstrap, two-level bootstrap over seeds and episodes
+  controls.py       input controls (listener emptied / replaced, slot continuity across turns broken) used by the control analyses
   data.py, pipeline.py, config.py   tables, feature loading, hyper-parameters
-scripts/      run_partiset_cv.py (5-fold episode CV, 10 seeds), run_partiset_test.py (test split, 5 seeds)
+scripts/      run_partiset_cv.py (5-fold episode CV, 10 seeds), run_partiset_test.py (test split, 5 seeds),
+              run_partiset_controls.py (the same CV under the input controls), profile_fusion.py (parameters, time, memory of the fusion stage)
 notebooks/    the baselines (ViT, Qwen2.5-VL)
 tests/        checks that the package matches the first implementation (synthetic data, no dataset needed)
 ```

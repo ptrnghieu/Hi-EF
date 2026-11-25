@@ -46,7 +46,7 @@ def diff(pa, pb, w):
 ones = np.ones(len(y))
 ea, eb = PA.mean(0).argmax(1), PB.mean(0).argmax(1)
 (dU, dW), (wa, ua), (wb, ub) = diff(ea, eb, ones), metrics(ea, ones), metrics(eb, ones)
-per = np.array([diff(PA[s].argmax(1), PB[s].argmax(1), ones) for s in range(len(PA))])
+per = np.array([diff(PA[s % len(PA)].argmax(1), PB[s % len(PB)].argmax(1), ones) for s in range(max(len(PA), len(PB)))])
 rng = np.random.default_rng(0)
 
 

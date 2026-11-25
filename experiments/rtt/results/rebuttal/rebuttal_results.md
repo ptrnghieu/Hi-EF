@@ -1,0 +1,82 @@
+# Rebuttal analyses on saved predictions
+
+All numbers are computed from the saved prediction files (Hi-EF test: 409 samples, 8 episodes; Hi-EF development CV: 2,421 samples, 45 episodes; MELD test: 1,341 windows, 223 dialogues). Intervals are 95% percentile intervals from a bootstrap that resamples whole episodes (dialogues for MELD), 2,000 draws, on the seed ensembles. `ep+` is the number of episodes in which PartiSet beats the comparison on UAR. Scripts: `experiments/rtt/analysis/`.
+
+## 1. R1: Hi-EF test, PartiSet against the ViT models
+
+| PartiSet − | ΔUAR [95% CI] | ΔWAR [95% CI] | ep+ (UAR) | SD over seeds of ΔUAR |
+|---|---|---|---|---|
+| **Baseline** (21.30 / 31.30) | **+3.94 [1.22, 7.91]** | **+5.13 [0.67, 10.29]** | 6/8 | 0.35 |
+| Strongest configuration, Trans/Avg (24.23 / 32.76) | +1.01 [−1.98, 4.60] | +3.67 [−0.38, 8.61] | 5/8 | 1.72 |
+| F,B,S (21.62 / 32.27) | +3.63 [0.49, 8.14] | +4.16 [−0.60, 10.09] | 6/8 | 1.57 |
+| F,B,S,A (22.72 / 33.74) | +2.52 [−0.06, 6.80] | +2.69 [−2.40, 8.50] | 5/8 | 1.59 |
+| Avg/Avg (22.84 / 32.52) | +2.40 [−0.23, 6.31] | +3.91 [0.21, 8.43] | 5/8 | 1.61 |
+| Qwen2.5-VL zero-shot (15.75 / 21.76) | +9.49 [3.39, 13.95] | +14.67 [9.00, 18.32] | 7/8 | 1.50 |
+| Qwen2.5-VL few-shot, set 0 (18.97 / 24.45) | +6.27 [−1.55, 11.66] | +11.98 [3.36, 18.18] | 6/8 | 1.50 |
+
+## 2. R1: development CV (5 folds, 5 seeds)
+
+| PartiSet − | ΔUAR [95% CI] | ΔWAR [95% CI] | ep+ (UAR) |
+|---|---|---|---|
+| Baseline with PartiSet's features (23.25 / 32.71) | +3.37 [1.70, 4.85] | +5.20 [3.37, 7.01] | 29/45 |
+| Baseline, original features (21.27 / 31.68) | +5.35 [3.20, 7.41] | +6.24 [3.15, 9.37] | 32/45 |
+
+## 3. M1: matched full model against variants (same run, 10 seeds, 45 episodes)
+
+| Full − variant | UAR (full / variant) | ΔUAR [95% CI] | ΔWAR [95% CI] | ep+ (UAR) |
+|---|---|---|---|---|
+| Faces pooled per clip (no slots) | 26.24 / 25.80 | **+0.44 [−0.74, 1.84]** | +0.12 [−1.91, 2.19] | 23/45 |
+| Without listener tokens | 26.24 / 24.20 | **+2.04 [1.10, 3.07]** | +2.81 [1.36, 4.30] | 31/45 |
+| Mean pooling instead of query | 26.24 / 26.42 | −0.18 [−1.26, 0.93] | +0.29 [−1.12, 1.82] | 19/45 |
+
+## 4. R2: MELD test
+
+| PartiSet − | ΔUAR [95% CI] | ΔWAR [95% CI] |
+|---|---|---|
+| Baseline (15.27 / 45.34) | +1.58 [−0.35, 3.90] | **−6.04 [−8.22, −3.73]** |
+| Strongest configuration, Trans/Avg (16.42 / 38.85) | +0.43 [−2.29, 3.35] | +0.45 [−1.98, 2.99] |
+
+Recall by class and share of *neutral* predictions (%):
+
+| Model | angry | disgust | fear | happy | neutral | sad | surprise | predicted neutral |
+|---|---|---|---|---|---|---|---|---|
+| Baseline | 15.5 | 0 | 0 | 0 | 91.4 | 0 | 0 | **90.8** |
+| ViT Avg/Avg | 3.5 | 0 | 0 | 2.4 | 95.0 | 0 | 0 | 95.7 |
+| ViT Trans/Avg | 12.0 | 2.4 | 5.0 | 13.2 | 71.5 | 4.8 | 6.1 | 70.2 |
+| **PartiSet** | 17.6 | 0 | 5.0 | 17.9 | 70.5 | 1.9 | 5.0 | **70.5** |
+| Qwen2.5-VL zero-shot | 49.3 | 17.1 | 0 | 29.7 | 23.4 | 19.0 | 20.0 | 20.7 |
+
+*Neutral* is 47.8% of the test labels; an always-*neutral* predictor has WAR 47.80 and UAR 14.29.
+
+## 5. T1: mirror and non-mirror samples (development CV, 2,421 samples)
+
+| Group | n | PartiSet acc / UAR | Baseline with PartiSet's features | Baseline |
+|---|---|---|---|---|
+| Mirror (target = emotion of A) | 860 | 55.9 / 32.3 | 45.8 / 26.5 | 45.6 / 25.4 |
+| Non-mirror | 1,561 | 28.0 / 22.1 | 25.5 / 20.3 | 24.0 / 18.4 |
+
+PartiSet minus Baseline with PartiSet's features, by group:
+
+| Group | ΔUAR [95% CI] | Δaccuracy [95% CI] |
+|---|---|---|
+| Mirror | +5.84 [2.88, 9.60] | +10.12 [6.43, 13.96] |
+| Non-mirror | +1.81 [0.25, 3.37] | +2.50 [0.68, 4.38] |
+| Mirror − non-mirror | +4.04 [0.84, 7.87] | +7.62 [3.65, 11.87] |
+
+Errors shared between models (same samples): 69–73% of the samples that either model gets wrong; correlation of correctness 0.44–0.56.
+
+## 6. T2: responder groups (development CV, against Baseline with PartiSet's features)
+
+| Group | n | PartiSet UAR | Baseline with PartiSet's features | ΔUAR [95% CI] |
+|---|---|---|---|---|
+| B seen = proxy | 990 | 25.93 | 22.91 | +3.02 [0.55, 5.64] |
+| B seen ≠ proxy | 1,114 | 27.79 | 24.42 | +3.37 [0.54, 5.88] |
+| B not seen | 225 | 23.80 | 19.86 | +3.94 [−0.08, 8.68] |
+| uncertain | 92 | 24.61 | 18.98 | +5.63 [−2.54, 15.21] |
+
+## Not done
+
+- R3: manual audit of the estimated responder oracle (needs annotators).
+- R4: end-to-end profiling of pre-processing and fusion.
+- M2, M3: need retraining.
+- Qwen few-shot on MELD from predictions: the uploaded file only has the zero-shot run.

@@ -27,6 +27,7 @@ ap.add_argument('--split-csv', required=True); ap.add_argument('--participant-fe
 ap.add_argument('--out', default='.'); ap.add_argument('--folds', type=int, default=5)
 ap.add_argument('--seeds', type=int, nargs='+', default=[42, 123, 456, 7, 11, 19, 23, 31, 37, 43])
 ap.add_argument('--arms', nargs='+', default=[a for a, _ in ARMS], help='subset of arm names')
+ap.add_argument('--tag', default='', help='suffix of the output files, to run the arms in several sessions')
 a = ap.parse_args()
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -49,8 +50,9 @@ for f in range(a.folds):
             w, u = war_uar(p.argmax(1), y[te])
             log.append(dict(fold=f, arm=name, seed=s, sel_UAR=sel, UAR=u, WAR=w)); print(f'fold {f} {name} seed {s} done', flush=True)
 os.makedirs(a.out, exist_ok=True)
-pd.DataFrame(log).to_csv(os.path.join(a.out, 'partiset_controls_log.csv'), index=False)
+sfx = f'_{a.tag}' if a.tag else ''
+pd.DataFrame(log).to_csv(os.path.join(a.out, f'partiset_controls_log{sfx}.csv'), index=False)
 safe = lambda s: re.sub(r'[^0-9A-Za-z]+', '_', s).strip('_')
-np.savez(os.path.join(a.out, 'partiset_controls_oof.npz'), sample_id=sp.sample_id.values, fold=fold_of_row, y=y, src=src,
+np.savez(os.path.join(a.out, f'partiset_controls_oof{sfx}.npz'), sample_id=sp.sample_id.values, fold=fold_of_row, y=y, src=src,
          **{safe(k): v for k, v in oof.items()})
 print('saved', a.out)

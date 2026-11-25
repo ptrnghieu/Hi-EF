@@ -1,0 +1,36 @@
+% ---- Table 1 body (ViT rows retrained on our splits; values computed from saved test predictions) ----
+ViT & F,B,S & Trans & LSTM+Trans & 21.62 & 32.27 & 14.87 & 46.09 \\
+ViT & F,B,S,A & Trans & LSTM+Trans & 22.72 & 33.74 & 15.05 & \textbf{46.16} \\
+ViT & F,B,S,T & Trans & LSTM+Trans & 20.82 & 30.81 & 14.97 & 45.64 \\
+ViT & F,B,S,T,A & Avg & Avg & 22.84 & 32.52 & 14.41 & \textbf{46.16} \\
+ViT & F,B,S,T,A & Trans & Avg & 24.23 & 32.76 & 16.42 & 38.85 \\
+ViT & F,B,S,T,A & Avg & LSTM+Trans & 19.01 & 28.85 & 15.14 & 40.64 \\
+ViT (Baseline) & F,B,S,T,A & Trans & LSTM+Trans & 21.30 & 31.30 & 15.27 & 45.34 \\
+\midrule
+Qwen2.5-VL (zero-shot) & V,T & -- & -- & 15.75 & 21.76 & 22.65 & 25.80 \\
+Qwen2.5-VL (few-shot) & V,T & -- & -- & 17.80 & 23.88 & \textbf{24.85} & 23.19 \\
+\midrule
+PartiSet (ours) & F,S,T,A & Set-based & Set-based & \textbf{25.24} & \textbf{36.43} & 16.85 & 39.30 \\
+
+% ---- Table 9 body: published columns copied from the manuscript (please verify against the Hi-EF paper) ----
+ResNet18 & F & -- & Avg & 17.02 & 22.22 & -- & -- & -- & -- \\
+ResNet18 & F,B,S & Avg & Avg & 18.58 & 23.15 & -- & -- & -- & -- \\
+ResNet18 & F,B,S & Trans & Avg & 19.75 & 32.41 & -- & -- & -- & -- \\
+ResNet18 & F,B,S & Avg & Trans & 21.09 & 28.70 & -- & -- & -- & -- \\
+I3D & F & -- & Avg & 21.73 & 28.57 & -- & -- & -- & -- \\
+I3D & F,B,S & Avg & Avg & 21.16 & 29.62 & -- & -- & -- & -- \\
+I3D & F,B,S & Trans & Avg & 21.19 & 29.63 & -- & -- & -- & -- \\
+I3D & F,B,S & Avg & Trans & 22.99 & 29.62 & -- & -- & -- & -- \\
+\midrule
+ViT & F,B,S & Trans & LSTM+Trans & 22.39 & 31.37 & 21.62 & 32.27 & 14.87 & 46.09 \\
+ViT & F,B,S,A & Trans & LSTM+Trans & 21.27 & 33.34 & 22.72 & 33.74 & 15.05 & \textbf{46.16} \\
+ViT & F,B,S,T & Trans & LSTM+Trans & 21.80 & 31.03 & 20.82 & 30.81 & 14.97 & 45.64 \\
+ViT & F,B,S,T,A & Avg & Avg & 18.55 & 31.44 & 22.84 & 32.52 & 14.41 & \textbf{46.16} \\
+ViT & F,B,S,T,A & Trans & Avg & 21.71 & 33.38 & 24.23 & 32.76 & 16.42 & 38.85 \\
+ViT & F,B,S,T,A & Avg & LSTM+Trans & 23.19 & 34.49 & 19.01 & 28.85 & 15.14 & 40.64 \\
+ViT (Baseline) & F,B,S,T,A & Trans & LSTM+Trans & 23.72 & 35.19 & 21.30 & 31.30 & 15.27 & 45.34 \\
+\midrule
+Qwen2.5-VL-7B, zero-shot & V,T & -- & -- & -- & -- & \textit{15.75} & \textit{21.76} & 22.65 & 25.80 \\
+Qwen2.5-VL-7B, few-shot & V,T & -- & -- & -- & -- & \textit{17.80} & \textit{23.88} & \textbf{24.85} & 23.19 \\
+\midrule
+PartiSet (ours) & F,S,T,A & Set-based & Set-based & -- & -- & \textbf{25.24} & \textbf{36.43} & 16.85 & 39.30 \\

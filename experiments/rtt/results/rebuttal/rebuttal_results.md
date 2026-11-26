@@ -80,3 +80,29 @@ Errors shared between models (same samples): 69–73% of the samples that either
 - R4: end-to-end profiling of pre-processing and fusion.
 - M2, M3: need retraining.
 - Qwen few-shot on MELD from predictions: the uploaded file only has the zero-shot run.
+
+## 7. M2 and M3: input controls (development CV, 10 seeds, 45 episodes; run `k1_partiset_controls.ipynb`)
+
+The `Full` arm reproduces the earlier ten-seed run exactly (maximum absolute difference of the probabilities 0.0).
+
+| Arm | Ensemble UAR | Ensemble WAR | Per-seed UAR (mean ± SD) |
+|---|---|---|---|
+| Full | 26.24 | 38.04 | 24.74 ± 0.97 |
+| Listener slot emptied (masked) | 24.51 | 35.98 | 23.12 ± 0.66 |
+| Listener slot replaced by the other-participants slot | 23.98 | 34.82 | 22.86 ± 0.70 |
+| Listener slot taken from another sample | 23.36 | 33.62 | 22.51 ± 0.88 |
+| Continuity of slots across turns broken (clips I/II permuted) | 26.46 | 38.74 | 24.71 ± 1.10 |
+| One permutation for all turns (continuity kept, slot meaning changed) | 26.42 | 38.50 | 24.56 ± 0.47 |
+
+Paired differences in UAR (a − b), 95% interval from resampling whole episodes:
+
+| a − b | ΔUAR [95% CI] | episodes a better |
+|---|---|---|
+| Full − listener emptied | +1.73 [0.67, 2.84] | 25/45 |
+| Full − listener from other participants | +2.26 [1.07, 3.40] | 29/45 |
+| Full − listener from another sample | +2.88 [1.39, 4.22] | 34/45 |
+| Full − continuity broken | −0.22 [−1.13, 0.72] | 22/45 |
+| Full − one permutation for all turns | −0.18 [−1.01, 0.68] | 20/45 |
+| One permutation for all turns − continuity broken | −0.03 [−0.87, 0.79] | 20/45 |
+| Listener from other participants − listener emptied | −0.53 [−1.33, 0.30] | 20/45 |
+| Listener from another sample − listener emptied | −1.15 [−2.19, −0.06] | 14/45 |

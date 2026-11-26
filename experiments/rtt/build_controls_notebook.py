@@ -10,7 +10,8 @@ cells = [md("""
 Runs `scripts/run_partiset_controls.py` of the code package: development cross-validation (5 episode-disjoint folds, the same folds,
 early-stopping episodes and seeds as the main experiments), the **test split is never read**. Arms: `Full`; the listener slot emptied;
 the listener slot replaced by the other-participants slot; the listener slot taken from another sample; slots of clips I/II permuted
-independently of clip III (continuity broken); one permutation for all turns (continuity kept, slot meaning changed).
+independently of clip III (continuity broken); one permutation for all turns (continuity kept, slot meaning changed); slot embeddings removed;
+slots A and L exchanged in a random half of the samples (the last two complete the ablation table).
 
 **Inputs to attach:** the code dataset (the release zip), the Hi-EF dataset (video + annotation), the pre-extracted CLIP/AudioCLIP features,
 the split table `source_folder_split_seed42.csv`, and the folder with the participant-feature shards (`shard_*.pkl`). GPU on.
@@ -32,9 +33,10 @@ print(r.stdout[-400:], r.stderr[-300:])
 code("""
 # ======== CONFIG ========
 QUICK = True                      # True: one seed, two arms (check the pipeline); False: the full run
-ALL_ARMS = ['Full', 'listener-off (masked)', 'listener-from-others', 'listener-from-other-sample', 'continuity-broken', 'global-permutation']
-ARMS = ALL_ARMS                   # e.g. ALL_ARMS[:3] in one session and ALL_ARMS[3:] in the next
-TAG = 'a'                         # suffix of this session's output files
+ALL_ARMS = ['Full', 'listener-off (masked)', 'listener-from-others', 'listener-from-other-sample', 'continuity-broken', 'global-permutation',
+            'no-slot-embeddings', 'A-L-swapped-half']
+ARMS = ['Full', 'no-slot-embeddings', 'A-L-swapped-half']   # session b: the two arms of the ablation table, with Full for the pairing (Full is reproduced exactly)
+TAG = 'b'                         # suffix of this session's output files; use another tag per session
 SEEDS = [42, 123, 456, 7, 11, 19, 23, 31, 37, 43]
 OUT_DIR = '/kaggle/working/out'
 

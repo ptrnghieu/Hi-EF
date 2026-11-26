@@ -18,15 +18,16 @@ from partiset.controls import ControlledInputs
 from partiset.cv import assign_folds, cv_fold_rows
 from partiset.pipeline import prepare
 
-ARMS = [('Full', 'none'), ('listener-off (masked)', 'listener_off'), ('listener-from-others', 'listener_other'),
-        ('listener-from-other-sample', 'listener_swap'), ('continuity-broken', 'continuity'), ('global-permutation', 'global_perm')]
+ARMS = [('Full', 'none', {}), ('listener-off (masked)', 'listener_off', {}), ('listener-from-others', 'listener_other', {}),
+        ('listener-from-other-sample', 'listener_swap', {}), ('continuity-broken', 'continuity', {}), ('global-permutation', 'global_perm', {}),
+        ('no-slot-embeddings', 'none', {'slot_emb': False}), ('A-L-swapped-half', 'al_swap_half', {})]
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--dataset', required=True); ap.add_argument('--features', required=True)
 ap.add_argument('--split-csv', required=True); ap.add_argument('--participant-features', required=True)
 ap.add_argument('--out', default='.'); ap.add_argument('--folds', type=int, default=5)
 ap.add_argument('--seeds', type=int, nargs='+', default=[42, 123, 456, 7, 11, 19, 23, 31, 37, 43])
-ap.add_argument('--arms', nargs='+', default=[a for a, _ in ARMS], help='subset of arm names')
+ap.add_argument('--arms', nargs='+', default=[a[0] for a in ARMS], help='subset of arm names')
 ap.add_argument('--tag', default='', help='suffix of the output files, to run the arms in several sessions')
 a = ap.parse_args()
 
@@ -35,17 +36,17 @@ sp, B, base = prepare(a.dataset, a.features, a.split_csv, a.participant_features
 src, y = sp.source_folder.values, sp.yB.values
 fold, load = assign_folds(src, a.folds)
 fold_of_row = np.array([fold[e] for e in src])
-arms = [(n, k) for n, k in ARMS if n in a.arms]
+arms = [x for x in ARMS if x[0] in a.arms]
 T = lambda r: torch.tensor(r, device=dev)
-oof = {n: np.full((len(a.seeds), len(sp), 7), np.nan, np.float32) for n, _ in arms}
+oof = {x[0]: np.full((len(a.seeds), len(sp), 7), np.nan, np.float32) for x in arms}
 log = []
 for f in range(a.folds):
     fit, dv, te, trr = cv_fold_rows(src, fold, f, 5)
     base.set_faces(*B.build_face_tensors(sorted(set(sp.iloc[trr][['clip1', 'clip2', 'clip3']].values.ravel())), dev)[:2])
-    for name, kind in arms:
+    for name, kind, over in arms:
         X = ControlledInputs(base, kind, seed=1000 + f)
         for si, s in enumerate(a.seeds):
-            p, sel = train_eval(lambda: PartiSet(BASE, B.FDIM, 9), HP, X, T(fit), T(dv), T(te), s + 1000 * f, dev)
+            p, sel = train_eval(lambda: PartiSet({**BASE, **over}, B.FDIM, 9), HP, X, T(fit), T(dv), T(te), s + 1000 * f, dev)
             oof[name][si, te] = p
             w, u = war_uar(p.argmax(1), y[te])
             log.append(dict(fold=f, arm=name, seed=s, sel_UAR=sel, UAR=u, WAR=w)); print(f'fold {f} {name} seed {s} done', flush=True)

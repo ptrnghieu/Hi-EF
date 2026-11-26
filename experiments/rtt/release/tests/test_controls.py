@@ -88,3 +88,13 @@ def test_controls_are_deterministic_and_work_on_subsets():
     assert torch.equal(b1.face, b2.face)
     ix = torch.tensor([4, 9, 17])
     assert torch.equal(X1.index(ix).face, b1.face[ix])                         # same result whether indexed alone or in a batch
+
+
+def test_al_swap_half_swaps_a_and_l_in_a_random_half_of_the_samples():
+    X, b, o = batch_of('al_swap_half', seed=5)
+    half = X.half
+    assert 0.2 < half.float().mean() < 0.8
+    assert torch.equal(b.face[~half], o.face[~half])                                  # the other half is untouched
+    assert torch.equal(b.face[half][:, 0], o.face[half][:, 1]) and torch.equal(b.face[half][:, 1], o.face[half][:, 0])
+    assert torch.equal(b.face[half][:, 2], o.face[half][:, 2])                        # O is never moved
+    assert torch.equal(b.fmask[half][:, 0], o.fmask[half][:, 1])

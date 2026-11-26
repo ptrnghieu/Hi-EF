@@ -7,6 +7,7 @@
                 across turns. The per-slot mouth-synchrony entries of the turn descriptor move with their slot.
   global_perm   control for `continuity`: one non-identity permutation per sample, applied to all three turns, so that
                 continuity is kept and only the meaning of the slots is changed.
+  al_swap_half  slots A and L are exchanged in all turns of a random half of the samples (the table of the ablations)
   listener_off  the listener slot is emptied in every turn (its tokens become the learned absent token and its synchrony
                 entries are zeroed); the number of tokens is unchanged.
   listener_other the listener slot is replaced by the other-participants slot (faces of other people of the same sample).
@@ -21,7 +22,7 @@ import torch
 
 from .data import Batch
 
-KINDS = ('none', 'continuity', 'global_perm', 'listener_off', 'listener_other', 'listener_swap')
+KINDS = ('none', 'continuity', 'global_perm', 'al_swap_half', 'listener_off', 'listener_other', 'listener_swap')
 N_SYNC = 6          # VOI[..., :6] = (synchrony, mouth variability) for each of the three slots
 
 
@@ -66,6 +67,10 @@ class ControlledInputs:
         elif kind == 'global_perm':
             P = _non_identity_perms(n, seed)
             self.perm = torch.tensor(np.repeat(P[:, None], 3, axis=1), device=base.device)
+        elif kind == 'al_swap_half':
+            half = np.random.default_rng(seed).random(n) < 0.5
+            P = np.tile(np.arange(3), (n, 3, 1)); P[half] = (1, 0, 2)
+            self.perm = torch.tensor(P, device=base.device); self.half = torch.tensor(half, device=base.device)
         elif kind == 'listener_swap':
             self.swap = torch.tensor(_derangement(n, seed), device=base.device)
 
@@ -77,7 +82,7 @@ class ControlledInputs:
         if self.kind == 'none':
             return b
         face, fmask, voi = b.face, b.fmask, b.voi
-        if self.kind in ('continuity', 'global_perm'):
+        if self.kind in ('continuity', 'global_perm', 'al_swap_half'):
             face, fmask, voi = permute_slots(face, fmask, voi, self.perm[ix])
         elif self.kind == 'listener_off':
             fmask = fmask.clone(); fmask[:, 1] = False

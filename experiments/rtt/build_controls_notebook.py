@@ -67,6 +67,8 @@ assert p.wait() == 0, 'the run failed'
 """),
 md("## Cost of the fusion stage (parameters, time per sample, GPU memory)"),
 code("""
+import torch
+print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')
 r = subprocess.run([sys.executable, 'scripts/profile_fusion.py'], capture_output=True, text=True)
 print(r.stdout, r.stderr[-500:])
 """),

@@ -51,6 +51,7 @@ CODE_ROOT = '/kaggle/working/code'
 shutil.copytree(os.path.dirname(CODE_SRC), CODE_ROOT, dirs_exist_ok=True)
 sys.path.insert(0, CODE_ROOT)
 """),
+code(CONFIG_C),
 md("## 1. Fusion stage"),
 code('''
 import torch.nn as nn, torch.nn.functional as F
@@ -139,7 +140,6 @@ print(GROUP); json.dump(GROUP, open('/kaggle/working/cost_grouping.json', 'w'))
 """),
 md("## 3. Pre-processing per clip (extraction code of the experiments, copied verbatim)"),
 code(G(1)),
-code(CONFIG_C),
 code(G(3)),
 code(G(4)),
 code(G(5)),

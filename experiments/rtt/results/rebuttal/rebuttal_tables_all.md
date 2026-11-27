@@ -58,8 +58,12 @@ Hi-EF WAR is a multiple of 100/409 (Baseline 128 of 409 correct = 31.30; PartiSe
 | Faces pooled per clip (no slots) | 26.24 / 25.80 | **+0.44 [−0.74, 1.84]** | +0.12 [−1.91, 2.19] | 23/45 |
 | Without listener tokens | 26.24 / 24.20 | **+2.04 [1.10, 3.07]** | +2.81 [1.36, 4.30] | 31/45 |
 | Mean pooling instead of query | 26.24 / 26.42 | −0.18 [−1.26, 0.93] | +0.29 [−1.12, 1.82] | 19/45 |
+| Without slot embeddings | 26.24 / 26.41 | −0.17 [−1.03, 0.61] | −0.29 [−1.34, 0.72] | 21/45 |
+| A and L exchanged in a random half of the samples | 26.24 / 26.91 | −0.67 [−1.57, 0.23] | −0.99 [−2.81, 0.63] | 26/45 |
 
-The pooled-face value in this matched run is 25.80; Table 4 of the manuscript lists 25.20 (a different run), so the manuscript row should be paired with the full-model score of its own run.
+The last two rows were run later with the same folds, seeds and early-stopping episodes; `Full` is reproduced exactly (maximum absolute difference of the probabilities 0.0), so the pairing is valid. Without slot embeddings the ensemble UAR is 26.41, the value of Table 4 of the manuscript. For the exchange of A and L the matched run gives 26.91, whereas Table 4 of the manuscript lists 26.25 (a different run and implementation of the random half); in both, exchanging the slots does not lower UAR.
+
+The pooled-face value in this matched run is 25.80; Table 4 of the manuscript lists 25.20 (a different run), so the manuscript row should be paired with the full-model score of its own run. Not available as matched runs: a random non-speaker as listener (needs identity labels of the faces) and the oracle responder (needs the future clip).
 
 ## 5. Input controls (development CV, 10 seeds, 45 episodes)
 

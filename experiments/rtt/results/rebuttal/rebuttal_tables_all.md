@@ -91,6 +91,26 @@ The pooled-face value in this matched run is 25.80; Table 4 of the manuscript li
 
 With the other-participants slot the listener's faces are absent from the input altogether, which is why it behaves like removing the listener. Five comparisons with the full model are reported without correction for multiple comparisons.
 
+### 5b. Source-preservation controls (development CV, 10 seeds, 45 episodes; `k1_partiset_controls.ipynb`, session c)
+
+Same features, same fusion model, same number of face tokens (nine), same training protocol; only the grouping of the face evidence into slots changes. *Replicated pooling*: every slot of a turn holds the same clip-level frames (up to 32). *Random grouping*: each face frame of a turn goes to one of the three slots at random (fixed seed, identity not used). In both, the per-slot synchrony entries are replaced by their mean over slots, so no grouping leaks. `Full` reproduces the earlier ten-seed run exactly (maximum absolute difference 0.0).
+
+| Arm | Ensemble UAR | Ensemble WAR | Per-seed UAR (mean ± SD) |
+|---|---|---|---|
+| Full PartiSet (participant slots) | 26.24 | 38.04 | 24.74 ± 0.97 |
+| Replicated pooling | 24.87 | 36.76 | 23.42 ± 0.65 |
+| Random grouping | 25.04 | 36.89 | 23.36 ± 0.70 |
+
+| a − b | ΔUAR [95% CI] | ΔWAR [95% CI] | ep+ (UAR) |
+|---|---|---|---|
+| Full − replicated pooling | +1.37 [0.23, 2.56] | +1.28 [−0.75, 3.16] | 27/45 |
+| Full − random grouping | +1.20 [0.00, 2.43] | +1.16 [−0.64, 3.01] | 26/45 |
+| Replicated pooling − random grouping | −0.17 [−1.04, 0.71] | −0.12 [−1.24, 0.97] | 19/45 |
+
+Reading: Full is above both controls in UAR (the lower interval end is 0.23 and 0.00, so the random-grouping difference is borderline), and not significantly above in WAR. The two controls do not differ from each other. These controls use 32 frames per slot (replicated) or a disjoint split of them (random), against up to 24 frames per cell in Full; slot embeddings are kept in all arms. Not corrected for multiple comparisons.
+
+The retrained sham-listener control (listener taken from another sample, in training and evaluation) is the row "Listener slot taken from another sample" above: Full − sham = +2.88 [1.39, 4.22] UAR, +4.42 [2.39, 6.38] WAR; the sham is also below the emptied-listener arm (−1.15 [−2.19, −0.06]).
+
 ## 6. MELD test (1,341 windows, 223 dialogues)
 
 | PartiSet − | ΔUAR [95% CI] | ΔWAR [95% CI] |

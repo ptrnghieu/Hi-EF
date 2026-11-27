@@ -20,7 +20,8 @@ from partiset.pipeline import prepare
 
 ARMS = [('Full', 'none', {}), ('listener-off (masked)', 'listener_off', {}), ('listener-from-others', 'listener_other', {}),
         ('listener-from-other-sample', 'listener_swap', {}), ('continuity-broken', 'continuity', {}), ('global-permutation', 'global_perm', {}),
-        ('no-slot-embeddings', 'none', {'slot_emb': False}), ('A-L-swapped-half', 'al_swap_half', {})]
+        ('no-slot-embeddings', 'none', {'slot_emb': False}), ('A-L-swapped-half', 'al_swap_half', {}),
+        ('replicated-pooling', 'replicated_pool', {}), ('random-grouping', 'random_grouping', {})]
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--dataset', required=True); ap.add_argument('--features', required=True)

@@ -19,6 +19,8 @@ class FakeInputs:
         self.face = torch.randn(N, 3, 3, MAXF, FD, generator=g)
         self.fmask = torch.rand(N, 3, 3, MAXF, generator=g) > 0.4
         self.voi = torch.randn(N, 3, 9, generator=g)
+        self.pool = torch.randn(N, 1, 3, 32, FD, generator=g)
+        self.pmask = torch.rand(N, 1, 3, 32, generator=g) > 0.4
         self.yb = torch.randint(0, 7, (N,), generator=g)
 
     def set_faces(self, face, pool):
@@ -26,7 +28,7 @@ class FakeInputs:
 
     def index(self, ix):
         z = lambda *s: torch.zeros(len(ix), *s)
-        return Batch(self.face[ix], z(1), self.fmask[ix], z(1), z(3, 4), z(3, 4), z(3), z(3, 4), self.voi[ix], self.yb[ix], self.yb[ix])
+        return Batch(self.face[ix], self.pool[ix], self.fmask[ix], self.pmask[ix], z(3, 4), z(3, 4), z(3), z(3, 4), self.voi[ix], self.yb[ix], self.yb[ix])
 
 
 def batch_of(kind, seed=0):
@@ -38,6 +40,9 @@ def test_none_is_identity_and_all_kinds_keep_shapes():
     for kind in KINDS:
         _, b, o = batch_of(kind)
         for f in ('face', 'fmask', 'voi'):
+            if kind in ('replicated_pool', 'random_grouping') and f != 'voi':           # these use the 32 pooled frames per turn
+                assert getattr(b, f).shape[:3] == getattr(o, f).shape[:3], (kind, f)
+                continue
             assert getattr(b, f).shape == getattr(o, f).shape, (kind, f)
     _, b, o = batch_of('none')
     assert all(torch.equal(x, y) for x, y in zip(b, o))
@@ -98,3 +103,29 @@ def test_al_swap_half_swaps_a_and_l_in_a_random_half_of_the_samples():
     assert torch.equal(b.face[half][:, 0], o.face[half][:, 1]) and torch.equal(b.face[half][:, 1], o.face[half][:, 0])
     assert torch.equal(b.face[half][:, 2], o.face[half][:, 2])                        # O is never moved
     assert torch.equal(b.fmask[half][:, 0], o.fmask[half][:, 1])
+
+
+def test_replicated_pooling_gives_every_slot_the_same_pooled_evidence():
+    X, b, o = batch_of('replicated_pool')
+    assert b.face.shape == (N, 3, 3, 32, FD) and b.fmask.shape == (N, 3, 3, 32)
+    for r in range(3):
+        assert torch.equal(b.face[:, r], o.pool[:, 0]) and torch.equal(b.fmask[:, r], o.pmask[:, 0])
+    assert torch.equal(b.voi[..., 0:2], b.voi[..., 2:4]) and torch.equal(b.voi[..., 2:4], b.voi[..., 4:6])
+    assert torch.allclose(b.voi[..., 0:2], o.voi[..., :6].reshape(N, 3, 3, 2).mean(2))
+    assert torch.equal(b.voi[..., 6:], o.voi[..., 6:])
+
+
+def test_random_grouping_partitions_the_pooled_frames_without_identity():
+    X, b, o = batch_of('random_grouping', seed=2)
+    assert b.face.shape == (N, 3, 3, 32, FD)
+    valid = o.pmask[:, 0]                                                      # [N, turn, frames]
+    assert torch.equal(b.fmask.sum((1, 3)), valid.sum(-1))                          # every valid frame lands in exactly one slot
+    for i in range(N):
+        for k in range(3):
+            got = sorted(tuple(f.tolist()) for r in range(3) for f in b.face[i, r, k][b.fmask[i, r, k]])
+            want = sorted(tuple(f.tolist()) for f in o.pool[i, 0, k][valid[i, k]])
+            assert got == want                                                  # same frames, only redistributed
+    assert (b.fmask.sum(-1) > 0).any() and not torch.equal(b.fmask.sum(-1)[:, 0], b.fmask.sum(-1)[:, 1])   # slots differ in size
+    assert torch.equal(b.voi[..., 0:2], b.voi[..., 4:6])                        # no per-slot synchrony left
+    X2, b2, _ = batch_of('random_grouping', seed=2)
+    assert torch.equal(b.face, b2.face)                                         # deterministic

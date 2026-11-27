@@ -8,6 +8,12 @@
   global_perm   control for `continuity`: one non-identity permutation per sample, applied to all three turns, so that
                 continuity is kept and only the meaning of the slots is changed.
   al_swap_half  slots A and L are exchanged in all turns of a random half of the samples (the table of the ablations)
+  replicated_pool  all faces of a turn are pooled (the clip-level frames, up to 32) and the same frames are given to the three
+                slots: nine face tokens as in the full model, but every slot of a turn carries the same evidence (only the slot
+                embeddings differ). The per-slot synchrony entries of the turn descriptor are replaced by their mean over the slots.
+  random_grouping  every face frame of a turn is assigned to one of the three slots at random, without using identity: the
+                nine face tokens and the frames are the same as with `replicated_pool`, but the slots hold disjoint random
+                subsets. The per-slot synchrony entries are replaced by their mean over the slots, so that they carry no grouping.
   listener_off  the listener slot is emptied in every turn (its tokens become the learned absent token and its synchrony
                 entries are zeroed); the number of tokens is unchanged.
   listener_other the listener slot is replaced by the other-participants slot (faces of other people of the same sample).
@@ -22,7 +28,8 @@ import torch
 
 from .data import Batch
 
-KINDS = ('none', 'continuity', 'global_perm', 'al_swap_half', 'listener_off', 'listener_other', 'listener_swap')
+KINDS = ('none', 'continuity', 'global_perm', 'al_swap_half', 'listener_off', 'listener_other', 'listener_swap',
+         'replicated_pool', 'random_grouping')
 N_SYNC = 6          # VOI[..., :6] = (synchrony, mouth variability) for each of the three slots
 
 
@@ -71,6 +78,18 @@ class ControlledInputs:
             half = np.random.default_rng(seed).random(n) < 0.5
             P = np.tile(np.arange(3), (n, 3, 1)); P[half] = (1, 0, 2)
             self.perm = torch.tensor(P, device=base.device); self.half = torch.tensor(half, device=base.device)
+        elif kind == 'random_grouping':
+            pm = base.pmask[:, 0].cpu().numpy()                               # [n, turn, frames]
+            rng = np.random.default_rng(seed)
+            src = np.full((n, 3, 3, pm.shape[-1]), -1, dtype=np.int64)       # [n, slot, turn, j] -> frame of the pooled tensor
+            for i in range(n):
+                for k in range(3):
+                    valid = np.where(pm[i, k])[0]
+                    r = rng.integers(0, 3, len(valid))
+                    for s in range(3):
+                        sel = valid[r == s]
+                        src[i, s, k, :len(sel)] = sel
+            self.src = torch.tensor(src, device=base.device)
         elif kind == 'listener_swap':
             self.swap = torch.tensor(_derangement(n, seed), device=base.device)
 
@@ -94,4 +113,16 @@ class ControlledInputs:
             o = self.base.index(self.swap[ix])
             face = face.clone(); fmask = fmask.clone(); voi = voi.clone()
             face[:, 1], fmask[:, 1], voi[..., 2:4] = o.face[:, 1], o.fmask[:, 1], o.voi[..., 2:4]
+        elif self.kind in ('replicated_pool', 'random_grouping'):
+            pool, pmask = b.pool[:, 0], b.pmask[:, 0]                            # [B, turn, frames, F], [B, turn, frames]
+            if self.kind == 'replicated_pool':
+                face = pool.unsqueeze(1).expand(-1, 3, -1, -1, -1)
+                fmask = pmask.unsqueeze(1).expand(-1, 3, -1, -1)
+            else:
+                src = self.src[ix]                                               # [B, slot, turn, frames]
+                fmask = src >= 0
+                face = torch.gather(pool.unsqueeze(1).expand(-1, 3, -1, -1, -1), 3,
+                                    src.clamp(min=0).unsqueeze(-1).expand(-1, -1, -1, -1, pool.shape[-1]))
+            sync = voi[..., :N_SYNC].reshape(voi.shape[0], voi.shape[1], 3, 2).mean(2, keepdim=True).expand(-1, -1, 3, -1)
+            voi = torch.cat([sync.reshape(voi.shape[0], voi.shape[1], N_SYNC), voi[..., N_SYNC:]], -1)
         return b._replace(face=face, fmask=fmask, voi=voi)
